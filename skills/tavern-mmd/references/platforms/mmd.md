@@ -16,12 +16,12 @@
 
 ## 写作策略
 
-1. **状态栏/交互模块**：优先用`<script>`方案（逻辑写在script内，无需onerror点火器），但：
+1. **状态栏/交互模块**：首选混合态雷达法（见 ../beautify/statusbar-radar.md，本身即兼容旧版MMD）；用`<script>`载体仅作可选简化，且：
    - 保留时间戳唯一ID（页面多消息共存的问题与script无关，依然存在）
    - 保留最外层 `onclick="event.stopPropagation()"`（事件冒泡与script无关）
    - script内代码仍建议ES5（执行环境未验证）
-2. **回退方案**：若script实测失效，整体回退旧版方案（见 mmd-old.md），数据格式不变只换执行载体——因此状态栏数据格式必须与旧版方案兼容（HTML属性式数据块）。
-3. **正则**：与旧版完全相同——手动填写、30条限额，产出走手填清单（见 ../output/regex-output.md）。
+2. **回退方案**：若script实测失效，整体回退旧版方案（见 mmd-old.md），数据格式不变只换执行载体。
+3. **正则**：与旧版完全相同——json导入（4字段格式）或手填、30条限额，产出见 ../output/regex-output.md。
 4. **全局美化**：与旧版完全相同（见 ../beautify/global-css.md），激活器可改用script但保留onerror版本作为回退。
 
 ## 其余全部规则

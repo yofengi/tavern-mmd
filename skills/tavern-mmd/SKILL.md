@@ -20,9 +20,9 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 |---|---|---|---|
 | `<script>` 标签 | ✅ | ❌ → img onerror 点火器 | ✅（待验证） |
 | ES6+ 语法 | ✅ | ❌ ES5 only | 保守用 ES5（待验证） |
-| 正则导入方式 | json 直接导入 | 平台UI手动填写 | 同旧版 |
+| 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 同旧版 |
 | 正则限额 | 无硬限制 | ≤30条；findRegex≤1000字符；replaceString≤10000字符 | 同旧版 |
-| 状态栏方案 | 任意（含酒馆助手） | `<status>`标记+正则三段替换+onerror解析+数据继承 | 可用`<script>`简化，回退旧版方案 |
+| 状态栏方案 | 雷达法/KV V4.0均可 | **首选混合态雷达法**；KV V4.0轻量备选 | 同旧版 |
 | 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类 | 同旧版 |
 | 事件处理 | 正常 | onclick仅极简单行；stopPropagation必加；时间戳ID | 同旧版（待验证） |
 | MVU/STScript/酒馆助手 | ✅ | ❌ | ❌（保守） |
@@ -40,12 +40,13 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 世界书设计/条目规划 | `references/creation/worldbook.md` |
 | 开场白 | `references/creation/opening.md` |
 | 文风控制 | `references/creation/style.md` |
-| 状态栏 | `references/beautify/statusbar.md` + 对应平台文档 |
+| 状态栏 | **首选** `references/beautify/statusbar-radar.md`（雷达法）；轻量备选 `statusbar.md`（KV V4.0）+ 对应平台文档 |
 | 全局美化 | `references/beautify/global-css.md` + 对应平台文档 |
 | 正则规则 | `references/beautify/regex-rules.md` |
 | 角色卡JSON输出 | `references/output/card-json.md` |
 | 世界书JSON输出 | `references/output/worldbook-json.md` |
-| 正则产出（json或手填清单） | `references/output/regex-output.md` |
+| 正则产出（json/MMD导入json/手填清单） | `references/output/regex-output.md` |
+| 雷达法现成示例资产 | `assets/radar-examples/`（西幻RPG状态栏、日夜主题全局美化集成案例） |
 | 交付前自检 | `references/quality/checklist.md` |
 
 按需读取，不要一次全读。技术产出必读对应平台文档；写正文必读 creation/character.md 的写作规则节。
@@ -74,7 +75,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 |---|---|---|
 | 角色卡 | chara_card_v3 json | 同左 |
 | 世界书 | SillyTavern 世界书 json | 同左 |
-| 正则 | 正则脚本 json | 手填清单 .md（逐条复制粘贴） |
+| 正则 | 正则脚本 json | MMD导入json（pageDepth/statusbar/beginning/regex_scripts四字段，见 regex-output.md）；手填清单 .md 作备选 |
 
 所有 json 交付前必须语法校验：`python -m json.tool <文件> > /dev/null`。
 

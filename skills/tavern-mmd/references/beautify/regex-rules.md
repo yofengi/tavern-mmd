@@ -4,11 +4,13 @@
 
 | 项目 | 本地酒馆 | MMD（新旧同） |
 |---|---|---|
-| 导入方式 | json（regex_scripts数组） | 平台UI逐条手填 |
+| 导入方式 | json（regex_scripts数组） | json导入（MMD专用4字段格式）或平台UI手填 |
 | 条数 | 无硬限制（建议精简） | ≤30条 |
 | findRegex长度 | 无硬限制 | ≤1000字符 |
 | replaceString长度 | 无硬限制 | ≤10000字符 |
 | random标签 | 不支持（ST用{{random}}宏） | 支持`(random(a\|b\|c))`，多标签独立、可嵌$1捕获组 |
+
+两平台正则json字段结构不同（本地酒馆13字段 vs MMD 4字段），均见 `../output/regex-output.md`。
 
 ## 设计原则
 

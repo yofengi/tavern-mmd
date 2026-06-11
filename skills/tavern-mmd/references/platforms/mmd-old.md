@@ -99,7 +99,9 @@ var fn = function() { ... };
 |:---|:---|:---|
 | `findRegex` 字段 | **1000字符** | 超出后正则失效 |
 | `replaceString` 字段 | **10000字符** | 超出后被截断 |
-| 正则条目总数 | **30条** | 平台UI手动填写，无法动态增加 |
+| 正则条目总数 | **30条** | 无法动态增加 |
+
+导入方式：支持 **json 批量导入**（MMD专用4字段格式：pageDepth/statusbar/beginning/regex_scripts，见 `../output/regex-output.md`），也可在平台UI逐条手填。
 
 ### 4.2 `random` 标签三种用法
 
