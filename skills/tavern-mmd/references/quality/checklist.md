@@ -11,7 +11,8 @@
 - [ ] 设定一致性：开场白/世界书/状态栏数据互不矛盾（角色名、时间线、数值）
 
 ## 格式层（全平台）
-- [ ] json语法校验通过：python -m json.tool <文件> > /dev/null
+- [ ] json语法校验通过：python -m json.tool <文件> > /dev/null（能拦截裸换行/未转义引号/BOM）
+- [ ] MMD导入json：replaceString内所有换行已转义为\n（非真实换行）、HTML双引号转义为\"、文件无UTF-8 BOM
 - [ ] chara_card_v3：顶层与data字段同步；spec/spec_version正确
 - [ ] MMD项目角色卡为v2格式：spec="chara_card_v2"、spec_version="2.0"、无group_only_greetings（MMD不识别v3）
 - [ ] 世界书：蓝灯constant:true（key可为空）、绿灯constant:false有keys；递归控制按设计
