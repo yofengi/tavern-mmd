@@ -1,6 +1,6 @@
-# 角色卡 JSON 规范（chara_card_v3）
+# 角色卡 JSON 规范（chara_card_v3 / v2）
 
-定位：SillyTavern chara_card_v3 格式角色卡，三平台通用（本地酒馆、MMD、其他兼容前端）。
+定位：角色卡 JSON 权威参考。**本地酒馆交付 v3**（第1-4节）；**MMD 交付 v2**（第5节，MMD 仅识别 v2，不识别 v3）。
 
 ---
 
@@ -145,7 +145,7 @@
 
 ## 4. 嵌入正则（本地酒馆）
 
-卡内正则存放在 `data.extensions.regex_scripts`（数组）。本地酒馆读取此字段；MMD 平台忽略此字段，MMD 正则必须另出手填清单，详见 `regex-output.md`。
+卡内正则存放在 `data.extensions.regex_scripts`（数组）。本地酒馆读取此字段；MMD 平台忽略此字段，MMD 正则走导入json或手填清单，详见 `regex-output.md`。
 
 ```json
 "data": {
@@ -161,7 +161,48 @@
 
 ---
 
-## 5. 校验命令
+## 5. chara_card_v2（MMD 交付格式）
+
+MMD（新旧版同）**仅支持导入 v2 角色卡**。MMD 项目的角色卡 json 必须按本节输出。
+
+### 5.1 与 v3 的差异（v2 = v3 骨架做以下修改）
+
+| 位置 | v3 | v2 |
+|---|---|---|
+| `spec` | `"chara_card_v3"` | `"chara_card_v2"` |
+| `spec_version` | `"3.0"` | `"2.0"` |
+| `data.group_only_greetings` | 有 | **删除**（v3专有字段） |
+| 其余字段 | — | 完全一致（含顶层遗留字段、data内字段、character_book条目结构、同步规则） |
+
+### 5.2 v2 骨架（差异部分示意）
+
+```json
+{
+  "name": "角色名",
+  "…顶层遗留字段同第1节…": "…",
+  "spec": "chara_card_v2",
+  "spec_version": "2.0",
+  "create_date": "2026-01-01T00:00:00.000Z",
+  "data": {
+    "name": "角色名",
+    "…data字段同第1节，但不含 group_only_greetings…": "…",
+    "alternate_greetings": [],
+    "extensions": { "…同第1节…": "…" },
+    "character_book": { "name": "角色名", "entries": [] }
+  }
+}
+```
+
+### 5.3 交付规则
+
+- MMD 项目：output/ 只产出 v2 卡
+- 本地酒馆项目：产出 v3 卡
+- 用户两边都要：产出两份（`卡名-v3.json` + `卡名-v2-MMD.json`），内容仅按 5.1 差异表区别
+- 卡内世界书条目结构 v2/v3 一致（第3节通用），世界书也可单独走独立世界书json（见 worldbook-json.md，MMD可导入）
+
+---
+
+## 6. 校验命令
 
 ```bash
 python -m json.tool output/卡名.json > /dev/null && echo OK

@@ -26,7 +26,7 @@
 - 关系写具体画面：不写"深厚的感情"，写"有记忆起就在一起"
 - 性格独立成条/块：基本信息是"她是谁"，性格是"她怎么行为"，混写会导致AI误调用
 
-## chara_card_v3 字段分工
+## chara_card 字段分工（v3/v2 通用；MMD交付v2，见 output/card-json.md 第5节）
 - description：角色核心设定（YAML+xml结构）
 - personality：留空或一句话（详细性格进世界书条目）
 - scenario：当前情境一句话

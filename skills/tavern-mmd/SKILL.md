@@ -21,12 +21,12 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | `<script>` 标签 | ✅ | ❌ → img onerror 点火器 | ✅（待验证） |
 | ES6+ 语法 | ✅ | ❌ ES5 only | 保守用 ES5（待验证） |
 | 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 同旧版 |
-| 正则限额 | 无硬限制 | ≤30条；findRegex≤1000字符；replaceString≤10000字符 | 同旧版 |
+| 正则限额 | 无硬限制 | ≤30条；findRegex≤1000字符；replaceString≤20000字符 | 同旧版 |
 | 状态栏方案 | 雷达法/KV V4.0均可 | **首选混合态雷达法**；KV V4.0轻量备选 | 同旧版 |
 | 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类 | 同旧版 |
 | 事件处理 | 正常 | onclick仅极简单行；stopPropagation必加；时间戳ID | 同旧版（待验证） |
 | MVU/STScript/酒馆助手 | ✅ | ❌ | ❌（保守） |
-| 角色卡导入 | json/png | png/jpg/json | png/jpg/json |
+| 角色卡导入 | json/png | png/jpg/json（**仅v2**，不识别v3） | png/jpg/json（**仅v2**，不识别v3） |
 | 世界书导入 | json/png | png/json/角色卡连带 | png/json/角色卡连带 |
 
 **保守原则**：当前MMD仅确认解禁`<Script>`，其余按旧版处理，标注"待验证"。
@@ -73,7 +73,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 
 | 产出物 | 本地酒馆 | MMD（新旧同） |
 |---|---|---|
-| 角色卡 | chara_card_v3 json | 同左 |
+| 角色卡 | chara_card_v3 json | **chara_card_v2 json**（MMD不识别v3，见 card-json.md 第5节） |
 | 世界书 | SillyTavern 世界书 json | 同左 |
 | 正则 | 正则脚本 json | MMD导入json（pageDepth/statusbar/beginning/regex_scripts四字段，见 regex-output.md）；手填清单 .md 作备选 |
 

@@ -201,7 +201,7 @@ body.z-enabled.z-dark-mode {
 1. 所有覆盖样式必须 `!important`（压过 App 自带样式）
 2. 所有规则以 `body.z-enabled` 前缀开头（一键还原）
 3. 自定义类加自有前缀防撞平台类名（样本用 `z-`）
-4. 交付物 = 1 条正则（findRegex 匹配触发标记，replaceString = 激活器 + `<style>` 全套 CSS），字符数必须 ≤ 10000，超限拆分多条正则
+4. 交付物 = 1 条正则（findRegex 匹配触发标记，replaceString = 激活器 + `<style>` 全套 CSS），字符数必须 ≤ 20000，超限拆分多条正则
 
 ### 交付正则骨架示例
 
