@@ -156,6 +156,25 @@ open('out.json', 'w', encoding='utf-8').write(json.dumps(obj, ensure_ascii=False
 json.loads(open('out.json', encoding='utf-8').read())   # 回读自检
 ```
 
+### 2.4 双重转义陷阱（用脚本时必查）
+
+`json.dumps` 只能对**裸 HTML**（属性引号是 `"`、换行是真实换行）正确转义一次。若喂给它的 `html` 变量本身已经是转义过的内容（属性写成 `\"`、换行写成字面 `\n`），会被**再转义一层**，导致：
+
+- 解析出来的 HTML 里属性变成 `class=\"box\"`（多了反斜杠），浏览器渲染错乱
+- 或字面 `\n` 没变成真换行，CSS 全挤在一行
+
+典型来源：从另一个 JSON 的 `replaceString` 里复制内容、或从聊天记录粘贴已转义的代码。
+
+**强制自检（生成后必跑）**：
+```python
+import json
+rs = json.load(open('out.json', encoding='utf-8'))['regex_scripts'][0]['replaceString']
+assert rs.count('\\') == 0 or '\\' not in rs, f'HTML残留{rs.count(chr(92))}个反斜杠，疑双重转义'
+assert '<script' not in rs.lower(), '含<script>，旧版MMD禁用'
+print('字符数', len(rs), '| 残留反斜杠', rs.count(chr(92)))
+```
+解析后的 `replaceString` 里**反斜杠数应为 0**（除非 HTML/JS 逻辑真的需要反斜杠，如正则脚本——纯美化 HTML 通常不含）。若数量异常偏高（几百个），几乎一定是双重转义，需把源 HTML 先 `.replace('\\"','"')` 还原再重新 dumps。
+
 **交付前必须 `python -m json.tool out.json > /dev/null`**——能拦住裸换行、未转义引号、BOM 等全部此类错误。
 
 ---

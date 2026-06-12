@@ -36,6 +36,9 @@
 - [ ] 总条数≤30
 - [ ] 每条findRegex≤1000字符、replaceString≤20000字符（标注实测值）
 - [ ] 导入json：含pageDepth/statusbar/beginning/regex_scripts四字段，每条正则id=-1
+- [ ] **导入json通过 `python -m json.tool 文件 > /dev/null` 校验（拦截裸换行/未转义引号）**
+- [ ] **文件无UTF-8 BOM**
+- [ ] **回读 replaceString：解析后HTML无多余反斜杠（防双重转义，见 output/regex-output.md 2.4）**
 - [ ] 手填清单（备选交付时）：每条带用途、分框代码块、字符数、勾选框
 - [ ] 替换链标记（Z_CONTENT等）首尾衔接无断裂
 
