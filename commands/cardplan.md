@@ -16,3 +16,7 @@ description: 角色卡标准计划流程（弹窗快问快答→plan.md→执行
 7. 按 plan.md 顺序执行，调用对应references文档（worldbook/character/opening/statusbar等），每完成一步打勾。
 8. 关键节点停下确认：条目规划表 → 开场白成稿 → 技术组件成稿 → 最终交付。
 9. 交付前跑 quality/checklist.md，json校验，全部产出进 output/，更新main.md。
+
+## 交付前审核（强制）
+
+角色卡 json 完成后：派子代理跑 `python <skill>/scripts/validate.py <文件> --type card --platform <平台>`（MMD项目会校验 v2 规范），报告写入 `工作/审核记录.md`。有 ERROR 修复后复审。若卡内含状态栏/美化，按 /beautify 的预览流程让主AI 测交互。

@@ -19,3 +19,7 @@ description: 角色卡深度共创流程（大段讨论+弹窗收敛→分节设
 8. 设计写入plan.md（带验收标准的勾选步骤+决策记录）。
 9. 按plan.md执行，每完成一个阶段停下给用户检查：条目清单→世界书正文抽查→开场白→技术组件→最终json。进度实时打勾，文件变动记main.md。
 10. 交付前跑 quality/checklist.md 全层，json校验，产出进output/。
+
+## 交付前审核（强制）
+
+角色卡 json 完成后：派子代理跑 `python <skill>/scripts/validate.py <文件> --type card --platform <平台>`（MMD项目会校验 v2 规范），报告写入 `工作/审核记录.md`。有 ERROR 修复后复审。若卡内含状态栏/美化，按 /beautify 的预览流程让主AI 测交互。

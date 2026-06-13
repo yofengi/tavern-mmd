@@ -13,3 +13,7 @@ description: 制作酒馆世界书（输出可导入json）
    - 展开：逐条写作（正文规则按 creation/character.md），草稿放"工作/"
 5. 自检：跑 quality/checklist.md 内容层+格式层。
 6. 输出：按 output/worldbook-json.md 生成独立世界书json到 output/，执行 python -m json.tool 校验，更新main.md与plan.md。
+
+## 交付前审核（强制）
+
+输出世界书 json 后：派子代理跑 `python <skill>/scripts/validate.py <文件> --type worldbook --platform <平台>`，报告写入 `工作/审核记录.md`。有 ERROR 则主AI/子代理修复后复审，0 错误才交付。世界书无交互渲染，不需 build-preview。

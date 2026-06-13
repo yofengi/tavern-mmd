@@ -177,6 +177,22 @@ print('字符数', len(rs), '| 残留反斜杠', rs.count(chr(92)))
 
 **交付前必须 `python -m json.tool out.json > /dev/null`**——能拦住裸换行、未转义引号、BOM 等全部此类错误。
 
+### 2.5 交付前强制审核（用 validate.py，必做）
+
+skill 自带 `scripts/validate.py` 一次性覆盖上述所有检查（JSON合法性、BOM、双重转义、平台红线、字符数、v2规范），比手写 assert 更全。**0 错误才能交付：**
+
+```bash
+python <skill>/scripts/validate.py output/文件.json --platform oldmmd
+```
+
+报错对照处理：
+- `双重转义` → 源HTML喂 json.dumps 前已含 `\"`，先 `.replace(chr(92)+chr(34), chr(34))` 还原（见 2.4 与 wabisabi 案例）
+- `BOM` → 改用无 BOM 的 UTF-8 保存
+- `换行` → replaceString 内真实换行未转 `\n`
+- `<script>`/`ES6`/`innerHTML` → 旧版MMD红线，按报告改写
+
+可选预览（状态栏/美化）：`python <skill>/scripts/build-preview.py output/文件.json --platform oldmmd`，主AI 用 Preview 工具打开看渲染与交互。
+
 ---
 
 ## 第三节：MMD 手填清单（Markdown 交付物，备选）
