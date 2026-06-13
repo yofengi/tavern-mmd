@@ -35,6 +35,7 @@
 
 | 限制 | 现象 / 后果 | 解决方案 |
 |:---|:---|:---|
+| 注入HTML内的换行被渲染成空白段落 | MMD气泡走markdown管线（vditor），标签间换行/空行被解析器补成空`<p>`，空`<p>`带默认margin撑出大块横向空白条；**浏览器预览查不出**（预览按CSS折叠空白），内容少的页尤其明显 | 注入HTML写成单行无缝（标签间零换行）；防御CSS加 `.容器 p:empty{display:none!important}` + `.容器 p{margin:0!important}` + `.容器 br{display:none!important}`；状态栏方案另见 ../beautify/statusbar-radar.md「MMD换行空白条陷阱」 |
 | `onclick` 净化三级行为 | **放行**：极简单行（如 `this.textContent='...'`）；**手术式切除**：含多行/`try-catch` 的元素整体被删除消失；**代码实体化**：严重威胁时所有 `<>`、`"` 被HTML实体化变为纯文本显示 | `onclick` 只作"点火器"，复杂逻辑存入隐藏元素的 `data-s` 属性，onclick调用 `eval(...)` 触发 |
 | `window` 函数未定义 | 点击时报 `is not defined` 错误 | 使用内联 `onclick` 逻辑，避免依赖全局函数 |
 | 伪元素阻挡点击 | 按钮点击失效 | 装饰性伪元素添加 `pointer-events: none` |
@@ -327,6 +328,7 @@ z-index: 9999;                               /* appendChild已保证顺序，z-i
 | 点击无反应 | 伪元素阻挡点击，或按钮整体被净化删除 | 添加 `pointer-events: none`；将逻辑移入轻主板 |
 | 继承失效 | `findData` 函数selector参数错误，或img在容器外导致box为null | 检查选择器；确认img标签位置 |
 | 标签页切换失效 | `onclick` 被截断（含ES6语法导致从箭头函数处截断） | 排查onclick内是否使用了ES6语法，改用ES5 |
+| 面板内出现横向空白条（预览正常，导入后才有） | 注入HTML的换行被markdown管线补成空`<p>`段落，空`<p>`带margin撑出空条；内容少的页更明显 | HTML压成单行无换行；防御CSS `p:empty{display:none!important}` + `p{margin:0!important}` + `br{display:none!important}`；详见 ../beautify/statusbar-radar.md |
 
 ---
 

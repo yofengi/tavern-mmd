@@ -108,7 +108,34 @@
 6. **打包**：MMD导入json（pageDepth/statusbar/beginning/regex_scripts四字段）+ 状态栏规则进世界书条目；字符数核查（单条≤20000）。**replaceString 必须用脚本序列化生成**（换行转`\n`、引号转`\"`、无BOM），禁止手写多行——详见 ../output/regex-output.md 第2.3节，打包后必跑 `python -m json.tool` 校验
 7. **实机测试**：第一句话贴测试数据块 → 看渲染 → 编辑/翻页测防劫持 → 窄屏测折叠
 
+## MMD换行空白条陷阱（旧版MMD状态栏必避，浏览器预览查不出）
+
+**症状**：状态栏在沙箱/浏览器预览里完全正常，导入MMD后面板内部冒出大片横向空白条；内容少的页（如酒吧页）尤其刺眼，因为没有足够正文遮盖。
+
+**根因**：MMD的AI气泡走markdown管线渲染（类名里能看到 `.vditor-ir`）。markdown解析器遇到注入HTML标签之间的换行/空行时，按标准行为**补一个空`<p>`段落**；空`<p>`继承默认段落margin，渲染成一条等高的横向空白条。浏览器预览则把标签间的`\n`当作可折叠空白（CSS whitespace collapsing），所以同一段HTML在预览里严丝合缝、在MMD里却被空段落撑开。空白条精确出现在源HTML各大区块的换行接缝处——导航/标签栏之后、选项区之前是重灾区；内容少的页（如酒吧页）没有足够正文遮盖，空条尤其刺眼。
+
+> 形态判定：空白是**带高度的大块矩形**而非一行行高的细缝，指向**带margin的空`<p>`**而非`<br>`。`<br>`只在单换行场景出现，撑不出这么高。但不同换行数/解析器配置下两者都可能产生，防御CSS应两者都覆盖。
+
+注意区分两层"换行"：
+- **JSON层**：MMD导入json的`replaceString`里换行必须转义为`\n`（这是合法性要求，见 ../output/regex-output.md 第2.3节）——但转义只保证JSON能解析，`\n`解析后仍是真实换行字符，照样进markdown管线被补成空段落。
+- **HTML载荷层**：真正要消灭的是注入到页面的HTML字符串内部的换行。CSS/HTML模板要写成**单行无缝**，标签与标签之间零换行符。
+
+**三重防御（旧版MMD做状态栏时全部上）**：
+
+1. **源头压平（治本）**：CSS模板（优先级2正则）和雷达引擎装配出的HTML之间不留任何换行；`<style>...</style>`、各`<div>`首尾相接写成单行。没有空行，markdown解析器就不会补空`<p>`。装配DOM用`createElement+appendChild`本就不产生文本换行节点，重点是**手写的模板字符串**别留换行。
+2. **防御CSS兜底**（写进优先级2正则的`<style>`，空`<p>`/带margin的`<p>`/`<br>`三种形态全覆盖）：
+   ```css
+   .z-status-box p:empty{display:none!important}
+   .z-status-box p{margin:0!important;padding:0!important}
+   .z-status-box br{display:none!important}
+   ```
+   `p:empty`直接干掉空段落；`p{margin:0}`兜住非空但被误包的段落；`br{display:none}`覆盖单换行形态。
+3. **信标尾吞**：数据信标转换器（优先级3正则）`replaceString`尾部已带`\s*`吞噬键值对后的换行，确保隐形数据块不撑高度。
+
+**强制验证**：浏览器预览/沙箱看正常**不等于**MMD正常——这是本陷阱的核心教训。状态栏交付前必须实机导入MMD看渲染，重点看内容最少的页有没有空白条。`scripts/build-preview.py` 的沙箱无法复现uni-app的换行管线，只能拦其他类问题。
+
 ## 常见故障排查
+
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
@@ -118,3 +145,4 @@
 | 编辑后状态栏消失 | 防劫持探针已过巡检期 | 正常，下一轮回复重新渲染；高频复现则增加巡检次数 |
 | 某数据"失忆" | 该键名误入无兜底名单 / 超渲染深度且引擎未开全量扫描 | 核对兜底白名单；确认引擎用textContent全量扫描 |
 | 窄屏排版挤压 | CSS缺媒体查询 | 补`@media (max-width:650px)`单列折叠规则 |
+| **预览正常但导入MMD后状态栏内部出现大片横向空白条**（内容少的页尤其明显） | **MMD气泡走markdown管线（vditor）渲染：标签之间的换行/空行被解析器补成空`<p>`段落，空`<p>`继承默认段落margin撑出等高空条；浏览器预览把标签间换行当可折叠空白，所以预览看不出来**。空白条出现在源HTML各大区块之间换行处（导航后、选项前） | ①注入HTML整体压成单行，标签之间零换行（治本：没有空行markdown就不补空段落）；②防御CSS兜底 `.z-status-box p:empty{display:none!important}` + `.z-status-box p{margin:0!important}` + `.z-status-box br{display:none!important}`（三种形态全覆盖）；③数据块/锚点前后用信标转换器`\s*`尾吞换行（见标准部署优先级3） |

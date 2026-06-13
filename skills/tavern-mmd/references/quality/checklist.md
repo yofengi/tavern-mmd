@@ -40,7 +40,9 @@
 - [ ] **已跑 `scripts/validate.py 文件 --platform oldmmd` 且 0 错误（一次性覆盖JSON合法/BOM/双重转义/红线/字符数）**
 - [ ] **文件无UTF-8 BOM**
 - [ ] **回读 replaceString：解析后HTML无多余反斜杠（防双重转义，见 output/regex-output.md 2.4）**
+- [ ] **注入HTML载荷内无换行符（防MMD空白条）：CSS/HTML模板写成单行无缝，标签间零换行；JSON转义的`\n`解析后仍是真实换行照样被渲染，必须从HTML源头消灭**
 - [ ] （状态栏/美化）已 `scripts/build-preview.py 文件 --platform <平台>` 生成沙箱，主AI 看过渲染并测过交互（点按钮/切标签/开侧边栏）
+- [ ] **（MMD状态栏/美化）已实机导入MMD看渲染——沙箱预览正常≠MMD正常，markdown管线把标签间换行补成空`<p>`撑出空白条，只有实机能复现，重点看内容最少的页有无横向空白条**
 - [ ] 手填清单（备选交付时）：每条带用途、分框代码块、字符数、勾选框
 - [ ] 替换链标记（Z_CONTENT等）首尾衔接无断裂
 

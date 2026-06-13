@@ -387,6 +387,7 @@ var opt = findData('div[data-opt]', true);   // 不继承，每次必须提供
 | 点击无反应 | 伪元素阻挡 | 添加pointer-events:none |
 | 继承失效 | 选择器错误 | 检查findData函数的selector参数 |
 | 标签页切换失效 | onclick被截断 | 检查是否使用了ES6语法 |
+| 面板内横向空白条（预览正常，导入MMD才有） | 三段模板的HTML字符串内含换行，被markdown管线补成空`<p>`段落撑出空条；内容少的页更明显 | 三段replaceString的HTML压成单行无换行；防御CSS加 `.z-status-box p:empty{display:none!important}` + `.z-status-box p{margin:0!important}` + `.z-status-box br{display:none!important}`；详见 statusbar-radar.md「MMD换行空白条陷阱」 |
 
 ### 快速验证方法
 
