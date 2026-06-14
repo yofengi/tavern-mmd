@@ -160,7 +160,7 @@ def looks_like(obj):
             return "regex"  # MMD 导入 json
         if "spec" in obj and "data" in obj:
             return "card"
-        if "entries" in obj and isinstance(obj.get("entries"), dict):
+        if "entries" in obj and isinstance(obj.get("entries"), (dict, list)):
             return "worldbook"
     if isinstance(obj, list) and obj and isinstance(obj[0], dict) and "findRegex" in obj[0]:
         return "regex"  # 本地酒馆正则数组
@@ -202,9 +202,19 @@ def validate_regex(obj, platform):
         rs = sc.get("replaceString", "")
         tag = "正则[%s]" % name
 
+        # 容错：findRegex/replaceString 必须是字符串，否则告警并按空串处理（防 len() 崩溃）
+        if not isinstance(fr, str):
+            warn("%s findRegex 非字符串（%s），已按空串处理" % (tag, type(fr).__name__))
+            fr = ""
+        if not isinstance(rs, str):
+            warn("%s replaceString 非字符串（%s），已按空串处理" % (tag, type(rs).__name__))
+            rs = ""
+
         if platform in ("oldmmd", "mmd"):
             if len(fr) > 1000:
                 err("%s findRegex %d 字符 > 1000" % (tag, len(fr)))
+            else:
+                ok("%s findRegex %d 字符 ≤ 1000" % (tag, len(fr)))
             if len(rs) > 20000:
                 err("%s replaceString %d 字符 > 20000" % (tag, len(rs)))
             else:
@@ -226,6 +236,8 @@ def validate_card(obj, platform):
     sv = obj.get("spec_version", "")
     ok("角色卡 spec=%s spec_version=%s" % (spec, sv))
     data = obj.get("data", {})
+    if not isinstance(data, dict):
+        data = {}
 
     if platform in ("oldmmd", "mmd"):
         if spec != "chara_card_v2":
@@ -249,18 +261,23 @@ def validate_card(obj, platform):
     cb = data.get("character_book", {})
     for e in cb.get("entries", []) if isinstance(cb, dict) else []:
         c = e.get("content", "")
-        if "<style" in c or "onerror=" in c or "onclick=" in c:
+        if isinstance(c, str) and ("<style" in c or "onerror=" in c or "onclick=" in c):
             check_platform_redlines(c, platform, "卡内条目[%s]" % e.get("comment", "?"))
             check_interactive_event_newlines(c, "卡内条目[%s]" % e.get("comment", "?"), platform)
 
 
 def validate_worldbook(obj, platform):
     entries = obj.get("entries", {})
-    if not isinstance(entries, dict):
-        err("独立世界书 entries 应为对象（uid字符串作键），当前为 %s" % type(entries).__name__)
+    if isinstance(entries, dict):
+        items = list(entries.items())
+    elif isinstance(entries, list):
+        items = list(enumerate(entries))  # 数组形式：下标当 uid
+        ok("entries 为数组形式（部分酒馆导出），已按下标遍历")
+    else:
+        err("独立世界书 entries 应为对象或数组，当前为 %s" % type(entries).__name__)
         return
-    ok("独立世界书：%d 个条目" % len(entries))
-    for uid, e in entries.items():
+    ok("独立世界书：%d 个条目" % len(items))
+    for uid, e in items:
         if not isinstance(e, dict):
             err("条目 %s 不是对象" % uid)
             continue
@@ -272,7 +289,7 @@ def validate_worldbook(obj, platform):
         if e.get("constant") is True and e.get("selective") is True:
             warn("%s 蓝灯(constant=true)却 selective=true，通常蓝灯 selective=false。" % tag)
         c = e.get("content", "")
-        if "<style" in c or "onerror=" in c:
+        if isinstance(c, str) and ("<style" in c or "onerror=" in c):
             check_platform_redlines(c, platform, tag)
 
 
