@@ -355,6 +355,17 @@ var opt = findData('div[data-opt]', true);   // 不继承，每次必须提供
 
 ---
 
+## 状态栏规则放哪里（整卡 vs 单独流程）
+
+上节"AI生成规范"是状态栏的**生成规则**（模型侧协议），必须随产出一起交付，放哪里取决于流程：
+
+| 流程 | 规则放哪 | 说明 |
+|---|---|---|
+| 整张角色卡（内嵌正则） | 卡内 `character_book` 一条 **constant=true（蓝灯）** 条目 | 渲染正则只把数据块变面板、不会让模型生成数据块；必须有这条蓝灯规则让模型每轮输出 `<status>`，否则后续轮次状态栏不更新。见 ../output/card-json.md 第 8 节 |
+| 单独状态栏 / 美化流程 | 独立 `规则.md` 文件 | 默认交付 = 正则 json + 规则.md（模型侧协议文档），不强制塞进某张卡 |
+
+---
+
 ## script载体变体（当前MMD / 本地酒馆）
 
 当前MMD 平台允许 `<script>` 标签时，可将规则3的 `img onerror` 改为 `<script>` 包裹同等解析逻辑：仍使用 ES5 语法、仍用时间戳生成唯一ID防止重复、仍在最外层 onclick 中调用 `event.stopPropagation()`。规则1（容器+CSS）和规则2（主HTML结构）保持不变。数据格式（data-env / data-st / data-opt）与 onerror 版完全一致，两种载体可随时互换，切换时只需替换规则3的 replaceString。

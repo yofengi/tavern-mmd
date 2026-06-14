@@ -127,7 +127,8 @@ class TestCli(unittest.TestCase):
                 png = f.read()
             self.assertEqual(json.loads(m.read_chara(png))["name"], "C")
 
-    def test_cli_jpg_without_bg_errors(self):
+    def test_cli_jpg_rejected(self):
+        # jpg 已弃用：CLI 必须直接拒绝（即便给了 --bg 也不放行）
         with tempfile.TemporaryDirectory() as d:
             jp = os.path.join(d, "card.json")
             with open(jp, "w", encoding="utf-8") as f:
@@ -135,6 +136,7 @@ class TestCli(unittest.TestCase):
             r = self._run(jp, "--format", "jpg")
             self.assertEqual(r.returncode, 1)
             self.assertIn("jpg", r.stderr.lower())
+            self.assertIn("弃用", r.stderr)
 
     def test_cli_invalid_json_errors(self):
         with tempfile.TemporaryDirectory() as d:

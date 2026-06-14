@@ -3,11 +3,15 @@
 """
 tavern-mmd 角色卡图片导出 make_card_image.py
 
-把角色卡 JSON 嵌入图片，产出可导入的 png（默认）/ jpg（按需，实验性）。
+把角色卡 JSON 嵌入 PNG（写 tEXt chara chunk），产出可导入的整卡图片。
 纯 Python 标准库，无 pip 依赖。
 
+**JPG 已弃用**：实测 MMD 无法从 jpg 读出卡数据（EXIF UserComment 与 JPEG COM 段
+两种方案均验证不可用）。CLI 不再支持 `--format jpg`；底层 embed_jpg/read_jpg_chara
+函数仅保留作历史参考，不在导出流程中使用。MMD 整卡只用 PNG（或 JSON，本地酒馆）。
+
 用法:
-  python make_card_image.py <卡JSON> [--format png|jpg] [--bg 底图路径] [-o 输出路径]
+  python make_card_image.py <卡JSON> [--bg 底图路径] [-o 输出路径]
 """
 import sys
 import os
@@ -168,7 +172,8 @@ def embed_png(png_bytes, json_str, is_v3):
 
 
 def embed_jpg(jpg_bytes, json_str):
-    """在 JPEG SOI 后插入 COM 段携带 chara base64。实验性，未在 MMD 实机验证。"""
+    """【已弃用·历史参考】在 JPEG SOI 后插入 COM 段携带 chara base64。
+    实测 MMD 无法从 jpg 读出卡数据，导出流程不再使用，仅保留供研究。"""
     if not jpg_bytes.startswith(b"\xff\xd8"):
         raise ValueError("--bg 为 jpg 格式时文件必须是合法 JPEG（以 FFD8 开头）")
     payload = b"chara\x00" + base64.b64encode(json_str.encode("utf-8"))
@@ -180,7 +185,7 @@ def embed_jpg(jpg_bytes, json_str):
 
 
 def read_jpg_chara(jpg_bytes):
-    """从 JPEG 的 COM 段读回 chara JSON 字符串；无则 None。"""
+    """【已弃用·历史参考】从 JPEG 的 COM 段读回 chara JSON 字符串；无则 None。"""
     i = 2
     while i + 4 <= len(jpg_bytes):
         if jpg_bytes[i] != 0xFF:
@@ -209,12 +214,20 @@ def _load_card(path):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="把角色卡 JSON 嵌入图片导出")
+    p = argparse.ArgumentParser(description="把角色卡 JSON 嵌入 PNG 导出（jpg 已弃用）")
     p.add_argument("card", help="角色卡 JSON 文件路径")
-    p.add_argument("--format", choices=["png", "jpg"], default="png")
-    p.add_argument("--bg", help="底图路径；png 省略则生成默认米黄底图；jpg 必填")
+    p.add_argument("--format", choices=["png", "jpg"], default="png",
+                   help="仅支持 png；jpg 已弃用（MMD 实测无法读出卡数据）")
+    p.add_argument("--bg", help="底图路径；省略则生成默认米黄底图")
     p.add_argument("-o", "--output", help="输出路径（默认与卡同名换扩展名）")
     a = p.parse_args(argv)
+
+    if a.format == "jpg":
+        sys.stderr.write(
+            "jpg 已弃用：实测 MMD 无法从 jpg 读出卡数据"
+            "（EXIF UserComment 与 JPEG COM 段两种方案均不可用）。"
+            "请用 png（MMD/本地酒馆均可）或 json（本地酒馆）。\n")
+        return 1
 
     try:
         json_str, is_v3 = _load_card(a.card)
@@ -223,27 +236,16 @@ def main(argv=None):
         return 1
 
     try:
-        if a.format == "png":
-            if a.bg:
-                with open(a.bg, "rb") as f:
-                    out_bytes = embed_png(f.read(), json_str, is_v3)
-            else:
-                out_bytes = embed_png(make_default_bg(), json_str, is_v3)
-        else:  # jpg
-            sys.stderr.write(
-                "[待验证] JPG 嵌入未在 MMD 实机验证，建议优先 PNG。\n")
-            if not a.bg:
-                sys.stderr.write(
-                    "jpg 格式必须用 --bg 提供一张 jpg 底图"
-                    "（stdlib 无法从零编码 JPEG）。\n")
-                return 1
+        if a.bg:
             with open(a.bg, "rb") as f:
-                out_bytes = embed_jpg(f.read(), json_str)
+                out_bytes = embed_png(f.read(), json_str, is_v3)
+        else:
+            out_bytes = embed_png(make_default_bg(), json_str, is_v3)
     except (OSError, ValueError) as e:
         sys.stderr.write("嵌入失败: %s\n" % e)
         return 1
 
-    out_path = a.output or (os.path.splitext(a.card)[0] + "." + a.format)
+    out_path = a.output or (os.path.splitext(a.card)[0] + ".png")
     with open(out_path, "wb") as f:
         f.write(out_bytes)
     sys.stdout.write("已生成 %s\n" % out_path)

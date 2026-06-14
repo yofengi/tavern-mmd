@@ -12,7 +12,7 @@ description: 制作酒馆美化（全局美化/状态栏）
    - 全局美化：references/beautify/global-css.md。先问配色主题（可给2-3方案preview），再产出激活器+CSS正则。雷达法集成案例（日夜双主题+侧边栏切换）见 assets/radar-examples/完整美化-日夜主题与雷达.json。
 5. 代码草稿放"工作/"；每条正则统计字符数（MMD限额预检）。
 6. 自检：quality/checklist.md 结构/代码/正则/样式层全跑。
-7. 输出到 output/：本地酒馆=正则json；MMD=导入json（pageDepth/statusbar/beginning/regex_scripts四字段，首选）+手填清单.md（备选），格式均见 output/regex-output.md。状态栏附"状态栏规则"文本块（用户需放进卡的世界书或人设）。更新main.md与plan.md。
+7. 输出到 output/：本地酒馆=正则json；MMD=导入json（pageDepth/statusbar/beginning/regex_scripts四字段，首选）+手填清单.md（备选），格式均见 output/regex-output.md。**单独美化/状态栏流程的默认交付 = 正则 json + 状态栏规则.md**（独立的状态栏生成规则/模型侧协议文档），不强制塞进某张卡。更新main.md与plan.md。
 
 ## 交付前审核与预览（强制）
 

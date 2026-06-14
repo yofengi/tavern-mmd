@@ -218,25 +218,64 @@ python -m json.tool output/卡名.json > /dev/null && echo OK
 
 | 平台 | png 整卡 | jpg 整卡 | json 整卡 |
 |---|---|---|---|
-| MMD（新/旧） | ✅ | ✅（实验性） | ❌ 不能直接导入整卡（仅世界书/正则可 json 导入） |
-| 本地酒馆 | ✅ | ✅ | ✅ |
+| MMD（新/旧） | ✅ | ❌ 已弃用（实测读不出卡数据） | ❌ 不能直接导入整卡（仅世界书/正则可 json 导入） |
+| 本地酒馆 | ✅ | ❌ 已弃用 | ✅ |
 
-**交付整张角色卡前，主 AI 必须用 AskUserQuestion 弹窗问两次（两平台都问）：**
+> **JPG 已弃用**：实测 MMD 无法从 jpg 读出卡数据——EXIF UserComment 方案因 8 字节字符集前缀致 atob 失败、JPEG COM 段方案也验证不可用。整卡图片一律用 **PNG**。
 
-1. **导出格式**：
-   - `png`（推荐）
-   - `jpg`（按需；提示"待验证，建议优先 PNG"）
-   - `json`：MMD 项目标注"**不推荐**——MMD 不能直接导入 json 整卡"；本地酒馆项目不标注
-2. **底图来源**：默认米黄底图（下部带 tavern-mmd 标签） / 用户自备图（让用户给路径）
+**交付整张图片卡前，主 AI 用 AskUserQuestion 问底图来源**：默认米黄底图（下部带 tavern-mmd 标签） / 用户自备图（让用户给路径）。
 
-**生成命令**（脚本见 scripts/make_card_image.py）：
+（输出形态 PNG / JSON / 分离式 的三选弹窗见第 8 节；本节只管图片底图。）
+
+**生成命令**（脚本见 scripts/make_card_image.py，只产 png）：
 ```bash
 # 默认底图 + v2 卡（MMD）
 python make_card_image.py output/卡名-v2-MMD.json -o output/卡名.png
-# 用户底图
+# 用户底图（png）
 python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/卡名.png
-# jpg（实验性，需 jpg 底图）
-python make_card_image.py output/卡名.json --format jpg --bg 资料/底图.jpg
 ```
 
 **嵌入与 v2/v3**：脚本只忠实嵌入传入的卡 JSON。MMD 项目传 v2（只写 `chara` chunk）；本地酒馆传 v3（写 `chara` + `ccv3`）。两边都要则分别用 v3 与 v2 JSON 各跑一次。
+
+---
+
+## 8. 整卡输出形态与状态栏规则进世界书
+
+### 8.1 三种输出形态（末尾用弹窗询问）
+
+做整张角色卡、用户未指定时，完成后用 AskUserQuestion 问输出形态：
+
+| 形态 | 产出 | 适用 |
+|---|---|---|
+| (a) 内嵌正则的整卡 PNG | 一张 png，卡内含设定+世界书+`data.extensions.regex_scripts` | 推荐。MMD 导入即一次到位 |
+| (b) 内嵌正则的整卡 JSON | v2 卡 json（含内嵌 regex_scripts） | MMD 不能直接导 json 整卡，多用于本地酒馆/备份 |
+| (c) 分离式 | 角色卡 + 独立正则 json（见 regex-output.md）+ 状态栏规则.md | 卡与正则分文件，便于单独维护/复用 |
+
+内嵌正则用 MMD 4 字段格式（id:-1/scriptName/findRegex/replaceString）放进 `data.extensions.regex_scripts`，见第 4 节。分离式的独立正则 json 的 `beginning`/`regex_scripts` 应与卡内 `first_mes`/`regex_scripts` 保持一致，避免分开导入时互相覆盖。
+
+### 8.2 状态栏生成规则必须进世界书（默认蓝灯）
+
+**渲染正则 ≠ 生成规则。** 内嵌的 `regex_scripts` 只负责把 `<status>` 数据块渲染成面板；它不会让模型去**生成**数据块。若只内嵌渲染正则，模型只在 `first_mes` 那一个数据块时显示状态栏，后续轮次不再输出 → 状态栏不更新。
+
+因此，输出整张内嵌正则的角色卡（a/b 形态）时，状态栏的**生成规则**（模型侧协议：要求 AI 每轮在正文末尾输出 `<status>` 数据块、字段格式、继承规则、选项必出等）必须作为一条 **constant=true（蓝灯/固定）** 条目放进卡内 `character_book.entries`。
+
+条目按第 3 节结构，关键字段：
+
+```json
+{
+  "id": 0,
+  "keys": [],
+  "comment": "状态栏生成规则（模型侧协议）",
+  "content": "每轮回复正文结束后，另起一行输出 <status> 数据块……（字段格式/继承/选项必出等完整协议）",
+  "constant": true,
+  "selective": false,
+  "insertion_order": 100,
+  "enabled": true,
+  "position": "after_char",
+  "extensions": { "position": 1, "...": "同第3节" }
+}
+```
+
+- `constant: true` + `selective: false`：蓝灯常驻，每轮注入（见 §3.2）。
+- 规则正文怎么写见 `../beautify/statusbar.md`（KV V4.0）或 `../beautify/statusbar-radar.md`（雷达法）的规则写法节。
+- 分离式（c 形态）则把这份规则单独输出为 `状态栏规则.md`，不放进卡。
