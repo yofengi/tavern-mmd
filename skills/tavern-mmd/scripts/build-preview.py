@@ -50,20 +50,25 @@ def extract_fragments(obj):
         rs = sc.get("replaceString", "")
         name = sc.get("scriptName", sc.get("name", ""))
         fr = sc.get("findRegex", "")
-        # 只渲染含HTML标签的替换（跳过纯信标转换器如 <span style=display:none>[$1=$2]</span>）
-        if "<style" in rs or "<div" in rs or "<img" in rs:
+        # 含任意 HTML 标签的替换都渲染；跳过纯信标转换器（无标签的占位文本）
+        if re.search(r"<[a-zA-Z][a-zA-Z0-9]*[\s/>]", rs):
             frags.append((name, fr, rs))
     return frags
 
 
 def assemble_html(frags, platform, src_name):
-    """把所有HTML片段拼进一个预览页。"""
+    """把所有HTML片段拼进一个预览页。每个片段包进独立 iframe srcdoc，
+    隔离 CSS/ID 作用域，模拟 MMD 每条消息独立气泡（防跨片段污染）。"""
     body_parts = []
     for name, fr, rs in frags:
         processed = apply_platform_limits(rs, platform)
+        srcdoc = html_mod.escape(processed, quote=True)
         body_parts.append(
-            '<div class="frag"><div class="frag-label">规则: %s （findRegex: %s）</div>%s</div>'
-            % (html_mod.escape(name), html_mod.escape(fr), processed))
+            '<div class="frag"><div class="frag-label">规则: %s （findRegex: %s）</div>'
+            '<iframe class="frag-frame" srcdoc="%s" sandbox="allow-scripts allow-same-origin" '
+            'onload="this.style.height=this.contentWindow.document.body.scrollHeight+20+\'px\'">'
+            '</iframe></div>'
+            % (html_mod.escape(name), html_mod.escape(fr), srcdoc))
     body = "\n".join(body_parts)
     banner = make_banner(platform, src_name, len(frags))
     return PAGE_TEMPLATE % {"platform": platform, "banner": banner, "body": body}
@@ -122,6 +127,7 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif}
 [data-mmd-es6]{outline:2px solid #d29922 !important;outline-offset:1px;position:relative}
 [data-mmd-es6]::after{content:'⚠ES6:'attr(data-mmd-es6);position:absolute;top:-8px;right:0;background:#d29922;color:#000;font-size:9px;padding:1px 4px;border-radius:3px;z-index:99}
 .mmd-warn-badge{display:inline-block;background:#d29922;color:#000;font-size:10px;padding:1px 6px;border-radius:3px;margin:2px}
+.frag-frame{width:100%%;border:0;display:block;background:#fff;min-height:80px}
 </style></head>
 <body>
 %(banner)s

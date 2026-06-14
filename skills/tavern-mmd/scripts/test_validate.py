@@ -136,5 +136,57 @@ class TestRegexLimits(unittest.TestCase):
         self.assertTrue(any("30" in m for m in v.ERRORS))
 
 
+class TestRegexNonString(unittest.TestCase):
+    def test_none_findregex_and_replacestring_no_crash(self):
+        reset()
+        v.validate_regex({"regex_scripts": [
+            {"scriptName": "x", "findRegex": None, "replaceString": None}
+        ], "statusbar": "<s>"}, "mmd")
+        self.assertFalse(any("> 1000" in m or "> 20000" in m for m in v.ERRORS))
+
+    def test_numeric_replacestring_no_crash(self):
+        reset()
+        v.validate_regex({"regex_scripts": [
+            {"scriptName": "y", "replaceString": 123}
+        ], "statusbar": ""}, "mmd")
+        self.assertTrue(any("非字符串" in m for m in v.WARNS))
+
+
+class TestWorldbookArrayForm(unittest.TestCase):
+    def test_looks_like_recognizes_array_entries(self):
+        self.assertEqual(
+            v.looks_like({"entries": [{"comment": "x", "content": "y"}]}),
+            "worldbook")
+
+    def test_validate_worldbook_array_entries(self):
+        reset()
+        v.validate_worldbook({"entries": [
+            {"comment": "蓝灯", "content": "<style>.a{}</style>", "constant": True}
+        ]}, "st")
+        self.assertFalse(any("entries 应为对象" in m for m in v.ERRORS))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNullFieldsNoCrash(unittest.TestCase):
+    def test_card_null_data_no_crash(self):
+        reset()
+        v.validate_card({"spec": "chara_card_v2", "data": None}, "mmd")
+        # 不崩溃即可（data=null 被容错为 {}）
+        self.assertTrue(True)
+
+    def test_worldbook_nonstring_content_no_crash(self):
+        reset()
+        v.validate_worldbook({"entries": [
+            {"comment": "坏条目", "content": None, "constant": True}
+        ]}, "st")
+        self.assertTrue(True)
+
+    def test_card_entry_nonstring_content_no_crash(self):
+        reset()
+        v.validate_card({"spec": "chara_card_v2", "data": {
+            "character_book": {"entries": [{"comment": "x", "content": 123}]}
+        }}, "mmd")
+        self.assertTrue(True)
