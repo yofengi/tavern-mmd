@@ -415,3 +415,12 @@ document.querySelectorAll('.z-status-box').forEach(function(box, i){
   console.log('Box ' + i + ':', box.querySelector('.z-status-data') ? '有数据' : '无数据');
 });
 ```
+
+## 换用风格数据库
+
+本节上方的 `#0d1117` GitHub 暗黑配色只是**默认风格之一**。状态栏的全部视觉（配色/圆角/边框/阴影/字体/装饰）可整套替换为 ../style-db/ 里任一风格：
+1. 按 ../style-system.md 选风格（或混搭维度）。
+2. 把该风格 palettes.md 的色板填进本方案 CSS 的 `--bg/--bg2/--border/--t1/--t2/--t3/--accent` 等变量（变量名映射见 style-system.md 第1节）。
+3. 圆角/边框/阴影/装饰按 layout-ui.md 与 decoration.md 的该风格取值替换对应 CSS。
+4. 渲染引擎、正则结构、JS 解析逻辑**完全不动**——只换样式值。
+5. 用户要单独微调（换主色、改圆角等）按 style-system.md 第5节项目级覆盖处理。

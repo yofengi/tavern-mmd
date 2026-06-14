@@ -226,3 +226,11 @@ replaceString:
 ```
 
 > `findRegex` 的触发标记由卡片开场白或系统提示插入，正则匹配后替换为激活器+样式块。
+
+## 换用风格数据库
+
+上方主题变量架构里的 `--lb/--lc/--lcm/--lm/--lt/--lts/--la/--lg/--lh/--ls/--lif` 可由 ../style-db/ 任一风格的配色填充，**变量结构与选择器不动**，只换值：
+1. 按 ../style-system.md 选风格（或混搭）。
+2. 用映射表（style-system.md 第1节）把风格 palettes.md 色板填进 `--lb/--lc/...`。
+3. 圆角/边框/阴影/装饰按 layout-ui.md、decoration.md 该风格取值；日/夜双版用风格的 light/dark 两套色板分别填 `body.z-enabled` 与 `body.z-enabled.z-dark-mode`。
+4. 单点微调按 style-system.md 第5节覆盖协议。
