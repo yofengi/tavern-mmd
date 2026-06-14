@@ -11,7 +11,7 @@ tavern-mmd 预览脚本 build-preview.py
 平台渲染差异:
   st     : 原样渲染，<script>/ES6 全执行
   oldmmd : <script>剥离并裸露源码(红框)；onerror/onclick内ES6标红但仍执行；onerror点火器正常
-  mmd    : 同oldmmd，但<script>正常执行并加"待验证"黄角标
+  mmd    : <script>/ES6 全执行（已确认支持）；script 加"保留回退"黄角标提醒兼容旧版
 
 退出码: 0=生成成功  2=用法/读取错误
 """
@@ -82,24 +82,25 @@ def apply_platform_limits(rs, platform):
         if platform == "oldmmd":
             return '<pre class="mmd-stripped">%s</pre>' % html_mod.escape(full)
         else:  # mmd
-            return '<div class="mmd-warn-badge" title="当前MMD支持但未验证">⚠待验证</div>' + full
+            return '<div class="mmd-warn-badge" title="当前MMD已确认支持script；保留 onerror 回退以兼容旧版">⚠保留回退</div>' + full
     out = re.sub(r"<script\b[\s\S]*?</script>", script_repl, out, flags=re.I)
 
-    # 2. onerror/onclick 内 ES6 语法：包一层标黄高亮（不阻止执行，便于AI测交互）
-    #    只标记，不改语义——给整个含ES6的事件属性所在标签加 data 属性
+    # 2. onerror/onclick 内 ES6 语法：仅旧版MMD会截断，标黄高亮（不阻止执行，便于AI测交互）
+    #    当前MMD已确认支持ES6，不标记。
     def es6_mark(m):
         tag = m.group(0)
         if re.search(r"on\w+\s*=\s*\"[^\"]*(=>|\blet\b|\bconst\b|`)[^\"]*\"", tag):
             return tag.replace(">", ' data-mmd-es6="真实平台此处会截断">', 1)
         return tag
-    out = re.sub(r"<[a-zA-Z][^>]*on\w+\s*=[^>]*>", es6_mark, out)
+    if platform == "oldmmd":
+        out = re.sub(r"<[a-zA-Z][^>]*on\w+\s*=[^>]*>", es6_mark, out)
 
     return out
 
 
 def make_banner(platform, src_name, n):
     labels = {"st": "本地酒馆 SillyTavern（无限制渲染）",
-              "mmd": "当前MMD（script待验证）",
+              "mmd": "当前MMD（支持script/ES6，推荐ES5）",
               "oldmmd": "旧版MMD（禁script/ES5）"}
     return ('<div class="banner banner-%s">预览平台: %s ｜ 来源: %s ｜ %d 个HTML片段</div>'
             % (platform, labels.get(platform, platform), html_mod.escape(src_name), n))

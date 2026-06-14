@@ -18,8 +18,8 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 
 | 能力 | 本地酒馆 /st | 旧版MMD /oldmmd | 当前MMD /mmd |
 |---|---|---|---|
-| `<script>` 标签 | ✅ | ❌ → img onerror 点火器 | ✅（待验证） |
-| ES6+ 语法 | ✅ | ❌ ES5 only | 保守用 ES5（待验证） |
+| `<script>` 标签 | ✅ | ❌ → img onerror 点火器 | ✅（已确认） |
+| ES6+ 语法 | ✅ | ❌ ES5 only | ✅ 无限制，推荐 ES5 写法（已确认） |
 | 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 同旧版 |
 | 正则限额 | 无硬限制 | ≤30条；findRegex≤1000字符；replaceString≤20000字符 | 同旧版 |
 | 状态栏方案 | 雷达法/KV V4.0均可 | **首选混合态雷达法**；KV V4.0轻量备选 | 同旧版 |
@@ -29,7 +29,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） |
 | 世界书导入 | json/png | png/json/角色卡连带 | png/json/角色卡连带 |
 
-**保守原则**：当前MMD仅确认解禁`<Script>`，其余按旧版处理，标注"待验证"。
+**保守原则**：当前MMD已确认解禁 `<script>` 与 ES6（推荐 ES5 写法），其余未确认能力（onclick净化/CSP多行/MVU等）仍按旧版处理，标注"待验证"。
 
 ## 任务路由
 

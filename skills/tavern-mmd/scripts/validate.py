@@ -87,7 +87,7 @@ def check_platform_redlines(s, platform, where):
         if platform == "oldmmd":
             err("%s 含 <script> 标签——旧版MMD会剥离，JS不执行。改用 img onerror 点火器。" % where)
         elif platform == "mmd":
-            warn("%s 含 <script>——当前MMD支持但未充分验证，建议保留 onerror 回退方案。" % where)
+            warn("%s 含 <script>——当前MMD已确认支持；建议保留 onerror 回退方案以兼容旧版。" % where)
         # st 不报
 
     # ES6 语法（仅 MMD 系平台关心）
@@ -109,7 +109,7 @@ def check_platform_redlines(s, platform, where):
             lvl = err if platform == "oldmmd" else warn
             lvl("%s 含 ES6+ 语法: %s——%s。" % (
                 where, "、".join(es6),
-                "旧版MMD会从该处截断，后续代码丢失" if platform == "oldmmd" else "当前MMD执行环境未验证，建议ES5"))
+                "旧版MMD会从该处截断，后续代码丢失" if platform == "oldmmd" else "当前MMD已确认支持ES6，但官方推荐ES5写法更稳"))
         else:
             ok("%s 全 ES5（无箭头函数/let/const/模板字符串等）" % where)
 
