@@ -18,7 +18,7 @@ python validate.py <文件> [--type regex|card|worldbook] [--platform oldmmd|mmd
 - 通用：JSON合法性、UTF-8 BOM、replaceString/HTML内双重转义反斜杠
 - 正则/状态栏：四字段结构、字符数(find≤1000/replace≤20000)、条数≤30、stopPropagation、平台红线
 - 平台红线(oldmmd)：`<script>`→错误、ES6→错误、innerHTML/cssText→错误、内联事件裸换行→错误
-- 平台红线(mmd)：script/ES6 已确认支持→不报错（script 仅警告提醒保留 onerror 回退；ES6 仅提示推荐 ES5）；innerHTML/cssText/裸换行仍按需提示
+- 平台红线(mmd)：script/ES6 已确认支持→放行（script 标 OK；ES6 仅提示官方推荐 ES5）；innerHTML/cssText/裸换行仍按需提示
 - 角色卡：spec/同步；MMD平台强制 v2（spec=chara_card_v2、无 group_only_greetings）
 - 世界书：entries字段、蓝绿灯配置
 
@@ -33,7 +33,7 @@ python build-preview.py <文件> --platform oldmmd|mmd|st [-o 输出.html]
 平台渲染差异：
 - `st`：原样渲染，script/ES6 全执行
 - `oldmmd`：`<script>`剥离并裸露源码（红框）；onerror/onclick内ES6标黄但仍执行（便于测交互）；onerror点火器正常执行
-- `mmd`：script/ES6 全执行（已确认支持）；script 加"保留回退"黄角标提醒兼容旧版
+- `mmd`：script/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行
 
 输出是自包含 HTML 文件，默认落在 `工作/` 下。不能调 Preview 工具的 agent：提示用户用浏览器打开。
 

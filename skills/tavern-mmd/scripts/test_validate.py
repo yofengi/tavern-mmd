@@ -58,11 +58,13 @@ class TestPlatformRedlines(unittest.TestCase):
         v.check_platform_redlines("<script>alert(1)</script>", "oldmmd", "测试")
         self.assertTrue(any("script" in m.lower() for m in v.ERRORS))
 
-    def test_script_tag_mmd_warn(self):
+    def test_script_tag_mmd_ok(self):
         reset()
         v.check_platform_redlines("<script>x</script>", "mmd", "测试")
-        self.assertTrue(any("script" in m.lower() for m in v.WARNS))
+        # 当前MMD已确认支持 <script>，应放行（OK），不报错不警告
+        self.assertTrue(any("script" in m.lower() for m in v.OKS))
         self.assertEqual(v.ERRORS, [])
+        self.assertFalse(any("script" in m.lower() for m in v.WARNS))
 
     def test_es6_arrow_oldmmd_error(self):
         reset()
