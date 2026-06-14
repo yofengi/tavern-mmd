@@ -37,6 +37,21 @@ python build-preview.py <文件> --platform oldmmd|mmd|st [-o 输出.html]
 
 输出是自包含 HTML 文件，默认落在 `工作/` 下。不能调 Preview 工具的 agent：提示用户用浏览器打开。
 
+## make_card_image.py — 角色卡图片导出
+
+把角色卡 JSON 嵌入 PNG（写 tEXt chara chunk），产出可导入的整卡图片。纯 stdlib。
+
+```bash
+python make_card_image.py <卡JSON> [--bg 底图路径] [-o 输出路径]
+```
+
+- PNG：在 IDAT 前写 `chara` tEXt chunk（base64 卡 JSON）；卡 spec=chara_card_v3 时额外写 `ccv3` chunk。`--bg` 省略则生成默认米黄底图（下部带 tavern-mmd 标签），给路径则注入用户 PNG。
+- JPG：**已弃用**。实测 MMD 无法从 jpg 读出卡数据（EXIF UserComment 与 JPEG COM 段两种方案均验证不可用）。`--format jpg` 会直接报错退出；底层 embed_jpg/read_jpg_chara 仅保留作历史参考。MMD 整卡只用 PNG（或 JSON，本地酒馆）。
+- 自动按卡 JSON 的 `spec` 决定写 v2（仅 chara）还是 v3（chara+ccv3）。
+- 退出码：0 成功，1 失败（JSON 不合法/底图缺失或非法/请求 jpg），2 用法错误。
+
+测试：`python -m unittest test_make_card_image -v`（往返一致性）。
+
 ## 工作流（详见各指令文件）
 
 产出物完成 → 子代理跑 validate.py（结果写 `工作/审核记录.md`）→ 有错则主AI/子代理修复复审 → 主AI 跑 build-preview.py 生成沙箱 → 主AI 用 Preview 工具看渲染+测交互（子代理做不了这步）→ 问用户是否预览。

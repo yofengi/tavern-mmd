@@ -16,6 +16,9 @@
 - [ ] chara_card_v3：顶层与data字段同步；spec/spec_version正确
 - [ ] MMD项目角色卡为v2格式：spec="chara_card_v2"、spec_version="2.0"、无group_only_greetings（MMD不识别v3）
 - [ ] 世界书：蓝灯constant:true（key可为空）、绿灯constant:false有keys；递归控制按设计
+- [ ] （整张图片卡）png 能被 stdlib 解出 `chara` chunk 并还原 JSON：跑 `python -m unittest test_make_card_image -v` 通过；v3 卡 `chara`+`ccv3` 都在，v2 卡仅 `chara`
+- [ ] （整张图片卡）嵌入的卡规格与平台匹配：MMD=v2、本地酒馆=v3
+- [ ] （整张图片卡）只导 PNG（jpg 已弃用：MMD 实测读不出卡数据）
 - [ ] output/文件齐全且main.md索引已更新
 
 ## 结构层（MMD技术产出）
@@ -58,3 +61,9 @@
 - [ ] 装饰性伪元素 pointer-events:none
 - [ ] 交互元素 position:relative + z-index
 - [ ] 全局美化：所有规则body.z-enabled前缀 + !important + 自有类前缀
+
+## 整卡输出形态（做整张角色卡时）
+- [ ] 已用 AskUserQuestion 问过输出形态：内嵌正则 PNG / 内嵌正则 JSON / 分离式（卡+正则json+规则.md）
+- [ ] （内嵌正则的整卡）状态栏**生成规则**已作为 constant=true（蓝灯）条目放入卡内 character_book——渲染正则≠生成规则，缺这条后续轮次状态栏不更新（见 output/card-json.md 第 8 节）
+- [ ] （内嵌正则的整卡）卡内 regex_scripts 用 MMD 4 字段格式；分离式时独立正则 json 的 beginning/regex_scripts 与卡内 first_mes/regex_scripts 一致
+- [ ] （单独美化/状态栏流程）默认交付含 正则 json + 规则.md（状态栏生成规则文档）
