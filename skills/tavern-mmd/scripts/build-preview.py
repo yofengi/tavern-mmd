@@ -11,7 +11,7 @@ tavern-mmd 预览脚本 build-preview.py
 平台渲染差异:
   st     : 原样渲染，<script>/ES6 全执行
   oldmmd : <script>剥离并裸露源码(红框)；onerror/onclick内ES6标红但仍执行；onerror点火器正常
-  mmd    : <script>/ES6 全执行（已确认支持）；script 加"保留回退"黄角标提醒兼容旧版
+  mmd    : <script>/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行
 
 退出码: 0=生成成功  2=用法/读取错误
 """
@@ -102,7 +102,7 @@ def apply_platform_limits(rs, platform):
         if platform == "oldmmd":
             return '<pre class="mmd-stripped">%s</pre>' % html_mod.escape(full)
         else:  # mmd
-            return '<div class="mmd-warn-badge" title="当前MMD已确认支持script；保留 onerror 回退以兼容旧版">⚠保留回退</div>' + full
+            return '<div class="mmd-warn-badge" title="当前MMD已确认支持 script，正常执行">✓script</div>' + full
     out = re.sub(r"<script\b[\s\S]*?</script>", script_repl, out, flags=re.I)
 
     # 2. onerror/onclick 内 ES6 语法：仅旧版MMD会截断，标黄高亮（不阻止执行，便于AI测交互）
