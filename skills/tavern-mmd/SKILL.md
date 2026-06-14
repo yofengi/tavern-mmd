@@ -26,7 +26,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类 | 同旧版 |
 | 事件处理 | 正常 | onclick仅极简单行；stopPropagation必加；时间戳ID | 同旧版（待验证） |
 | MVU/STScript/酒馆助手 | ✅ | ❌ | ❌（保守） |
-| 角色卡导入 | json/png | png/jpg/json（**仅v2**，不识别v3） | png/jpg/json（**仅v2**，不识别v3） |
+| 角色卡导入 | json/png | png/jpg（**仅v2**，不识别v3；不能直接导入json整卡） | png/jpg（**仅v2**，不识别v3；不能直接导入json整卡） |
 | 世界书导入 | json/png | png/json/角色卡连带 | png/json/角色卡连带 |
 
 **保守原则**：当前MMD仅确认解禁`<Script>`，其余按旧版处理，标注"待验证"。
@@ -79,8 +79,11 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 
 所有 json 交付前必须语法校验：`python -m json.tool <文件> > /dev/null`。
 
+**整张角色卡可导出为图片**：MMD 只能用 png/jpg 导入整卡（不能导入 json 整卡），本地酒馆 png/jpg/json 均可。交付整卡前用弹窗问导出格式（png 推荐 / jpg 待验证 / json）与底图来源（默认米黄底图 / 用户图），用 `scripts/make_card_image.py` 生成，详见 output/card-json.md 第 7 节。
+
 ## 交互风格
 
 - 提问用 AskUserQuestion 弹窗选项式，一次一个问题
 - 关键节点（条目清单、设计方案、最终交付）必须停下让用户确认
+- 交付整张角色卡前，用弹窗问导出格式（png/jpg/json）与底图来源（详见 output/card-json.md 第 7 节）
 - /cardplanmax 模式额外允许大段开放讨论（见指令文件）

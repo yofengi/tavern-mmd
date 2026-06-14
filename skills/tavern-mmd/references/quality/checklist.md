@@ -16,6 +16,9 @@
 - [ ] chara_card_v3：顶层与data字段同步；spec/spec_version正确
 - [ ] MMD项目角色卡为v2格式：spec="chara_card_v2"、spec_version="2.0"、无group_only_greetings（MMD不识别v3）
 - [ ] 世界书：蓝灯constant:true（key可为空）、绿灯constant:false有keys；递归控制按设计
+- [ ] （整张图片卡）png 能被 stdlib 解出 `chara` chunk 并还原 JSON：跑 `python -m unittest test_make_card_image -v` 通过；v3 卡 `chara`+`ccv3` 都在，v2 卡仅 `chara`
+- [ ] （整张图片卡）嵌入的卡规格与平台匹配：MMD=v2、本地酒馆=v3
+- [ ] （整张图片卡）jpg 导出已向用户标注"待验证、建议优先 png"
 - [ ] output/文件齐全且main.md索引已更新
 
 ## 结构层（MMD技术产出）

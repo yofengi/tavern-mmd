@@ -209,3 +209,34 @@ python -m json.tool output/卡名.json > /dev/null && echo OK
 ```
 
 输出 `OK` 即 JSON 格式合法。导入酒馆前务必执行。
+
+---
+
+## 7. 导出整张图片卡
+
+整张角色卡的导入能力按平台不同：
+
+| 平台 | png 整卡 | jpg 整卡 | json 整卡 |
+|---|---|---|---|
+| MMD（新/旧） | ✅ | ✅（实验性） | ❌ 不能直接导入整卡（仅世界书/正则可 json 导入） |
+| 本地酒馆 | ✅ | ✅ | ✅ |
+
+**交付整张角色卡前，主 AI 必须用 AskUserQuestion 弹窗问两次（两平台都问）：**
+
+1. **导出格式**：
+   - `png`（推荐）
+   - `jpg`（按需；提示"待验证，建议优先 PNG"）
+   - `json`：MMD 项目标注"**不推荐**——MMD 不能直接导入 json 整卡"；本地酒馆项目不标注
+2. **底图来源**：默认米黄底图（下部带 tavern-mmd 标签） / 用户自备图（让用户给路径）
+
+**生成命令**（脚本见 scripts/make_card_image.py）：
+```bash
+# 默认底图 + v2 卡（MMD）
+python make_card_image.py output/卡名-v2-MMD.json -o output/卡名.png
+# 用户底图
+python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/卡名.png
+# jpg（实验性，需 jpg 底图）
+python make_card_image.py output/卡名.json --format jpg --bg 资料/底图.jpg
+```
+
+**嵌入与 v2/v3**：脚本只忠实嵌入传入的卡 JSON。MMD 项目传 v2（只写 `chara` chunk）；本地酒馆传 v3（写 `chara` + `ccv3`）。两边都要则分别用 v3 与 v2 JSON 各跑一次。
