@@ -56,22 +56,37 @@ def extract_fragments(obj):
     return frags
 
 
+def detect_blank_bar_risk(rs):
+    """MMD markdown 管线会把标签之间的裸换行补成空 <p> 撑出横向空白条。
+    检测 replaceString 里标签闭合与下一个标签之间是否夹着换行（>\\n...<）。"""
+    return bool(re.search(r">\s*\n\s*<", rs))
+
+
 def assemble_html(frags, platform, src_name):
     """把所有HTML片段拼进一个预览页。每个片段包进独立 iframe srcdoc，
     隔离 CSS/ID 作用域，模拟 MMD 每条消息独立气泡（防跨片段污染）。"""
     body_parts = []
     for name, fr, rs in frags:
         processed = apply_platform_limits(rs, platform)
-        srcdoc = html_mod.escape(processed, quote=True)
+        # 标记 CSS 随片段注入子文档（iframe 不继承父文档样式）
+        frame_doc = "<style>%s</style>%s" % (MARKER_CSS, processed)
+        srcdoc = html_mod.escape(frame_doc, quote=True)
+        # 空白条风险警告（仅 MMD 系平台关心；标签间裸换行会被补成空<p>）
+        warn_row = ""
+        if platform in ("oldmmd", "mmd") and detect_blank_bar_risk(rs):
+            warn_row = ('<div class="frag-warn">⚠ 检测到标签间裸换行——'
+                        'MMD markdown 管线会补成空&lt;p&gt;撑出横向空白条；'
+                        '注入HTML请压成单行无换行（预览看不出此问题，详见 statusbar-radar.md）</div>')
         body_parts.append(
-            '<div class="frag"><div class="frag-label">规则: %s （findRegex: %s）</div>'
+            '<div class="frag"><div class="frag-label">规则: %s （findRegex: %s）</div>%s'
             '<iframe class="frag-frame" srcdoc="%s" sandbox="allow-scripts allow-same-origin" '
             'onload="this.style.height=this.contentWindow.document.body.scrollHeight+20+\'px\'">'
             '</iframe></div>'
-            % (html_mod.escape(name), html_mod.escape(fr), srcdoc))
+            % (html_mod.escape(name), html_mod.escape(fr), warn_row, srcdoc))
     body = "\n".join(body_parts)
     banner = make_banner(platform, src_name, len(frags))
-    return PAGE_TEMPLATE % {"platform": platform, "banner": banner, "body": body}
+    return PAGE_TEMPLATE % {"platform": platform, "banner": banner,
+                            "body": body, "marker_css": MARKER_CSS}
 
 
 def apply_platform_limits(rs, platform):
@@ -111,6 +126,16 @@ def make_banner(platform, src_name, n):
             % (platform, labels.get(platform, platform), html_mod.escape(src_name), n))
 
 
+# 平台限制标记的 CSS（红框源码/ES6描边/黄角标）。父文档与每个 iframe 子文档都要注入，
+# 否则 apply_platform_limits 生成的标记元素在 iframe 里无样式（iframe 不继承父文档 CSS）。
+MARKER_CSS = """.mmd-stripped{display:block;margin:8px;padding:10px;border:2px solid #f85149;border-radius:6px;
+  background:#2d0a0a;color:#ff7b72;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}
+.mmd-stripped::before{content:'⚠ 旧版MMD会剥离此标签，不执行（源码裸露）：';display:block;color:#f85149;margin-bottom:6px;font-weight:600}
+[data-mmd-es6]{outline:2px solid #d29922 !important;outline-offset:1px;position:relative}
+[data-mmd-es6]::after{content:'⚠ES6:'attr(data-mmd-es6);position:absolute;top:-8px;right:0;background:#d29922;color:#000;font-size:9px;padding:1px 4px;border-radius:3px;z-index:99}
+.mmd-warn-badge{display:inline-block;background:#d29922;color:#000;font-size:10px;padding:1px 6px;border-radius:3px;margin:2px}"""
+
+
 PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -121,12 +146,8 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif}
 .banner-st{background:#1f6feb}.banner-mmd{background:#9e6a03}.banner-oldmmd{background:#6e1423}
 .frag{margin:16px;padding:0;border:1px dashed #30363d;border-radius:8px;overflow:hidden}
 .frag-label{background:#161b22;color:#8b949e;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d}
-.mmd-stripped{display:block;margin:8px;padding:10px;border:2px solid #f85149;border-radius:6px;
-  background:#2d0a0a;color:#ff7b72;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}
-.mmd-stripped::before{content:'⚠ 旧版MMD会剥离此标签，不执行（源码裸露）：';display:block;color:#f85149;margin-bottom:6px;font-weight:600}
-[data-mmd-es6]{outline:2px solid #d29922 !important;outline-offset:1px;position:relative}
-[data-mmd-es6]::after{content:'⚠ES6:'attr(data-mmd-es6);position:absolute;top:-8px;right:0;background:#d29922;color:#000;font-size:9px;padding:1px 4px;border-radius:3px;z-index:99}
-.mmd-warn-badge{display:inline-block;background:#d29922;color:#000;font-size:10px;padding:1px 6px;border-radius:3px;margin:2px}
+.frag-warn{background:#3a2d00;color:#f0c674;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d}
+%(marker_css)s
 .frag-frame{width:100%%;border:0;display:block;background:#fff;min-height:80px}
 </style></head>
 <body>

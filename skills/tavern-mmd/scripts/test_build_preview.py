@@ -42,3 +42,33 @@ class TestFragmentIsolation(unittest.TestCase):
         html = bp.assemble_html(bp.extract_fragments(obj), "mmd", "t.json")
         self.assertIn("srcdoc=", html)
         self.assertIn("&quot;", html)
+
+
+class TestMarkerCssInIframe(unittest.TestCase):
+    def test_oldmmd_marker_css_injected_into_srcdoc(self):
+        # oldmmd 把 <script> 变成 .mmd-stripped 元素，其 CSS 必须随片段进 iframe
+        obj = {"regex_scripts": [
+            {"scriptName": "S", "replaceString": "<script>var x=1</script><div>hi</div>"},
+        ]}
+        html = bp.assemble_html(bp.extract_fragments(obj), "oldmmd", "t.json")
+        import re
+        src = re.search(r'srcdoc="([^"]*)"', html).group(1)
+        # srcdoc(子文档)里必须自带 .mmd-stripped 规则，否则红框标记无样式
+        self.assertIn(".mmd-stripped", src)
+
+
+class TestBlankBarDetection(unittest.TestCase):
+    def test_bare_newline_between_tags_flagged(self):
+        # 标签之间有裸换行 → MMD markdown 管线会补空<p>撑空白条，应在 frag-label 警告
+        obj = {"regex_scripts": [
+            {"scriptName": "换行", "replaceString": "<div>A</div>\n<div>B</div>"},
+        ]}
+        html = bp.assemble_html(bp.extract_fragments(obj), "mmd", "t.json")
+        self.assertIn("空白条", html)
+
+    def test_single_line_not_flagged(self):
+        obj = {"regex_scripts": [
+            {"scriptName": "单行", "replaceString": "<div>A</div><div>B</div>"},
+        ]}
+        html = bp.assemble_html(bp.extract_fragments(obj), "mmd", "t.json")
+        self.assertNotIn("空白条", html)

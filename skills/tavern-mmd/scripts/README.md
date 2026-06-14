@@ -24,7 +24,7 @@ python validate.py <文件> [--type regex|card|worldbook] [--platform oldmmd|mmd
 
 ## build-preview.py — 平台保真预览
 
-生成自包含 HTML 沙箱，主AI 用 Preview 工具打开看渲染、测交互（点按钮、切标签页、开侧边栏）。
+生成自包含 HTML 沙箱，主AI 用 Preview 工具打开看渲染、测交互（点按钮、切标签页、开侧边栏）。每个片段包进独立 iframe（隔离 CSS/ID 作用域，模拟 MMD 每条消息独立气泡）；MMD 系平台还会静态扫描标签间裸换行，命中则在片段上标"空白条"警告（把只有实机能发现的头号陷阱前移到预览）。
 
 ```bash
 python build-preview.py <文件> --platform oldmmd|mmd|st [-o 输出.html]
