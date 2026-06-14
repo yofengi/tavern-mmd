@@ -40,8 +40,9 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 世界书设计/条目规划 | `references/creation/worldbook.md` |
 | 开场白 | `references/creation/opening.md` |
 | 文风控制 | `references/creation/style.md` |
-| 状态栏 | **首选** `references/beautify/statusbar-radar.md`（雷达法）；轻量备选 `statusbar.md`（KV V4.0）+ 对应平台文档 |
-| 全局美化 | `references/beautify/global-css.md` + 对应平台文档 |
+| 美化风格选择/风格库/换配色换主题 | **先读** `references/beautify/style-system.md`（token契约+6维度+分装+覆盖）；风格清单见 `references/beautify/style-db/README.md` |
+| 状态栏 | **首选** `references/beautify/statusbar-radar.md`（雷达法）；轻量备选 `statusbar.md`（KV V4.0）+ 对应平台文档；换风格见 beautify/style-system.md |
+| 全局美化 | `references/beautify/global-css.md` + 对应平台文档；换风格见 beautify/style-system.md |
 | 正则规则 | `references/beautify/regex-rules.md` |
 | 角色卡JSON输出 | `references/output/card-json.md` |
 | 世界书JSON输出 | `references/output/worldbook-json.md` |
@@ -61,6 +62,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 ├── plan.md      # 任务规划：勾选框步骤清单、决策记录、进度
 ├── 资料/        # 用户素材、讨论记录、被否决方向存档
 ├── 工作/        # 制作中间文件（条目草稿、代码草稿）
+│   └── 美化决策.md  # 仅美化项目：选用风格、混搭维度、单点覆盖（token 原值→新值+原因）的留痕
 └── output/      # 最终交付物
 ```
 
@@ -68,6 +70,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 - 创建任何文件后立即更新 main.md（一行：文件路径—用途—状态）
 - 完成 plan.md 中一步立即打勾，不批量补记
 - 新会话续作：先读 main.md 再读 plan.md，禁止跳过直接动工
+- 做美化时，风格选择与每次单点覆盖都记入 `工作/美化决策.md`（无美化则不建此文件）；详见 beautify/style-system.md 第5节
 
 ## 产出规范
 
@@ -97,5 +100,6 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 
 - 提问用 AskUserQuestion 弹窗选项式，一次一个问题
 - 关键节点（条目清单、设计方案、最终交付）必须停下让用户确认
+- 做美化（状态栏/全局）前，先用弹窗问视觉风格（基调组→具体风格，或混搭），默认整套 bundle；详见 beautify/style-system.md
 - 交付整张角色卡前，用弹窗问输出形态（内嵌正则 PNG / 内嵌正则 JSON / 分离式：卡+正则json+规则.md），详见《整卡输出形态》节与 output/card-json.md 第 8 节
 - /cardplanmax 模式额外允许大段开放讨论（见指令文件）

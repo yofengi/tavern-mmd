@@ -155,3 +155,12 @@
 | 某数据"失忆" | 该键名误入无兜底名单 / 超渲染深度且引擎未开全量扫描 | 核对兜底白名单；确认引擎用textContent全量扫描 |
 | 窄屏排版挤压 | CSS缺媒体查询 | 补`@media (max-width:650px)`单列折叠规则 |
 | **预览正常但导入MMD后状态栏内部出现大片横向空白条**（内容少的页尤其明显） | **MMD气泡走markdown管线（vditor）渲染：标签之间的换行/空行被解析器补成空`<p>`段落，空`<p>`继承默认段落margin撑出等高空条；浏览器预览把标签间换行当可折叠空白，所以预览看不出来**。空白条出现在源HTML各大区块之间换行处（导航后、选项前） | ①注入HTML整体压成单行，标签之间零换行（治本：没有空行markdown就不补空段落）；②防御CSS兜底 `.z-status-box p:empty{display:none!important}` + `.z-status-box p{margin:0!important}` + `.z-status-box br{display:none!important}`（三种形态全覆盖）；③数据块/锚点前后用信标转换器`\s*`尾吞换行（见标准部署优先级3） |
+
+## 换用风格数据库
+
+雷达法默认的暗色配色只是**默认风格之一**。状态栏的全部视觉（配色/圆角/边框/阴影/字体/装饰）可整套替换为 ../style-db/ 里任一风格：
+1. 按 ../style-system.md 选风格（或混搭维度）。
+2. 把该风格 palettes.md 的色板填进雷达法 CSS 的 `--bg/--bg2/--border/--t1/--t2/--t3/--accent` 等变量（变量名映射见 style-system.md 第1节）。
+3. 圆角/边框/阴影/装饰按 layout-ui.md 与 decoration.md 的该风格取值替换对应 CSS。
+4. 雷达嗅探引擎、正则结构、JS 解析逻辑**完全不动**——只换样式值。
+5. 用户要单独微调（换主色、改圆角等）按 style-system.md 第5节项目级覆盖处理。

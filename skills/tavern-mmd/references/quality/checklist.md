@@ -61,6 +61,9 @@
 - [ ] 装饰性伪元素 pointer-events:none
 - [ ] 交互元素 position:relative + z-index
 - [ ] 全局美化：所有规则body.z-enabled前缀 + !important + 自有类前缀
+- [ ] （风格库）已用 AskUserQuestion 问过视觉风格（基调组→风格或混搭），不是默认套用 #0d1117
+- [ ] （风格库）配色已按 style-system.md 第1节 token 映射填入，未改动渲染管线/正则/JS
+- [ ] （风格库）混搭或单点覆盖时跑过整体性检查（对比度≥4.5:1、明暗一致、圆角同档），覆盖项已记入 工作/美化决策.md
 
 ## 整卡输出形态（做整张角色卡时）
 - [ ] 已用 AskUserQuestion 问过输出形态：内嵌正则 PNG / 内嵌正则 JSON / 分离式（卡+正则json+规则.md）
