@@ -16,18 +16,18 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 
 ## 平台差异矩阵（所有技术分流的依据）
 
-| 能力 | 本地酒馆 /st | 旧版MMD /oldmmd | 当前MMD /mmd |
+| 能力 | 本地酒馆 /st | 当前MMD /mmd | 旧版MMD /oldmmd |
 |---|---|---|---|
-| `<script>` 标签 | ✅ | ❌ → img onerror 点火器 | ✅（已确认） |
-| ES6+ 语法 | ✅ | ❌ ES5 only | ✅ 无限制，推荐 ES5 写法（已确认） |
-| 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 同旧版 |
-| 正则限额 | 无硬限制 | ≤30条；findRegex≤1000字符；replaceString≤20000字符 | 同旧版 |
-| 状态栏方案 | 雷达法/KV V4.0均可 | **首选混合态雷达法**；KV V4.0轻量备选 | 同旧版 |
-| 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类 | 同旧版 |
-| 事件处理 | 正常 | onclick仅极简单行；stopPropagation必加；时间戳ID | 同旧版（待验证） |
-| MVU/STScript/酒馆助手 | ✅ | ❌ | ❌（保守） |
-| 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） |
-| 世界书导入 | json/png | png/json/角色卡连带 | png/json/角色卡连带 |
+| `<script>` 标签 | ✅ | ✅（已确认） | ❌ → img onerror 点火器 |
+| ES6+ 语法 | ✅ | ✅ 无限制，推荐 ES5 写法（已确认） | ❌ ES5 only |
+| 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 同当前MMD |
+| 正则限额 | 无硬限制 | ≤30条；findRegex≤1000字符；replaceString≤20000字符 | 同当前MMD |
+| 状态栏方案 | 雷达法/KV V4.0均可 | **首选混合态雷达法**；KV V4.0轻量备选 | 同当前MMD |
+| 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类 | 同当前MMD |
+| 事件处理 | 正常 | onclick仅极简单行；stopPropagation必加；时间戳ID（待验证） | 同当前MMD |
+| MVU/STScript/酒馆助手 | ✅ | ❌（保守） | ❌ |
+| 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | 同当前MMD |
+| 世界书导入 | json/png | png/json/角色卡连带 | 同当前MMD |
 
 **保守原则**：当前MMD已确认解禁 `<script>` 与 ES6（推荐 ES5 写法），其余未确认能力（onclick净化/CSP多行/MVU等）仍按旧版处理，标注"待验证"。
 
