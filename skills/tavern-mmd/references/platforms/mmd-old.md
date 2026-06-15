@@ -2,6 +2,8 @@
 
 本文档适用于旧版MMD / sexyai.top 平台的交互模块开发；状态栏具体方案（三段正则模板、数据格式、继承机制）见 `../beautify/statusbar.md`，全局CSS美化见 `../beautify/global-css.md`。
 
+> 旧版 MMD 已冻结、不再更新。本文档保持旧版基线（ES5 only、禁 `<script>`、onclick 净化等）不动。**唯一已随平台同步的项**：正则总数上限由 30 提升至 **130 条**（平台级能力，新旧版一致）；findRegex 1000 / replaceString 20000 字符上限不变。
+
 ---
 
 ## 1. 红线分级表
@@ -100,7 +102,7 @@ var fn = function() { ... };
 |:---|:---|:---|
 | `findRegex` 字段 | **1000字符** | 超出后正则失效 |
 | `replaceString` 字段 | **20000字符** | 超出后被截断 |
-| 正则条目总数 | **30条** | 无法动态增加 |
+| 正则条目总数 | **130条** | 平台级上限（新旧版一致，原 30 已提升） |
 
 导入方式：支持 **json 批量导入**（MMD专用4字段格式：pageDepth/statusbar/beginning/regex_scripts，见 `../output/regex-output.md`），也可在平台UI逐条手填。
 
@@ -372,4 +374,4 @@ z-index: 9999;                               /* appendChild已保证顺序，z-i
 - [ ] 资源条使用 `名称:当前值/最大值` 格式
 - [ ] 数据收集使用原生表单元素（`.value` 属性天然数据容器）
 - [ ] 无变化字段省略以节省Token（利用继承机制）
-- [ ] `findRegex` ≤ 1000字符，`replaceString` ≤ 20000字符，正则条目 ≤ 30条
+- [ ] `findRegex` ≤ 1000字符，`replaceString` ≤ 20000字符，正则条目 ≤ 130条

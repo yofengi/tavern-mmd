@@ -106,12 +106,12 @@ def check_platform_redlines(s, platform, where):
         if re.search(r"\?\.", s):
             es6.append("可选链(?.)")
         if es6:
-            lvl = err if platform == "oldmmd" else warn
-            lvl("%s 含 ES6+ 语法: %s——%s。" % (
-                where, "、".join(es6),
-                "旧版MMD会从该处截断，后续代码丢失" if platform == "oldmmd" else "当前MMD已确认支持ES6，但官方推荐ES5写法更稳"))
+            if platform == "oldmmd":
+                err("%s 含 ES6+ 语法: %s——旧版MMD会从该处截断，后续代码丢失。" % (where, "、".join(es6)))
+            else:
+                ok("%s 含 ES6+ 语法: %s——当前MMD实测全支持（img载体下），推荐ES6。" % (where, "、".join(es6)))
         else:
-            ok("%s 全 ES5（无箭头函数/let/const/模板字符串等）" % where)
+            ok("%s 全 ES5" % where)
 
     # 纯DOM API：innerHTML 拼接 / cssText
     if re.search(r"\.innerHTML\s*=", s):
@@ -140,15 +140,31 @@ def check_double_escape(s, where):
 
 
 def check_interactive_event_newlines(s, where, platform):
-    """检查内联事件处理器（onclick/onerror）内是否有裸换行——旧版MMD会因CSP破坏。"""
+    """检查内联事件处理器内是否有裸换行。
+    旧版MMD：onerror/onclick 均须单行（CSP破坏多行JS）。
+    当前MMD：onerror 实测可多行，放行；onclick 仍应为干净单行调用（禁代码字面量/赋值），多行警告。"""
     if platform not in ("oldmmd", "mmd"):
         return
-    bad = re.findall(r'on\w+\s*=\s*"[^"]*\n[^"]*"', s)
-    if bad:
-        (err if platform == "oldmmd" else warn)(
-            "%s 有 %d 个内联事件处理器(onclick/onerror)含裸换行——旧版MMD的CSP会破坏多行JS，必须单行。" % (where, len(bad)))
-    else:
-        ok("%s 内联事件处理器均单行" % where)
+    if platform == "oldmmd":
+        bad = re.findall(r'on\w+\s*=\s*"[^"]*\n[^"]*"', s)
+        if bad:
+            err("%s 有 %d 个内联事件处理器(onclick/onerror)含裸换行——旧版MMD的CSP会破坏多行JS，必须单行。" % (where, len(bad)))
+        else:
+            ok("%s 内联事件处理器均单行" % where)
+    else:  # mmd：onerror 多行放行，仅查 onclick
+        onclick_bad = re.findall(r'onclick\s*=\s*"[^"]*\n[^"]*"', s)
+        if onclick_bad:
+            warn("%s 有 %d 个 onclick 含裸换行——当前MMD onclick 只放行干净单行调用(__fn()/eval(x.dataset.s))，复杂逻辑应进 data-s 或 window.__fn。onerror 多行已放行。" % (where, len(onclick_bad)))
+        else:
+            ok("%s onclick 均单行（onerror 当前MMD可多行）" % where)
+    # 当前MMD onclick 净化：属性内禁代码字面量/直接DOM赋值
+    if platform == "mmd":
+        # onclick="eval('...')" 代码字符串塞进属性 → 被净化
+        if re.search(r"onclick\s*=\s*\"[^\"]*eval\s*\(\s*['`]", s):
+            warn("%s onclick 内 eval 直接吃代码字符串字面量——当前MMD会净化。改为 eval(getElementById('FUNC').dataset.s) 这种干净调用（代码存进 data-s）。" % where)
+        # onclick="this.xxx=..." 直接赋值 → 被净化
+        if re.search(r"onclick\s*=\s*\"[^\"]*\b(this|document|window)\.[\w.]+\s*=[^=]", s):
+            warn("%s onclick 内含直接DOM赋值语句——当前MMD会净化（比旧版收紧）。改走 window.__fn() 或轻主板 eval(dataset.s)。" % where)
 
 
 # ============ 类型专项校验 ============
@@ -188,10 +204,10 @@ def validate_regex(obj, platform):
         return
 
     if platform in ("oldmmd", "mmd"):
-        if len(scripts) > 30:
-            err("正则条数 %d > 30，超出MMD上限。" % len(scripts))
+        if len(scripts) > 130:
+            err("正则条数 %d > 130，超出MMD上限。" % len(scripts))
         else:
-            ok("正则条数 %d ≤ 30" % len(scripts))
+            ok("正则条数 %d ≤ 130" % len(scripts))
 
     for i, sc in enumerate(scripts):
         if not isinstance(sc, dict):

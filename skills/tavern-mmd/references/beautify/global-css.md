@@ -11,14 +11,14 @@
 
 ## MMD 激活机制
 
-> `<script>` 标签在 MMD 会被过滤，改用 img onerror 执行 JS。所有覆盖样式以 `body.z-enabled` 为前缀，便于一键还原。
+> 旧版 MMD `<script>` 被过滤，必须 img onerror 执行 JS。**当前 MMD（/mmd）`<script>` 已实测可执行**：全局美化激活是"给 body 加一次开关类"的一次性操作（不是 per-message 自渲染，不踩 `<script>` 去重/`currentScript` 限制），因此 `<script>` 与 img onerror 两种激活器都可用，推荐仍保留 img onerror 版作跨版本回退。所有覆盖样式以 `body.z-enabled` 为前缀，便于一键还原。
 
 | 部件 | 写法 | 说明 |
 |---|---|---|
 | 激活开关 | `<img src="x" style="display:none" onerror="document.body.classList.add('z-enabled');this.remove()">` | img onerror 注入 JS，执行后自毁 |
 | 总开关类 | `body.z-enabled` | 所有覆盖样式都以它为前缀，便于一键还原 |
 | 夜间模式类 | `body.z-enabled.z-dark-mode` | 覆盖同名 CSS 变量即换色，选择器不动 |
-| 悬浮切换按钮 | `.z-sidebar-btn` + `.z-btn-text` | fixed 贴边按钮，inline onclick 循环 原/日/夜 |
+| 悬浮切换按钮 | `.z-sidebar-btn` + `.z-btn-text` | fixed 贴边按钮，点击循环 原/日/夜。**切换逻辑走合法路径**：/oldmmd 用轻主板 `eval(dataset.s)`；/mmd 用 `window.__fn()` 或 `el.onclick=function(){}`（img onerror 里赋值）——inline onclick 直接写 `classList.toggle` 在 /mmd 会被净化 |
 | 正则配合类 | `.z-q` 等 | 留给正则把正文关键词包成 `<span class="z-q">`，复用全局样式 |
 
 自定义类一律加自己的前缀（样本用 `z-`），避免撞平台类名。

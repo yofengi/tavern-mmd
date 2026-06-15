@@ -18,18 +18,18 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 
 | 能力 | 本地酒馆 /st | 当前MMD /mmd | 旧版MMD /oldmmd |
 |---|---|---|---|
-| `<script>` 标签 | ✅ | ✅（已确认） | ❌ → img onerror 点火器 |
-| ES6+ 语法 | ✅ | ✅ 无限制，推荐 ES5 写法（已确认） | ❌ ES5 only |
+| `<script>` 标签 | ✅ | ✅ 可执行，但**做不了 per-message 自渲染**（仅用于定义 `window.__fn` 给 onclick 调）→ 状态栏引擎仍走 img onerror | ❌ → img onerror 点火器 |
+| ES6+ 语法 | ✅ | ✅ 实测全支持（img onerror 载体下，7/7 语法探针全绿），**推荐 ES6** | ❌ ES5 only |
 | 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 同当前MMD |
-| 正则限额 | 无硬限制 | ≤30条；findRegex≤1000字符；replaceString≤20000字符 | 同当前MMD |
-| 状态栏方案 | 雷达法/KV V4.0均可 | **首选混合态雷达法**；KV V4.0轻量备选 | 同当前MMD |
-| 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类 | 同当前MMD |
-| 事件处理 | 正常 | onclick仅极简单行；stopPropagation必加；时间戳ID（待验证） | 同当前MMD |
+| 正则限额 | 无硬限制 | ≤130条；findRegex≤1000字符；replaceString≤20000字符 | ≤130条；同当前MMD |
+| 状态栏方案 | 雷达法/KV V4.0均可 | **动态/自创NPC：混合态雷达法**；固定字段：原生`$field`（最轻零JS）或 KV V4.0（带骨架），AI 择一 | 同当前MMD |
+| 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类（激活器可用script或img onerror） | 同当前MMD |
+| 事件处理 | 正常 | onclick仅放行"干净调用/引用表达式"（`__fn()`、`eval(x.dataset.s)`）；禁代码字符串字面量与直接DOM赋值；stopPropagation必加；时间戳ID | 同当前MMD（旧版略宽：曾放行极简单行赋值，当前版收紧） |
 | MVU/STScript/酒馆助手 | ✅ | ❌（保守） | ❌ |
 | 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | 同当前MMD |
 | 世界书导入 | json/png | png/json/角色卡连带 | 同当前MMD |
 
-**保守原则**：当前MMD已确认解禁 `<script>` 与 ES6（推荐 ES5 写法），其余未确认能力（onclick净化/CSP多行/MVU等）仍按旧版处理，标注"待验证"。
+**当前MMD已实测**：`<script>` 与 ES6 解禁、`onerror` 可多行可用双引号、正则上限 130 条。`<script>` 不能做 per-message 自渲染（`document.currentScript` 不可用 + 同段脚本只加载一次被去重），状态栏引擎仍只能 img onerror。MVU/STScript 等未确认能力仍按无处理（保守）。
 
 ## 任务路由
 
@@ -41,7 +41,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 开场白 | `references/creation/opening.md` |
 | 文风控制 | `references/creation/style.md` |
 | 美化风格选择/风格库/换配色换主题 | **先读** `references/beautify/style-system.md`（token契约+6维度+分装+覆盖）；风格清单见 `references/beautify/style-db/README.md` |
-| 状态栏 | **首选** `references/beautify/statusbar-radar.md`（雷达法）；轻量备选 `statusbar.md`（KV V4.0）+ 对应平台文档；换风格见 beautify/style-system.md |
+| 状态栏 | 动态/自创NPC **首选** `references/beautify/statusbar-radar.md`（雷达法）；固定字段走原生 `$field`（最轻）或 `statusbar.md`（KV V4.0），由 AI 择一 + 对应平台文档；换风格见 beautify/style-system.md |
 | 全局美化 | `references/beautify/global-css.md` + 对应平台文档；换风格见 beautify/style-system.md |
 | 正则规则 | `references/beautify/regex-rules.md` |
 | 角色卡JSON输出 | `references/output/card-json.md` |

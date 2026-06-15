@@ -29,18 +29,20 @@
 - [ ] 填充位置有data-field/data-list标记
 
 ## 代码层（MMD技术产出）
-- [ ] 全ES5：无箭头函数/模板字符串/let/const/解构/展开/可选链
-- [ ] 纯DOM API：无innerHTML字符串拼接、无style.cssText
-- [ ] onerror/onclick内代码单行无换行
-- [ ] onclick仅极简指令（复杂逻辑走轻主板data-s或script）
-- [ ] 无alert；无<script>（旧版MMD）
+- [ ] **（/oldmmd）全ES5**：无箭头函数/模板字符串/let/const/解构/展开/可选链
+- [ ] **（/mmd）ES6可用**：img载体下实测全支持，推荐ES6；引擎默认ES6版、ES5版兜底
+- [ ] 纯DOM API：无innerHTML字符串拼接、无style.cssText（两版都建议遵守，防实体化）
+- [ ] **（/oldmmd）onerror/onclick内代码单行无换行**
+- [ ] **（/mmd）onerror可多行可双引号**；onclick仅放行干净调用/引用表达式（`__fn()`/`eval(x.dataset.s)`），禁代码字面量与直接DOM赋值
+- [ ] onclick复杂逻辑走轻主板data-s（eval(dataset.s)）或 window.__fn（/mmd 已复测可用）
+- [ ] 无alert；无`<script>`（/oldmmd）；`<script>`（/mmd）仅用于定义window.__fn交互，**不做per-message状态栏自渲染**（引擎只能img onerror）
 
 ## 正则层（MMD）
-- [ ] 总条数≤30
+- [ ] 总条数≤130
 - [ ] 每条findRegex≤1000字符、replaceString≤20000字符（标注实测值）
 - [ ] 导入json：含pageDepth/statusbar/beginning/regex_scripts四字段，每条正则id=-1
 - [ ] **导入json通过 `python -m json.tool 文件 > /dev/null` 校验（拦截裸换行/未转义引号）**
-- [ ] **已跑 `scripts/validate.py 文件 --platform oldmmd` 且 0 错误（一次性覆盖JSON合法/BOM/双重转义/红线/字符数）**
+- [ ] **已跑 `scripts/validate.py 文件 --platform <mmd|oldmmd>` 且 0 错误**（当前MMD务必用 `--platform mmd`，否则误报ES6/script；旧版用 oldmmd 最严格）
 - [ ] **文件无UTF-8 BOM**
 - [ ] **回读 replaceString：解析后HTML无多余反斜杠（防双重转义，见 output/regex-output.md 2.4）**
 - [ ] **注入HTML载荷内无换行符（防MMD空白条）：CSS/HTML模板写成单行无缝，标签间零换行；JSON转义的`\n`解析后仍是真实换行照样被渲染，必须从HTML源头消灭**
@@ -50,7 +52,7 @@
 - [ ] 替换链标记（Z_CONTENT等）首尾衔接无断裂
 
 ## 雷达法状态栏（采用时附加）
-- [ ] 引擎逻辑零双引号（统一单引号）、无星号（乘法改除法）
+- [ ] **（/oldmmd）引擎逻辑零双引号（统一单引号）、无星号（乘法改除法）**——onerror净化规避；**（/mmd）onerror可多行双引号，此项可放宽**
 - [ ] 全半角鲁棒解析：分隔符正则兼容 `／｜：` 全角变体
 - [ ] 兜底白名单：一/二/五类键名在列，四类快照排除在外
 - [ ] 状态栏规则与引擎键名严格一致；规则中无任何UI机制描述
