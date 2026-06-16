@@ -42,11 +42,12 @@
 - [ ] 每条findRegex≤1000字符、replaceString≤20000字符（标注实测值）
 - [ ] 导入json：含pageDepth/statusbar/beginning/regex_scripts四字段，每条正则id=-1
 - [ ] **导入json通过 `python -m json.tool 文件 > /dev/null` 校验（拦截裸换行/未转义引号）**
-- [ ] **已跑 `scripts/validate.py 文件 --platform <mmd|oldmmd>` 且 0 错误**（当前MMD务必用 `--platform mmd`，否则误报ES6/script；旧版用 oldmmd 最严格）
+- [ ] **已跑 `scripts/validate.py 文件 --platform <mmd|oldmmd>` 且 0 错误**（当前MMD务必用 `--platform mmd`，否则误报ES6/script；悬空标记会报错，必须补正则或删标记；旧版用 oldmmd 最严格）
 - [ ] **文件无UTF-8 BOM**
 - [ ] **回读 replaceString：解析后HTML无多余反斜杠（防双重转义，见 output/regex-output.md 2.4）**
 - [ ] **注入HTML载荷内无换行符（防MMD空白条）：CSS/HTML模板写成单行无缝，标签间零换行；JSON转义的`\n`解析后仍是真实换行照样被渲染，必须从HTML源头消灭**
-- [ ] （状态栏/美化）已 `scripts/build-preview.py 文件 --platform <平台>` 生成沙箱，主AI 看过渲染并测过交互（点按钮/切标签/开侧边栏）
+- [ ] （状态栏/美化）已 `scripts/build-preview.py 文件 --platform <平台>` 生成三面板沙箱，主AI 看过：①第一句话整合预览（选项菜单/图片/特殊美化是否并入）；②状态栏单独预览；③悬浮组件预览（侧边栏/悬浮球），并测过交互（点按钮/切标签/开侧边栏）
+- [ ] **（状态栏/美化）已看过全景预览（`--mode both` 自动生成 `-panorama-` 文件）二次审核组合效果：所有组件同场无串台、底部输入框固定（滚动不动）、点发送出现用户气泡+占位AI气泡、状态栏选项点击能回填输入框**
 - [ ] **（MMD状态栏/美化）已实机导入MMD看渲染——沙箱预览正常≠MMD正常，markdown管线把标签间换行补成空`<p>`撑出空白条，只有实机能复现，重点看内容最少的页有无横向空白条**
 - [ ] 手填清单（备选交付时）：每条带用途、分框代码块、字符数、勾选框
 - [ ] 替换链标记（Z_CONTENT等）首尾衔接无断裂

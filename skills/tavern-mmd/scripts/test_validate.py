@@ -130,12 +130,33 @@ class TestRegexLimits(unittest.TestCase):
                                              "findRegex": "<x>", "replaceString": big}]}, "oldmmd")
         self.assertTrue(any("20000" in m for m in v.ERRORS))
 
-    def test_over_30_scripts(self):
+    def test_over_130_scripts(self):
         reset()
-        scripts = [{"id": -1, "scriptName": str(i), "findRegex": "<x>", "replaceString": "y"} for i in range(31)]
+        scripts = [{"id": -1, "scriptName": str(i), "findRegex": "<x>", "replaceString": "y"} for i in range(131)]
         v.validate_regex({"pageDepth": 2, "statusbar": "<x>", "beginning": "",
                           "regex_scripts": scripts}, "oldmmd")
-        self.assertTrue(any("30" in m for m in v.ERRORS))
+        self.assertTrue(any("130" in m for m in v.ERRORS))
+
+
+class TestDanglingMarkers(unittest.TestCase):
+    def test_statusbar_beginning_marker_without_matching_findregex_is_error(self):
+        reset()
+        v.validate_regex({"pageDepth": 2,
+                          "statusbar": "<css>",
+                          "beginning": "正文<missing>",
+                          "regex_scripts": [
+                              {"id": -1, "scriptName": "样式", "findRegex": "<css>", "replaceString": "<style></style>"}
+                          ]}, "mmd")
+        self.assertTrue(any("悬空标记" in m and "<missing>" in m for m in v.ERRORS))
+        self.assertFalse(any("<css>" in m and "悬空标记" in m for m in v.ERRORS))
+
+    def test_html_tags_are_not_treated_as_dangling_markers(self):
+        reset()
+        v.validate_regex({"pageDepth": 2,
+                          "statusbar": "",
+                          "beginning": "<div><button>点</button></div>",
+                          "regex_scripts": []}, "mmd")
+        self.assertFalse(any("悬空标记" in m for m in v.ERRORS))
 
 
 class TestRegexNonString(unittest.TestCase):

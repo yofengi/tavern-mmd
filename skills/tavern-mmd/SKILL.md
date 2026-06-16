@@ -43,6 +43,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 美化风格选择/风格库/换配色换主题 | **先读** `references/beautify/style-system.md`（token契约+6维度+分装+覆盖）；风格清单见 `references/beautify/style-db/README.md` |
 | 状态栏 | 动态/自创NPC **首选** `references/beautify/statusbar-radar.md`（雷达法）；固定字段走原生 `$field`（最轻）或 `statusbar.md`（KV V4.0），由 AI 择一 + 对应平台文档；换风格见 beautify/style-system.md |
 | 全局美化 | `references/beautify/global-css.md` + 对应平台文档；换风格见 beautify/style-system.md |
+| 悬浮组件（可拖动悬浮球/侧边栏抽屉/带菜单的悬浮按钮） | `references/beautify/floating-components.md`（认证写法：img onerror 注入 + CSS类 + classList，菜单跟随本体+翻转避裁+选项可点击；两版分流） |
 | 正则规则 | `references/beautify/regex-rules.md` |
 | 角色卡JSON输出 | `references/output/card-json.md` |
 | 世界书JSON输出 | `references/output/worldbook-json.md` |

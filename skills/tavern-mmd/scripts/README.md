@@ -16,18 +16,34 @@ python validate.py <文件> [--type regex|card|worldbook] [--platform oldmmd|mmd
 
 审核项：
 - 通用：JSON合法性、UTF-8 BOM、replaceString/HTML内双重转义反斜杠
-- 正则/状态栏：四字段结构、字符数(find≤1000/replace≤20000)、条数≤30、stopPropagation、平台红线
+- 正则/状态栏：四字段结构、字符数(find≤1000/replace≤20000)、条数≤130、stopPropagation、平台红线、**悬空标记**（statusbar/beginning 里的 `<标记>` 无对应 findRegex → ERROR）
 - 平台红线(oldmmd)：`<script>`→错误、ES6→错误、innerHTML/cssText→错误、内联事件裸换行→错误
-- 平台红线(mmd)：script/ES6 已确认支持→放行（script 标 OK；ES6 仅提示官方推荐 ES5）；innerHTML/cssText/裸换行仍按需提示
+- 平台红线(mmd)：script/ES6 已实测支持→放行；onerror 多行放行；onclick 代码字面量/直接赋值告警；innerHTML/cssText 仍按需提示
 - 角色卡：spec/同步；MMD平台强制 v2（spec=chara_card_v2、无 group_only_greetings）
 - 世界书：entries字段、蓝绿灯配置
 
 ## build-preview.py — 平台保真预览
 
-生成自包含 HTML 沙箱，主AI 用 Preview 工具打开看渲染、测交互（点按钮、切标签页、开侧边栏）。每个片段包进独立 iframe（隔离 CSS/ID 作用域，模拟 MMD 每条消息独立气泡）；MMD 系平台还会静态扫描标签间裸换行，命中则在片段上标"空白条"警告（把只有实机能发现的头号陷阱前移到预览）。
+生成自包含 HTML 沙箱，主AI 用 Preview 工具打开看渲染、测交互（点按钮、切标签页、开侧边栏）。
+
+MMD 导入 json（含 `statusbar`/`beginning`/`regex_scripts`）走**真实替换管线模拟**：先把 `statusbar + beginning` 拼成消息文本，再按 `regex_scripts` 逐条替换，最后输出三面板：
+
+1. **第一句话整合预览**：第一句话经全量替换后的真实长相；如果第一句话含可选菜单、图片或特殊美化，会在这里一起显示。
+2. **状态栏单独预览**：从整合结果中抽出雷达/KV状态栏；雷达法会保留 `img onerror` 引擎和隐藏信标数据，让 Preview 能实际触发 onerror。
+3. **悬浮组件预览**：从整合结果中抽出 `position:fixed` / `float/sidebar/ball` 类组件（侧边栏、悬浮球等），便于单独检查。
+
+本地酒馆正则数组（无 `beginning`）继续走逐片段 iframe 模式。MMD 系平台还会静态扫描标签间裸换行，命中则标"空白条"警告（把只有实机能发现的头号陷阱前移到预览）。
+
+### 两种产出：三面板诊断 + 全景预览（`--mode`）
+
+- `--mode panels`：只产**三面板诊断**（上述），逐组件隔离，定位单组件 CSS/ID 冲突。
+- `--mode panorama`：只产**全景预览**——所有组件组合进**一个模拟 MMD 聊天页**的单文档：可滚动聊天区（第一句话整合渲染，全局美化/状态栏/侧边栏/悬浮球同场运行）+ **底部固定主输入框**（上下滑动不受影响）+ 右侧发送按钮。发送会在聊天区追加用户气泡（`.content.right`）和一条占位 AI 气泡（`.content.left`，文案标明"预览模式，真实回复需实机生成"）。输入框用 `.uni-textarea-textarea` 类名，与状态栏选项按钮的回填选择器一致，所以选项点击→回填输入框这条链在全景里也通。
+- `--mode both`（默认）：两份都产，`<文件>-preview-<平台>.html`（三面板）+ `<文件>-panorama-<平台>.html`（全景）。
+
+> 全景发送逻辑是预览工具自带的脚手架（走 `img onerror` 点火器，三平台都执行，不被 `<script>` 剥离器当被测内容裸露），与被测美化产物无关。
 
 ```bash
-python build-preview.py <文件> --platform oldmmd|mmd|st [-o 输出.html]
+python build-preview.py <文件> --platform oldmmd|mmd|st [--mode panels|panorama|both] [-o 输出.html]
 ```
 
 平台渲染差异：
@@ -54,10 +70,10 @@ python make_card_image.py <卡JSON> [--bg 底图路径] [-o 输出路径]
 
 ## 工作流（详见各指令文件）
 
-产出物完成 → 子代理跑 validate.py（结果写 `工作/审核记录.md`）→ 有错则主AI/子代理修复复审 → 主AI 跑 build-preview.py 生成沙箱 → 主AI 用 Preview 工具看渲染+测交互（子代理做不了这步）→ 问用户是否预览。
+产出物完成 → 子代理跑 validate.py（结果写 `工作/审核记录.md`；悬空标记必须 0 错）→ 有错则主AI/子代理修复复审 → 主AI 跑 build-preview.py（默认 `--mode both`）→ **先用 Preview 工具看三面板诊断**审核单组件（第一句话整合、状态栏单独、悬浮组件）并测交互 → **再看全景预览二次审核**组合效果（所有组件同场无串台、输入框固定、发送/选项回填正常）→ 全景预览不默认关闭，留给用户自查是否要改（子代理做不了 Preview 这步）。
 
 ## 测试
 
 ```bash
-python -m unittest test_validate -v
+python -m unittest test_validate test_build_preview -v
 ```

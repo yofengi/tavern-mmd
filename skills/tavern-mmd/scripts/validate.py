@@ -183,6 +183,61 @@ def looks_like(obj):
     return None
 
 
+HTML_TAGS = set("""a audio b big body br button code del details div em font form h1 h2 h3 h4 h5 h6
+head hr html i iframe img input ins label li link mark meta nav ol option p pre script section select small span
+strong style sub summary sup table tbody td textarea th thead title tr u ul video""".split())
+
+
+def _parse_findregex(fr):
+    if not (isinstance(fr, str) and fr.startswith("/")):
+        return None
+    end = fr.rfind("/")
+    if end <= 0:
+        return None
+    try:
+        return re.compile(fr[1:end])
+    except re.error:
+        return None
+
+
+def check_dangling_markers(obj, scripts):
+    """statusbar/beginning 中的自定义 <标记> 必须被 findRegex 消费，否则会裸露。"""
+    if not isinstance(obj, dict):
+        return
+    hay = ""
+    for k in ("statusbar", "beginning"):
+        v = obj.get(k, "")
+        if isinstance(v, str):
+            hay += v
+    if not hay:
+        return
+    literals = set()
+    regexes = []
+    for sc in scripts:
+        if not isinstance(sc, dict):
+            continue
+        fr = sc.get("findRegex", "")
+        if not isinstance(fr, str) or not fr:
+            continue
+        rx = _parse_findregex(fr)
+        if rx is None:
+            literals.add(fr)
+        else:
+            regexes.append(rx)
+    seen = set()
+    for m in re.finditer(r"<([A-Za-z一-鿿][A-Za-z0-9_.\-一-鿿]*)>", hay):
+        marker = m.group(0)
+        name = m.group(1).lower()
+        if name in HTML_TAGS or marker in seen:
+            continue
+        seen.add(marker)
+        if marker in literals:
+            continue
+        if any(rx.search(marker) for rx in regexes):
+            continue
+        err("悬空标记 %s：出现在 statusbar/beginning 中但无对应 findRegex 消费，渲染时会裸露。" % marker)
+
+
 def validate_regex(obj, platform):
     """MMD 导入json(4字段) 或 本地酒馆正则数组。"""
     scripts = []
@@ -202,6 +257,9 @@ def validate_regex(obj, platform):
     else:
         err("无法识别的正则结构")
         return
+
+    if platform in ("oldmmd", "mmd") and isinstance(obj, dict):
+        check_dangling_markers(obj, scripts)
 
     if platform in ("oldmmd", "mmd"):
         if len(scripts) > 130:
