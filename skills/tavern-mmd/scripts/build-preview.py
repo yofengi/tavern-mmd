@@ -90,8 +90,44 @@ def _parse_regex_literal(fr):
 
 
 def _js_repl_to_python(repl):
-    """把 JS/MMD 替换里的 $1/$2 转成 Python re.sub 的 \\1/\\2。"""
+    """把 JS/MMD 替换里的 $1/$2 转成 Python re.sub 的 \\1/\\2。
+    （已弃用：影渲法引擎 replaceString 含正则字面量 \\d/\\s，被 re.sub 模板当转义会崩。
+    改用 _make_repl_func 函数式替换。保留此函数仅作兼容。）"""
     return re.sub(r"\$(\d+)", r"\\\1", repl)
+
+
+def _make_repl_func(rs):
+    """返回供 re.sub 用的替换函数，按 MMD 真实语义展开：
+      - `$1`/`$2` → 对应捕获组
+      - `\\\\` → 单个 `\\`（模板转义折叠：JSON 存的双反斜杠渲染成单）
+      - 其余字符原样输出
+    用函数式替换而非 re.sub 模板字符串，故 replaceString 里的单反斜杠序列
+    （如影渲法/雷达法引擎正则 \\d \\s）不会触发 're bad escape' 崩溃——
+    这正是之前预览脚本在影渲法引擎上崩的根因。"""
+    def repl(m):
+        out = []
+        i = 0
+        n = len(rs)
+        while i < n:
+            ch = rs[i]
+            if ch == "$" and i + 1 < n and rs[i + 1].isdigit():
+                j = i + 1
+                while j < n and rs[j].isdigit():
+                    j += 1
+                idx = int(rs[i + 1:j])
+                try:
+                    out.append(m.group(idx) or "")
+                except (IndexError, re.error):
+                    out.append(rs[i:j])
+                i = j
+            elif ch == "\\" and i + 1 < n and rs[i + 1] == "\\":
+                out.append("\\")          # \\ → \（模板转义折叠）
+                i += 2
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
+    return repl
 
 
 def apply_regex_pipeline(obj):
@@ -110,39 +146,34 @@ def apply_regex_pipeline(obj):
         if regex is None:
             text = text.replace(fr, rs)
         else:
-            text = regex.sub(_js_repl_to_python(rs), text)
+            text = regex.sub(_make_repl_func(rs), text)
     return text
 
 
 def find_dangling_markers(obj):
-    """找出 statusbar/beginning 中无对应 findRegex 消费的自定义 <标记>。"""
+    """找出 statusbar/beginning 中无对应 findRegex 消费的自定义 <标记>。
+
+    判据=该标记经完整正则管线后是否仍残留在渲染结果里。
+    （旧逻辑用裸标记 `<g3>` 去 rx.search 试探，对"整段匹配型" findRegex
+    如 /<g3>([\\s\\S]*?)<\\/g3>/ 会误判悬空——影渲法/雷达法常用整段匹配。
+    改为 post-pipeline 残留检测：被消费的标记不会出现在最终 HTML 里。）"""
     if isinstance(obj, list):
         return []
     hay = str(obj.get("statusbar", "")) + str(obj.get("beginning", ""))
-    find_literals = set()
-    find_regexes = []
-    for sc in obj.get("regex_scripts", []):
-        if not isinstance(sc, dict):
-            continue
-        fr = sc.get("findRegex", "")
-        if not isinstance(fr, str) or not fr:
-            continue
-        regex = _parse_regex_literal(fr)
-        if regex is None:
-            find_literals.add(fr)
-        else:
-            find_regexes.append(regex)
+    rendered = apply_regex_pipeline(obj)
     errors = []
+    seen = set()
     for m in re.finditer(r"<([A-Za-z一-鿿][A-Za-z0-9_.\-一-鿿]*)>", hay):
         marker = m.group(0)
         name = m.group(1).lower()
         if name in HTML_TAGS:
             continue
-        if marker in find_literals:
+        if marker in seen:
             continue
-        if any(rx.search(marker) for rx in find_regexes):
-            continue
-        errors.append(marker)
+        # 被某条 findRegex 消费的标记，跑完管线后不会残留；仍残留=真悬空
+        if marker in rendered:
+            errors.append(marker)
+            seen.add(marker)
     return errors
 
 

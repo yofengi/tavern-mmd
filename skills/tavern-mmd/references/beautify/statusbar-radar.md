@@ -2,6 +2,8 @@
 
 > 基于特征嗅探与响应式动态DOM的状态栏架构（改五版，by 黑洞猫）。MMD平台**动态/自创NPC状态栏首选本方案**；固定字段可走原生 `$field` 或 KV V4.0（statusbar.md）。
 > 现成可用的开源示例资产在 `../../assets/radar-examples/`，新做状态栏时**改造示例远快于从零写引擎**。
+>
+> 🆕 **另一选项——影渲法（ShadowCast，statusbar-shadowcast.md）**：把 UI 渲进 Shadow DOM，markdown 空白条/平台染色/CSS 冲突全免疫（本方案那些防御补丁都不需要），含固态+情境双轨代谢，有生成器。二者数据恢复地基相同（扫历史 light DOM）；雷达法成熟、示例多、支持嗅探未知键名，影渲法隔离更干净、维护更省。追求干净隔离选影渲法，需嗅探涌现选雷达法。
 
 > ⚠️ **载体红线（当前 MMD 实测）：per-message 状态栏引擎只能用 `<img onerror>`，不能用 `<script>`。** 即便当前 MMD 已解禁 `<script>`，把雷达引擎改成 `<script>` 载体会导致**状态栏整块空白**——原因：①`<script>` 拿不到自身位置（`document.currentScript` 在 MMD 不可用），无法 per-message 自定位；②同一段 `<script>` 只加载一次（官方原文），每条消息带同一份引擎会被去重、不逐条执行。`<script>` 仅适合定义 `window.__fn` 供 onclick 调（交互），不适合自渲染。详见 ../platforms/mmd.md §4。
 

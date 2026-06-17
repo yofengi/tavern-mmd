@@ -80,8 +80,49 @@ def load_json(rawb):
 
 # ============ 平台红线检查（作用于解析后的 HTML/JS 字符串） ============
 
+def _extract_event_handler_bodies(s):
+    """提取所有 onerror=/onclick= 属性值（JS 代码体），返回 [(attr_name, body), ...]。
+    尊重引号边界：onerror="..." 或 onerror='...'，取引号内整段。"""
+    out = []
+    for m in re.finditer(r"\b(onerror|onclick)\s*=\s*(\"|')", s, re.I):
+        attr = m.group(1).lower()
+        quote = m.group(2)
+        start = m.end()
+        end = s.find(quote, start)
+        if end == -1:
+            continue
+        out.append((attr, s[start:end]))
+    return out
+
+
+def check_onerror_inner_quote(s, platform, where):
+    """onerror="..." 双引号包裹时，内部 JS 禁裸双引号——会提前闭合属性、破坏 img 结构、
+    引擎不绑定 → 面板静默不渲染（不爆代码但完全不显示）。2026-06-17 浏览器+MMD 实机
+    三组对照确认的唯一引号红线。修法：内部字符串全用单引号，CFG/CSS 用单引号 JS 字面量
+    序列化（非 json.dumps）。仅 MMD 系平台（onerror 是注入载体）。
+    注：裸 < > => 在 onerror 引号内经实机证实无害（HTML 属性值不解析标签；雷达法引擎
+    满是 i<n/c>0 实战正常），不在此检查——曾误立的"禁裸 <>"已撤销。"""
+    if platform not in ("oldmmd", "mmd"):
+        return
+    bad = 0
+    for m in re.finditer(r'onerror="', s):
+        start = m.end()
+        endm = re.search(r'">', s[start:])
+        if not endm:
+            continue
+        body = s[start:start + endm.start()]
+        bad += body.count('"')
+    if bad > 0:
+        err('%s onerror="" 内部含 %d 个裸双引号——会提前闭合属性、img 结构破坏、'
+            '引擎不绑定、面板静默不渲染。内部字符串改单引号，CFG/CSS 用单引号 JS '
+            '字面量序列化（勿用 json.dumps）。' % (where, bad))
+
+
 def check_platform_redlines(s, platform, where):
     """s: 待检字符串（如 replaceString 解析后的值）。where: 来源描述。"""
+    # onerror="" 内部裸双引号（影渲法 demo 实机踩出的真红线）
+    check_onerror_inner_quote(s, platform, where)
+
     # <script> 标签
     if re.search(r"<script\b", s, re.I):
         if platform == "oldmmd":
@@ -125,18 +166,28 @@ def check_platform_redlines(s, platform, where):
 
 
 def check_double_escape(s, where):
-    """检查解析后的 HTML 是否残留多余反斜杠（双重转义典型症状）。"""
+    """检查解析后的 HTML 是否残留多余反斜杠（双重转义典型症状）。
+
+    真信号=`\\"`/`\\'`（属性引号被转义两次）→ err。
+    裸反斜杠数量对含 JS 载体（onerror/onclick）的正则是噪音——影渲法/雷达法引擎的
+    正则字面量 \\d \\s \\/ 本就有反斜杠，不报 WARN；仅纯美化 HTML（无事件处理器）
+    出现裸反斜杠才提示。"""
     bs = s.count("\\")
     if bs == 0:
         ok("%s 无残留反斜杠（无双重转义）" % where)
         return
-    # 反斜杠后紧跟引号 = 典型的属性引号被多转义
+    # 反斜杠后紧跟引号 = 典型的属性引号被多转义（真双重转义，与是否含 JS 无关）
     quote_bs = len(re.findall(r'\\[\"\']', s))
     if quote_bs > 5:
         err("%s 解析后含 %d 处 \\\" 或 \\' ——几乎确定是双重转义（HTML属性引号被转义两次）。"
             "源HTML喂给json.dumps前需先 .replace(chr(92)+chr(34), chr(34)) 还原。" % (where, quote_bs))
+        return
+    # 含 onerror/onclick = JS 载体，反斜杠多为正则字面量，正常
+    has_js = bool(re.search(r"on(error|click)\s*=", s, re.I))
+    if has_js:
+        ok("%s 含 %d 个反斜杠，但为 JS 载体（onerror/onclick）的正则字面量，正常" % (where, bs))
     elif bs > 0:
-        warn("%s 解析后含 %d 个反斜杠——若为纯美化HTML通常应为0，请确认是否JS正则确需反斜杠。" % (where, bs))
+        warn("%s 解析后含 %d 个反斜杠——纯美化HTML通常应为0，请确认是否双重转义。" % (where, bs))
 
 
 def check_interactive_event_newlines(s, where, platform):
@@ -201,7 +252,12 @@ def _parse_findregex(fr):
 
 
 def check_dangling_markers(obj, scripts):
-    """statusbar/beginning 中的自定义 <标记> 必须被 findRegex 消费，否则会裸露。"""
+    """statusbar/beginning 中的自定义 <标记> 必须被 findRegex 消费，否则会裸露。
+
+    判据=标记在 hay 中的位置是否落入某条 findRegex 的实际匹配区间。
+    （旧逻辑用裸标记 `<g3>` 去 rx.search 试探，对"整段匹配型" findRegex 如
+    /<g3>([\\s\\S]*?)<\\/g3>/ 会误判悬空——影渲法/雷达法常用整段匹配。改为在
+    整段 hay 上跑 finditer 收集覆盖区间，标记落入即被消费。）"""
     if not isinstance(obj, dict):
         return
     hay = ""
@@ -212,7 +268,7 @@ def check_dangling_markers(obj, scripts):
     if not hay:
         return
     literals = set()
-    regexes = []
+    covered = []          # findRegex 在 hay 上的实际匹配区间 [(start,end),...]
     for sc in scripts:
         if not isinstance(sc, dict):
             continue
@@ -222,8 +278,17 @@ def check_dangling_markers(obj, scripts):
         rx = _parse_findregex(fr)
         if rx is None:
             literals.add(fr)
+            # 字面量 findRegex：收集其在 hay 中所有出现区间
+            start = 0
+            while True:
+                idx = hay.find(fr, start)
+                if idx == -1:
+                    break
+                covered.append((idx, idx + len(fr)))
+                start = idx + len(fr)
         else:
-            regexes.append(rx)
+            for mm in rx.finditer(hay):
+                covered.append((mm.start(), mm.end()))
     seen = set()
     for m in re.finditer(r"<([A-Za-z一-鿿][A-Za-z0-9_.\-一-鿿]*)>", hay):
         marker = m.group(0)
@@ -231,9 +296,9 @@ def check_dangling_markers(obj, scripts):
         if name in HTML_TAGS or marker in seen:
             continue
         seen.add(marker)
-        if marker in literals:
-            continue
-        if any(rx.search(marker) for rx in regexes):
+        # 标记位置落入任一 findRegex 匹配区间 = 被消费
+        pos = m.start()
+        if any(s <= pos < e for s, e in covered):
             continue
         err("悬空标记 %s：出现在 statusbar/beginning 中但无对应 findRegex 消费，渲染时会裸露。" % marker)
 
