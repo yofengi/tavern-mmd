@@ -236,3 +236,18 @@ replaceString:
 2. 用映射表（style-system.md 第1节）把风格 palettes.md 色板填进 `--lb/--lc/...`。
 3. 圆角/边框/阴影/装饰按 layout-ui.md、decoration.md 该风格取值；日/夜双版用风格的 light/dark 两套色板分别填 `body.z-enabled` 与 `body.z-enabled.z-dark-mode`。
 4. 单点微调按 style-system.md 第5节覆盖协议。
+
+---
+
+## 现成范例
+
+完整可用的全局美化方案见 `assets/global-beautify-examples/`：
+
+- **[mmd-daytime-refined.md](../../assets/global-beautify-examples/mmd-daytime-refined.md)**：MMD 日间模式（米白+酒红），覆盖全界面（聊天页+模型设置+用户人设+对话设置+设定补充+分享页+滚轮+开关），含 MutationObserver 清污引擎 + 引号修复，拿来即用。配色通过 10 个 CSS 变量驱动，换主题只需改变量值。三段式架构：
+  1. 全局美化 CSS（1000+ 行，uni-app 类名覆盖）
+  2. 清污引擎（MutationObserver 常驻监听，自动移除 MMD 原生日夜模式残留污染）
+  3. 引号修复（TreeWalker 遍历文本节点，修复双左引号 bug + 接管 MMD 引号高亮）
+
+这些范例是「交钥匙工程」，可直接导入 MMD 正则系统；本文档（global-css.md）是「方法论指导」，教你从零设计自己的方案。两者互补：范例提供即用成品，文档提供设计能力。
+
+**模块化组件**：清污引擎已提取为独立模块 `assets/global-beautify-examples/mmd_cleanup_core.js`（183 行，含详细注释），所有 MMD 全局美化方案都可复用。
