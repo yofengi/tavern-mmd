@@ -60,32 +60,32 @@ def _paint(css):
 
 
 BALL_CSS = _paint(
-    ".ball{position:fixed;left:18px;bottom:96px;width:50px;height:50px;border-radius:50%;"
+    ".zsf-ball{position:fixed;left:18px;bottom:96px;width:50px;height:50px;border-radius:50%;"
     "background:@accent@;color:#fff;display:flex;align-items:center;justify-content:center;"
     "font-size:22px;z-index:2147483647;cursor:grab;box-shadow:0 3px 12px rgba(0,0,0,.4);"
     "touch-action:none;user-select:none}"
-    ".menu{position:fixed;display:none;background:@bg@;border:1px solid @accent@;"
+    ".zsf-menu{position:fixed;display:none;background:@bg@;border:1px solid @accent@;"
     "border-radius:8px;padding:6px;z-index:2147483647;min-width:140px;"
     "box-shadow:0 4px 16px rgba(0,0,0,.4)}"
-    ".menu.open{display:block}"
-    ".mi{padding:8px 10px;border-radius:6px;color:@fg@;font-size:13px;cursor:pointer;"
+    ".zsf-menu.open{display:block}"
+    ".zsf-mi{padding:8px 10px;border-radius:6px;color:@fg@;font-size:13px;cursor:pointer;"
     "white-space:nowrap;font-family:system-ui,sans-serif}"
-    ".mi:hover{background:@bg2@}"
+    ".zsf-mi:hover{background:@bg2@}"
 )
 
 DRAWER_CSS = _paint(
-    ".sbtn{position:fixed;right:0;top:32%;background:@bg@;color:@fg@;border:1px solid @accent@;"
+    ".zsf-sbtn{position:fixed;right:0;top:32%;background:@bg@;color:@fg@;border:1px solid @accent@;"
     "border-right:none;padding:10px 7px;border-radius:8px 0 0 8px;z-index:2147483646;"
     "cursor:pointer;font-size:18px;box-shadow:-2px 2px 10px rgba(0,0,0,.3)}"
-    ".drawer{position:fixed;right:0;top:0;height:100%;width:250px;background:@bg@;color:@fg@;"
+    ".zsf-drawer{position:fixed;right:0;top:0;height:100%;width:250px;background:@bg@;color:@fg@;"
     "border-left:1px solid @accent@;z-index:2147483645;transform:translateX(100%);"
     "transition:transform .35s ease;padding:48px 16px 16px;box-sizing:border-box;"
     "overflow-y:auto;font-family:system-ui,sans-serif}"
-    ".drawer.open{transform:translateX(0)}"
-    ".dtitle{color:@accent@;font-weight:700;font-size:16px;margin-bottom:14px;"
+    ".zsf-drawer.open{transform:translateX(0)}"
+    ".zsf-dtitle{color:@accent@;font-weight:700;font-size:16px;margin-bottom:14px;"
     "border-bottom:1px solid @border@;padding-bottom:8px}"
-    ".di{padding:9px 6px;border-radius:6px;font-size:13px;cursor:pointer;margin-bottom:4px}"
-    ".di:hover{background:@bg2@}"
+    ".zsf-di{padding:9px 6px;border-radius:6px;font-size:13px;cursor:pointer;margin-bottom:4px}"
+    ".zsf-di:hover{background:@bg2@}"
 )
 
 
@@ -121,20 +121,40 @@ def build_ball_engine():
 
     return """(function(img){
 if(document.getElementById('zsf-ball-wrap')){img.remove();return;}
+var us=String.fromCharCode(95);
+var CSS=""" + css + """;
 var wrap=document.createElement('div');
 wrap.id='zsf-ball-wrap';
-var sr=wrap.attachShadow({mode:'open'});
+var shadowOf=function(b){
+try{return b.shadowRoot||(b.attachShadow?b.attachShadow({mode:'open'}):null);}
+catch(e){return null;}
+};
+var styleLight=function(){
+var key=us+'zsfBallCss';
+if(window[key])return;
+var s=document.createElement('style');
+s.textContent=CSS;
+(document.head||document.body).appendChild(s);
+window[key]=1;
+};
+var sr=shadowOf(wrap),mount;
+if(sr){
 var st=document.createElement('style');
-st.textContent=""" + css + """;
+st.textContent=CSS;
 sr.appendChild(st);
+mount=sr;
+}else{
+styleLight();
+mount=wrap;
+}
 var ball=document.createElement('div');
-ball.className='ball';
+ball.className='zsf-ball';
 ball.textContent=""" + ball_text + """;
-sr.appendChild(ball);
+mount.appendChild(ball);
 var menu=document.createElement('div');
-menu.className='menu';
+menu.className='zsf-menu';
 menu.onclick=function(ev){ev.stopPropagation();};
-sr.appendChild(menu);
+mount.appendChild(menu);
 var LB=String.fromCharCode(91),RB=String.fromCharCode(93);
 var labels=""" + labels + """;
 var actions=""" + actions + """;
@@ -146,13 +166,14 @@ if(t){t.value=(t.value||'')+txt;t.dispatchEvent(new Event('input',{bubbles:true}
 };
 labels.forEach(function(lab,idx){
 var mi=document.createElement('div');
-mi.className='mi';
+mi.className='zsf-mi';
 mi.textContent=lab;
 mi.onclick=function(ev){
 ev.stopPropagation();
 if(drawers[idx]){
 var dw=document.getElementById('zsf-drawer-wrap');
-if(dw&&dw.shadowRoot){var d=dw.shadowRoot.querySelector('.drawer');if(d)d.classList.add('open');}
+var dsr=dw?(dw.shadowRoot||dw):null;
+if(dsr){var d=dsr.querySelector('.zsf-drawer');if(d)d.classList.add('open');}
 }else if(actions[idx]){fillInput(actions[idx]);}
 menu.classList.remove('open');
 };
@@ -220,32 +241,52 @@ def build_drawer_engine():
 
     return """(function(img){
 if(document.getElementById('zsf-drawer-wrap')){img.remove();return;}
+var us=String.fromCharCode(95);
+var CSS=""" + css + """;
 var wrap=document.createElement('div');
 wrap.id='zsf-drawer-wrap';
-var sr=wrap.attachShadow({mode:'open'});
+var shadowOf=function(b){
+try{return b.shadowRoot||(b.attachShadow?b.attachShadow({mode:'open'}):null);}
+catch(e){return null;}
+};
+var styleLight=function(){
+var key=us+'zsfDrawerCss';
+if(window[key])return;
+var s=document.createElement('style');
+s.textContent=CSS;
+(document.head||document.body).appendChild(s);
+window[key]=1;
+};
+var sr=shadowOf(wrap),mount;
+if(sr){
 var st=document.createElement('style');
-st.textContent=""" + css + """;
+st.textContent=CSS;
 sr.appendChild(st);
+mount=sr;
+}else{
+styleLight();
+mount=wrap;
+}
 var drawer=document.createElement('div');
-drawer.className='drawer';
+drawer.className='zsf-drawer';
 drawer.onclick=function(ev){ev.stopPropagation();};
 var ti=document.createElement('div');
-ti.className='dtitle';
+ti.className='zsf-dtitle';
 ti.textContent=""" + title + """;
 drawer.appendChild(ti);
 var items=""" + items + """;
 items.forEach(function(txt){
 var di=document.createElement('div');
-di.className='di';
+di.className='zsf-di';
 di.textContent=txt;
 drawer.appendChild(di);
 });
 var btn=document.createElement('div');
-btn.className='sbtn';
+btn.className='zsf-sbtn';
 btn.textContent='☰';
 btn.onclick=function(ev){ev.stopPropagation();drawer.classList.toggle('open');};
-sr.appendChild(drawer);
-sr.appendChild(btn);
+mount.appendChild(drawer);
+mount.appendChild(btn);
 document.body.appendChild(wrap);
 img.remove();
 })(this)"""

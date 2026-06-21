@@ -150,7 +150,7 @@ def check_platform_redlines(s, platform, where):
             if platform == "oldmmd":
                 err("%s 含 ES6+ 语法: %s——旧版MMD会从该处截断，后续代码丢失。" % (where, "、".join(es6)))
             else:
-                ok("%s 含 ES6+ 语法: %s——当前MMD实测全支持（img载体下），推荐ES6。" % (where, "、".join(es6)))
+                ok("%s 含 ES6+ 语法: %s——当前MMD实测全支持（img载体下）。" % (where, "、".join(es6)))
         else:
             ok("%s 全 ES5" % where)
 
@@ -168,25 +168,29 @@ def check_platform_redlines(s, platform, where):
 def check_double_escape(s, where):
     """检查解析后的 HTML 是否残留多余反斜杠（双重转义典型症状）。
 
-    真信号=`\\"`/`\\'`（属性引号被转义两次）→ err。
-    裸反斜杠数量对含 JS 载体（onerror/onclick）的正则是噪音——影渲法/雷达法引擎的
-    正则字面量 \\d \\s \\/ 本就有反斜杠，不报 WARN；仅纯美化 HTML（无事件处理器）
-    出现裸反斜杠才提示。"""
+    真信号=`\\"`/`\\'`（属性引号被转义两次）→ err，但**仅对非 JS 载体**成立。
+    含 onerror/onclick 的 JS 载体里，`\\'`/`\\"` 是合法的 JS 字符串转义（如单引号
+    字符串内的 CSS `content:''` 或字体名 `'Songti SC'` 必写成 `\\'`），不是属性引号
+    双重转义——故先判 has_js 放行，再对纯美化 HTML 用 quote_bs 判真双重转义。
+    （2026 实测：富交互状态栏的 CSS content/字体引号 >5 处曾被误报，此处修正判断顺序。）"""
     bs = s.count("\\")
     if bs == 0:
         ok("%s 无残留反斜杠（无双重转义）" % where)
         return
-    # 反斜杠后紧跟引号 = 典型的属性引号被多转义（真双重转义，与是否含 JS 无关）
+    # 含 onerror/onclick = JS 载体：内部字符串/正则字面量的 \" \' \d \s \/ 均为合法
+    # JS 转义，不是 HTML 属性引号双重转义。须先于 quote_bs 判断（否则 JS 载体里 >5 个
+    # 合法 \' 会被误判为双重转义）。
+    has_js = bool(re.search(r"on(error|click)\s*=", s, re.I))
+    if has_js:
+        ok("%s 含 %d 个反斜杠，但为 JS 载体（onerror/onclick）的字符串/正则字面量，正常" % (where, bs))
+        return
+    # 非 JS 载体（纯美化 HTML）：反斜杠后紧跟引号 = 属性引号被多转义（真双重转义）
     quote_bs = len(re.findall(r'\\[\"\']', s))
     if quote_bs > 5:
         err("%s 解析后含 %d 处 \\\" 或 \\' ——几乎确定是双重转义（HTML属性引号被转义两次）。"
             "源HTML喂给json.dumps前需先 .replace(chr(92)+chr(34), chr(34)) 还原。" % (where, quote_bs))
         return
-    # 含 onerror/onclick = JS 载体，反斜杠多为正则字面量，正常
-    has_js = bool(re.search(r"on(error|click)\s*=", s, re.I))
-    if has_js:
-        ok("%s 含 %d 个反斜杠，但为 JS 载体（onerror/onclick）的正则字面量，正常" % (where, bs))
-    elif bs > 0:
+    if bs > 0:
         warn("%s 解析后含 %d 个反斜杠——纯美化HTML通常应为0，请确认是否双重转义。" % (where, bs))
 
 
@@ -303,6 +307,34 @@ def check_dangling_markers(obj, scripts):
         err("悬空标记 %s：出现在 statusbar/beginning 中但无对应 findRegex 消费，渲染时会裸露。" % marker)
 
 
+def check_shadowcast(s, platform, where):
+    """影渲法（ShadowCast）写法识别。仅 MMD 系平台。
+
+    - 含 attachShadow = 影渲法引擎。2.0 起要求 shadow→light DOM 降级链：
+      attachShadow 不可用环境（旧 WebView/平台禁用）应回退 light DOM，否则面板静默消失。
+    - 判据：attachShadow 调用应被 try/catch 或三元守卫包裹（shadowOf 模式
+      `b.shadowRoot||(b.attachShadow?b.attachShadow(...):null)`），且存在 light 兜底
+      （document 注 style + 非 shadow 挂载）。裸 attachShadow 无守卫 → 警告（1.0 隐患）。
+    """
+    if platform not in ("oldmmd", "mmd"):
+        return
+    if "attachShadow" not in s:
+        return
+    # 守卫信号：三元探测（attachShadow? ... :）或 try/catch 包裹 + shadowRoot 复用
+    has_ternary_guard = bool(re.search(r"attachShadow\s*\?", s))
+    has_reuse = "shadowRoot" in s            # 复用已有 shadow（幂等）
+    # 兜底信号：adoptedStyleSheets 或 document 注 style 的 light 路径
+    has_adopted = "adoptedStyleSheets" in s
+    guarded = has_ternary_guard and has_reuse
+    if guarded:
+        extra = "，adoptedStyleSheets 缓存样式" if has_adopted else ""
+        ok("%s 影渲法 2.0 写法：attachShadow 带降级守卫（shadow→light DOM 兜底）%s。" % (where, extra))
+    else:
+        warn("%s 含 attachShadow 但未见降级守卫（shadowOf 三元探测 + shadowRoot 复用）——"
+             "影渲法 1.0 隐患：attachShadow 不可用环境会抛错致面板静默消失。"
+             "升级为 `b.shadowRoot||(b.attachShadow?b.attachShadow({mode:'open'}):null)` + light DOM 兜底。" % where)
+
+
 def validate_regex(obj, platform):
     """MMD 导入json(4字段) 或 本地酒馆正则数组。"""
     scripts = []
@@ -364,6 +396,7 @@ def validate_regex(obj, platform):
             check_platform_redlines(rs, platform, tag)
             check_double_escape(rs, tag)
             check_interactive_event_newlines(rs, tag, platform)
+            check_shadowcast(rs, platform, tag)
             # 容器事件冒泡（仅含交互的美化/状态栏需要）
             if platform in ("oldmmd", "mmd") and re.search(r"onclick=", rs):
                 if "stopPropagation" not in rs:

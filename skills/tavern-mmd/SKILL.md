@@ -49,7 +49,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 世界书JSON输出 | `references/output/worldbook-json.md` |
 | 正则产出（json/MMD导入json/手填清单） | `references/output/regex-output.md` |
 | 雷达法现成示例资产 | `assets/radar-examples/`（西幻RPG状态栏、日夜主题全局美化集成案例） |
-| 影渲法（ShadowCast）现成资产 | `assets/shadowcast-examples/`（状态栏+悬浮球+侧边栏成品 json、生成器 build_demo.py/build_float.py、README；改字段重新生成或直接改造成品） |
+| 影渲法（ShadowCast）现成资产 | `assets/shadowcast-examples/`（状态栏+悬浮球+侧边栏成品 json、生成器 build_demo.py/build_float.py、README；改字段重新生成或直接改造成品）。**富 UI 状态栏**（RPG/养成：面包屑/资源条tooltip/XP条/属性网格/装备说明/可切页背包/敌人卡/可点选项写回输入框）用同目录 `shadowcast_core.py` 共享引擎 + `build_rpg.py`/`build_manor.py` 场景脚本（雷达法移植，12种字段类型，含 rpg/manor 两套成品 json+蓝灯世界书） |
 | 交付前自检 | `references/quality/checklist.md` |
 
 按需读取，不要一次全读。技术产出必读对应平台文档；写正文必读 creation/character.md 的写作规则节。

@@ -11,11 +11,12 @@
 
 架构(8靶全绿实测支撑,见 mmd.md §6b)：
   数据留 light DOM 隐藏 span → img onerror 读取(+扫历史折叠兜底)
-  → attachShadow 复用幂等 → createElement 渲进 shadow(隔离/不过 markdown)
+  → shadowOf 降级链(attachShadow 不可用退 light DOM) → adoptedStyleSheets 缓存
+  → 事务式渲染(建好再挂载,异常回退纯净态) → alias 归一化
   → 模型每轮吐全量快照(per-message 无跨气泡状态)
 
 用法:
-  python build_demo.py              # 生成 g3-statusbar.mmd.json + 协议.md
+  python build_demo.py              # 生成 状态栏-影渲法.mmd.json + 状态栏-模型侧协议.md
   python build_demo.py --check      # 只跑一致性断言与 JSON 校验,不写文件
 
 退出码: 0=成功  1=断言/校验失败  2=用法错误
@@ -43,6 +44,7 @@ FIELDS = [
         "format": "当前/最大",
         "example": "85/100",
         "inherit": True,
+        "aliases": ["HP", "生命", "血量"],   # 模型写法归一化：都映射到标准 key
     },
     {
         "key": "mood",
@@ -51,6 +53,7 @@ FIELDS = [
         "format": "一个词或短语",
         "example": "害羞",
         "inherit": True,
+        "aliases": ["心情", "情绪"],
     },
     {
         "key": "loc",
@@ -59,6 +62,7 @@ FIELDS = [
         "format": "地点名",
         "example": "书房",
         "inherit": True,
+        "aliases": ["地点", "位置", "场景"],
     },
     {
         "key": "npc",
@@ -67,6 +71,7 @@ FIELDS = [
         "format": "名|好感:数值,名2|好感:数值2",
         "example": "茜|好感:15,真红|好感:-20",
         "inherit": True,
+        "aliases": ["在场角色", "角色", "NPC"],
     },
     {
         "key": "fight",
@@ -79,27 +84,33 @@ FIELDS = [
         # 防高刺激数据残留污染上下文。数据层 light span 仍在历史可追溯。
         "volatile": True,
         "example_off": True,      # 测试开场白默认不带它（演示非战斗态）
+        "aliases": ["遭遇", "战斗", "敌方", "敌"],
     },
 ]
 
 TRIGGER = "g3"  # 模型输出标记 <g3>...</g3>
 
-# shadow 内 CSS（隔离，无需 z- 前缀/无需防 markdown 补丁）
+# 面板 CSS。类名全程 g3- 前缀 → shadow 路径隔离不需要前缀，但 2.0 的 light DOM
+# 兜底路径（attachShadow 不可用时）样式注入 document，前缀保证零冲突。
+# 两路共用同一份 CSS：shadow 路径 :host{all:initial} 重置生效；light 路径 :host
+# 在 document <style> 内被忽略（无害），故 .g3-panel 自带完整 font/bg/color 自洽。
 SHADOW_CSS = (
     ":host{all:initial}"
-    ".panel{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;"
-    "border:1px solid #30363d;border-radius:12px;padding:14px;margin:8px 0}"
-    ".row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px}"
-    ".lbl{color:#8b949e;width:64px;flex-shrink:0;font-size:12px}"
-    ".val{color:#e6edf3;flex:1}"
-    ".bar{flex:1;height:6px;background:#161b22;border-radius:3px;overflow:hidden}"
-    ".fill{height:100%;background:linear-gradient(90deg,#3fb950,#2ed573);border-radius:3px}"
-    ".num{color:#8b949e;font-size:12px;width:64px;text-align:right;flex-shrink:0}"
-    ".npcs{display:flex;flex-wrap:wrap;gap:6px;flex:1}"
-    ".npc{background:#161b22;border:1px solid #30363d;border-radius:6px;"
+    ".g3-panel{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;"
+    "border:1px solid #30363d;border-radius:12px;padding:14px;margin:8px 0;"
+    "box-sizing:border-box}"
+    ".g3-panel *{box-sizing:border-box}"
+    ".g3-row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px}"
+    ".g3-lbl{color:#8b949e;width:64px;flex-shrink:0;font-size:12px}"
+    ".g3-val{color:#e6edf3;flex:1}"
+    ".g3-bar{flex:1;height:6px;background:#161b22;border-radius:3px;overflow:hidden}"
+    ".g3-fill{height:100%;background:linear-gradient(90deg,#3fb950,#2ed573);border-radius:3px}"
+    ".g3-num{color:#8b949e;font-size:12px;width:64px;text-align:right;flex-shrink:0}"
+    ".g3-npcs{display:flex;flex-wrap:wrap;gap:6px;flex:1}"
+    ".g3-npc{background:#161b22;border:1px solid #30363d;border-radius:6px;"
     "padding:4px 8px;font-size:12px}"
-    ".npc b{color:#58a6ff;font-weight:500}"
-    ".pos{color:#3fb950}.neg{color:#f85149}"
+    ".g3-npc b{color:#58a6ff;font-weight:500}"
+    ".g3-pos{color:#3fb950}.g3-neg{color:#f85149}"
 )
 
 
@@ -138,14 +149,44 @@ def build_engine_js():
     cfg_literal = js_literal(cfg)
     css_literal = js_literal(SHADOW_CSS)
 
+    # key 同义词归一化表（吸收哨兵雷达法 norm() 思想，但仍 schema 驱动、单一真相源）：
+    # 模型若写 HP/生命/血量 等别名，引擎归一回标准 key（hp）。映射键全小写，
+    # 引擎读取时把解析出的 key 小写后查表，命中则替换为标准 key。标准 key 自身也
+    # 入表（小写自映射）。别名在 FIELDS 一处声明，不破坏三方键名断言（断言比的是
+    # 标准 key，别名只是输入侧容错）。
+    alias_map = {}
+    for f in FIELDS:
+        std = f["key"]
+        alias_map[std.lower()] = std
+        for a in f.get("aliases", []):
+            alias_map[a.lower()] = std
+    alias_literal = js_literal(alias_map)
+
     # 注意：整段是 onerror 属性值（外层双引号）。注入的 CFG/CSS 必须用单引号 JS
     # 字面量，绝不能用 json.dumps（双引号会与外层 onerror="" 撞引号、提前闭合属性、
     # 导致 img 结构破坏、引擎不绑定、面板静默不渲染）。详见 js_literal。
     # 引擎其余字符串字面量全程单引号；无 innerHTML 字符串拼接。
+    #
+    # ShadowCast 2.0 三项强化（吸收哨兵雷达法 sd3 卡【280366】实测优点）：
+    #   1) shadowOf() 探测降级：attachShadow 不可用的环境（旧 WebView / 平台禁用）
+    #      回退 light DOM 渲染，面板照常显示，不再静默消失。
+    #   2) applyCss() 用 adoptedStyleSheets + 跨气泡缓存单张 sheet（多条消息共享，
+    #      不每条都塞 <style>）；不支持则退 <style> 节点。
+    #   3) 事务式渲染：先在内存里把 panel 整段建好，最后一步才挂载；任何异常
+    #      catch 后回退纯净态（移除半成品 + 记录 window.g3LastError），
+    #      绝不留下破碎 UI（对应影渲法"异常显性化"原则）。
     engine = """(function(img){
 var box=img.closest('.""" + TRIGGER + """-host');
 if(!box)return;
+var us=String.fromCharCode(95);
+var VER='sc2';
 var CFG=""" + cfg_literal + """;
+var CSS=""" + css_literal + """;
+var ALIAS=""" + alias_literal + """;
+var normKey=function(k){
+var n=ALIAS[k.toLowerCase()];
+return n?n:k;
+};
 var read=function(host){
 var d=host.querySelector('.""" + TRIGGER + """-data');
 var o={};
@@ -154,7 +195,7 @@ d.textContent.split(';').forEach(function(pair){
 var i=pair.indexOf('=');
 if(i===-1)return;
 var k=pair.slice(0,i).trim();
-if(k)o[k]=pair.slice(i+1).trim();
+if(k)o[normKey(k)]=pair.slice(i+1).trim();
 });
 return o;
 };
@@ -172,22 +213,18 @@ return false;
 });
 }
 });
-var sr=box.shadowRoot||box.attachShadow({mode:'open'});
-while(sr.firstChild)sr.removeChild(sr.firstChild);
-var st=document.createElement('style');
-st.textContent=""" + css_literal + """;
-sr.appendChild(st);
-var panel=document.createElement('div');
-panel.className='panel';
 var mkRow=function(labelTxt){
 var r=document.createElement('div');
-r.className='row';
+r.className='""" + TRIGGER + """-row';
 var l=document.createElement('span');
-l.className='lbl';
+l.className='""" + TRIGGER + """-lbl';
 l.textContent=labelTxt;
 r.appendChild(l);
 return r;
 };
+var buildPanel=function(){
+var panel=document.createElement('div');
+panel.className='""" + TRIGGER + """-panel';
 CFG.forEach(function(f){
 var v=cur[f.k];
 if(v===undefined||v==='')return;
@@ -196,9 +233,9 @@ if(f.type==='bar'){
 var m=v.match(/^(-?\\d+)\\s*\\/\\s*(\\d+)/);
 var r=mkRow(f.label);
 var bar=document.createElement('div');
-bar.className='bar';
+bar.className='""" + TRIGGER + """-bar';
 var fill=document.createElement('div');
-fill.className='fill';
+fill.className='""" + TRIGGER + """-fill';
 if(m){
 var pct=Math.max(0,Math.min(100,parseInt(m[1],10)/parseInt(m[2],10)*100));
 fill.style.width=pct+'%';
@@ -206,20 +243,20 @@ fill.style.width=pct+'%';
 bar.appendChild(fill);
 r.appendChild(bar);
 var num=document.createElement('span');
-num.className='num';
+num.className='""" + TRIGGER + """-num';
 num.textContent=v;
 r.appendChild(num);
 panel.appendChild(r);
 }else if(f.type==='list'){
 var r2=mkRow(f.label);
 var box2=document.createElement('div');
-box2.className='npcs';
+box2.className='""" + TRIGGER + """-npcs';
 v.split(',').forEach(function(item){
 var parts=item.split('|');
 var name=(parts[0]||'').trim();
 if(!name)return;
 var chip=document.createElement('div');
-chip.className='npc';
+chip.className='""" + TRIGGER + """-npc';
 var nb=document.createElement('b');
 nb.textContent=name;
 chip.appendChild(nb);
@@ -227,7 +264,7 @@ if(parts[1]){
 var fm=parts[1].match(/(-?\\d+)/);
 var sp=document.createElement('span');
 sp.textContent=' '+parts[1].trim();
-if(fm){sp.className=fm[1].charAt(0)==='-'?'neg':'pos';}
+if(fm){sp.className=fm[1].charAt(0)==='-'?'""" + TRIGGER + """-neg':'""" + TRIGGER + """-pos';}
 chip.appendChild(sp);
 }
 box2.appendChild(chip);
@@ -237,7 +274,7 @@ panel.appendChild(r2);
 }else{
 var r3=mkRow(f.label);
 var s=document.createElement('span');
-s.className='val';
+s.className='""" + TRIGGER + """-val';
 s.textContent=v;
 r3.appendChild(s);
 panel.appendChild(r3);
@@ -245,13 +282,66 @@ panel.appendChild(r3);
 }catch(e){
 var er=mkRow(f.label);
 var es=document.createElement('span');
-es.className='val';
+es.className='""" + TRIGGER + """-val';
 es.textContent=v;
 er.appendChild(es);
 panel.appendChild(er);
 }
 });
+return panel;
+};
+var shadowOf=function(b){
+try{return b.shadowRoot||(b.attachShadow?b.attachShadow({mode:'open'}):null);}
+catch(e){return null;}
+};
+var clearNode=function(n){while(n&&n.firstChild)n.removeChild(n.firstChild);};
+var applyCss=function(sr){
+if(sr.adoptedStyleSheets!==undefined&&window.CSSStyleSheet){
+try{
+var key=us+'""" + TRIGGER + """Sheet';
+var sh=window[key];
+if(!sh){sh=new CSSStyleSheet();sh.replaceSync(CSS);window[key]=sh;}
+sr.adoptedStyleSheets=[sh];
+return;
+}catch(e){}
+}
+var st=document.createElement('style');
+st.textContent=CSS;
+sr.appendChild(st);
+};
+var styleLight=function(){
+var key=us+'""" + TRIGGER + """LightCss';
+if(window[key])return;
+var st=document.createElement('style');
+st.textContent=CSS;
+(document.head||document.body).appendChild(st);
+window[key]=1;
+};
+var resetPlain=function(){
+var sr=box.shadowRoot;
+if(sr)clearNode(sr);
+var old=box.querySelector('.""" + TRIGGER + """-panel');
+if(old&&old.parentNode)old.parentNode.removeChild(old);
+box.removeAttribute('data-""" + TRIGGER + """v');
+};
+try{
+var panel=buildPanel();
+var sr=shadowOf(box);
+if(sr){
+clearNode(sr);
+applyCss(sr);
 sr.appendChild(panel);
+}else{
+styleLight();
+var prevPanel=box.querySelector('.""" + TRIGGER + """-panel');
+if(prevPanel&&prevPanel.parentNode)prevPanel.parentNode.removeChild(prevPanel);
+box.appendChild(panel);
+}
+box.setAttribute('data-""" + TRIGGER + """v',VER);
+}catch(e){
+window.""" + TRIGGER + """LastError=e;
+resetPlain();
+}
 })(this)"""
     return engine
 
@@ -290,15 +380,19 @@ def build_protocol_md():
     lines.append("</" + TRIGGER + ">")
     lines.append("```\n")
     lines.append("## 字段表\n")
-    lines.append("| 键名 | 含义 | 格式 | 示例 | 代谢 |")
-    lines.append("|---|---|---|---|---|")
+    lines.append("| 键名 | 含义 | 格式 | 示例 | 代谢 | 可接受别名 |")
+    lines.append("|---|---|---|---|---|---|")
     for f in FIELDS:
         meta = "情境（用完即焚）" if f.get("volatile") else "固态（继承）"
-        lines.append("| `%s` | %s | %s | `%s` | %s |"
-                     % (f["key"], f["label"], f["format"], f["example"], meta))
+        aliases = f.get("aliases", [])
+        alias_txt = "／".join("`%s`" % a for a in aliases) if aliases else "—"
+        lines.append("| `%s` | %s | %s | `%s` | %s | %s |"
+                     % (f["key"], f["label"], f["format"], f["example"], meta, alias_txt))
     lines.append("")
     lines.append("## 铁律")
     lines.append("- 用 `<%s>` 包裹，字段间用 `;` 分隔，键值用 `=`。" % TRIGGER)
+    lines.append("- **推荐用标准键名**（上表第一列）。引擎对别名做归一化容错（写 `HP`/`生命` "
+                 "都会归到 `hp`），但标准键名最稳，别名仅作兜底，不要刻意发散。")
     lines.append("- **固态字段每轮必出**（panel 无跨气泡状态、靠每轮全量，缺了引擎才向历史兜底）。")
     volatile_keys = [f["key"] for f in FIELDS if f.get("volatile")]
     if volatile_keys:
@@ -386,7 +480,7 @@ def check_consistency():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="只校验不写文件")
-    ap.add_argument("-o", "--out", default="g3-statusbar.mmd.json")
+    ap.add_argument("-o", "--out", default="状态栏-影渲法.mmd.json")
     args = ap.parse_args()
 
     errs, obj = check_consistency()
@@ -409,7 +503,7 @@ def main():
     import os
     base = os.path.dirname(os.path.abspath(__file__))
     json_path = os.path.join(base, args.out)
-    md_path = os.path.join(base, "协议.md")
+    md_path = os.path.join(base, "状态栏-模型侧协议.md")
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=True, indent=2)

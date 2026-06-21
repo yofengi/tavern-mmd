@@ -1,16 +1,33 @@
-# 影渲法（ShadowCast）现成资产
+# 影渲法（ShadowCast 2.0）现成资产
 
 Shadow DOM 隔离动态渲染的可运行示例与生成器。方法原理见 `../../references/beautify/statusbar-shadowcast.md`。
+
+> **2.0（引擎 VER=`sc2`，浏览器三路验证通过）**：① shadow→light DOM 降级链（attachShadow 不可用环境照常渲染，类名全程 `g3-` 前缀保证 light 路径零冲突）；② `adoptedStyleSheets` + 跨气泡缓存单 sheet；③ 事务式渲染（建好再挂载、异常回退纯净态 + 记 `window.g3LastError`）。来自吸收哨兵雷达法 sd3 卡的工程优点，细节见参考文档「2.0 强化」节。
 
 ## 文件清单
 
 | 文件 | 说明 |
 |---|---|
-| `build_demo.py` | **状态栏生成器**。`FIELDS` 是单一真相源，改字段只动这里 → 自动生成引擎/模型协议/测试数据并断言键名一致 |
+| `build_demo.py` | **简单状态栏生成器**（bar/text/list 三类型）。`FIELDS` 是单一真相源，改字段只动这里 → 自动生成引擎/模型协议/测试数据并断言键名一致 |
 | `build_float.py` | **悬浮组件生成器**。可拖动悬浮球（点击展开菜单）+ 侧边栏抽屉，含跨组件交互（球菜单开侧边栏） |
-| `状态栏-影渲法.mmd.json` | 状态栏成品（MMD 导入 json，4 字段），直接导入即可看 |
+| `状态栏-影渲法.mmd.json` | 简单状态栏成品（MMD 导入 json，4 字段），直接导入即可看 |
 | `悬浮球侧边栏-影渲法.mmd.json` | 悬浮球+侧边栏成品，直接导入 |
-| `状态栏-模型侧协议.md` | 状态栏的模型侧协议（蓝灯条目正文：要求 AI 每轮输出 `<g3>` 数据块） |
+| `状态栏-模型侧协议.md` | 简单状态栏的模型侧协议（蓝灯条目正文：要求 AI 每轮输出 `<g3>` 数据块） |
+| `shadowcast_core.py` | **富 UI 共享引擎**（单一引擎源，雷达法移植）。12 种字段类型，`build_rpg.py`/`build_manor.py` 复用 |
+| `build_rpg.py` | **西幻RPG 富状态栏生成器**（只含 config，引擎复用 core） |
+| `build_manor.py` | **宅邸养成 富状态栏生成器**（只含 config，引擎复用 core） |
+| `rpg-statusbar.mmd.json` + `RPG状态栏协议-蓝灯世界书.json` + `RPG协议.md` | 西幻RPG 成品：渲染正则 + 必配蓝灯协议 + 人读协议 |
+| `manor-statusbar.mmd.json` + `宅邸状态栏协议-蓝灯世界书.json` + `宅邸协议.md` | 宅邸养成 成品：同上 |
+
+### 富 UI 状态栏（雷达法移植）—— `shadowcast_core.py` + `build_rpg.py`/`build_manor.py`
+
+把雷达法（light DOM 重构）的复杂 RPG/养成状态栏完整转进 Shadow DOM，删掉雷达法整套对抗哨兵补丁与信标转换器。`shadowcast_core.py` 提供比 `build_demo.py` 多得多的字段类型，浏览器三路实测全绿：
+
+- **共享引擎 `shadowcast_core.py`**（单一引擎源）含全部富 UI 类型：`path`(面包屑) / `time`(时段高亮) / `bar`(带成因 tooltip) / `level`(XP条) / `stats`(属性网格) / `kvlist`(名↔说明 tooltip) / `lines`(编号记录) / `summary` / `turn`(角标) / `bag`(可切页◀▶) / `enemy`(敌人卡，volatile) / `option`(♥ero + 写回输入框)。
+- **场景脚本 `build_rpg.py` / `build_manor.py`** 只提供 config（FIELDS + 主题 CSS + 标题），引擎全复用 core，改 bug 只动 core。改字段/配色只动场景脚本。
+- 每套产 `*-statusbar.mmd.json`（渲染正则）+ `*-蓝灯世界书.json`（必配 constant=true 协议条目）——**两者必须一起导入，否则模型不持续吐数据块**。
+
+> 想要简单固定面板 → `build_demo.py`（bar/text/list 三类型）。想要 RPG/养成那种富交互 → `shadowcast_core.py` + `build_rpg.py`/`build_manor.py`。
 
 ## 快速用法
 

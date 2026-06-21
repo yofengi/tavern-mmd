@@ -164,6 +164,29 @@ fillTA('请按格式输出：'+F('姓名')+F('职业')+L+'HP=当前/上限'+R+' 
 
 组件 JS 整段塞进 `onerror="…"` 属性。源码里任何 ASCII `"`（哪怕在 `/* 注释 */` 里，如 `核心"切割"质感`）都会提前闭合属性 → 语法错误。**字符串统一用单引号；注释里的引号用全角「」**。打包脚本若不剥离注释，这条尤其致命。
 
+> 下面两条不致渲染失败，但会让交互**看起来卡顿/错乱**，validate 同样查不出，实机/预览拖动时才暴露。
+
+### 3. 可拖动元素禁用 `transition:all`（拖动卡顿根因）
+
+悬浮球常给 hover 加过渡（如太极反色、旋转）。若图省事写 `transition:all .25s`，那么拖动时每帧改的 `left/top` 也会被纳入过渡 → 球用 0.25s 补间"滑"向鼠标位置、永远追不上指针，看起来就是**拖动卡顿/有拖影延迟**。
+
+**避法**：transition 只列**视觉属性**，绝不含 `left`/`top`/`transform`（若 transform 不用于拖动可保留）：
+```css
+/* 错：拖动卡顿 */ .z-fab{transition:all .25s}
+/* 对：位置即时跟手，hover 动画照旧 */ .z-fab{transition:background .25s,color .25s,transform .25s}
+```
+> 位置用 `left/top` 拖动时，transition 里必须排除 `left`/`top`。若用 `transform:translate` 拖动，则排除 `transform`。
+
+### 4. 贴边按钮组容器禁用默认 `align-items:stretch`（hover 一个全变宽）
+
+侧边栏多个贴边按钮常放进 `display:flex;flex-direction:column` 的竖向容器。flex 容器**交叉轴默认 `align-items:stretch`**——某个按钮 `:hover` 变宽（如 `width:44px→52px`）会把容器撑宽，于是**同列其余按钮被 stretch 拉到同宽**，看起来"hover 一个、三个一起动"。
+
+**避法**：容器显式设 `align-items:flex-end`（贴右边栏）或 `flex-start`，让每个按钮**独立宽度**，只有 hover 的那个变宽：
+```css
+/* 错：hover 单个按钮，同列全变宽 */ .z-sidebtns{display:flex;flex-direction:column;gap:8px}
+/* 对：只有 hover 的按钮拉伸 */ .z-sidebtns{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+```
+
 ---
 
 ## 调用清单

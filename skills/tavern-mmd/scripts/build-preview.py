@@ -486,7 +486,7 @@ def apply_platform_limits(rs, platform):
 
 def make_banner(platform, src_name, n):
     labels = {"st": "本地酒馆 SillyTavern（无限制渲染）",
-              "mmd": "当前MMD（支持script/ES6，推荐ES5）",
+              "mmd": "当前MMD（支持script/ES6）",
               "oldmmd": "旧版MMD（禁script/ES5）"}
     return ('<div class="banner banner-%s">预览平台: %s ｜ 来源: %s ｜ %d 个HTML片段</div>'
             % (platform, labels.get(platform, platform), html_mod.escape(src_name), n))
