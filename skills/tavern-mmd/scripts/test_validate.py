@@ -38,6 +38,12 @@ class TestJSON(unittest.TestCase):
         self.assertIsNone(obj)
         self.assertTrue(any("换行" in m for m in v.ERRORS))
 
+    def test_invalid_utf8_is_error(self):
+        reset()
+        obj, _ = v.load_json(b'{"a":"\xff"}')
+        self.assertIsNone(obj)
+        self.assertTrue(any("UTF-8" in m for m in v.ERRORS))
+
 
 class TestDoubleEscape(unittest.TestCase):
     def test_double_escaped_quotes(self):
@@ -81,6 +87,21 @@ class TestPlatformRedlines(unittest.TestCase):
         v.check_platform_redlines("el.innerHTML = '<b>x</b>';", "oldmmd", "测试")
         self.assertTrue(any("innerHTML" in m for m in v.ERRORS))
 
+    def test_onerror_attr_order_not_false_positive(self):
+        reset()
+        v.check_onerror_inner_quote('<img onerror="alert(1)" style="display:none">', "mmd", "测试")
+        self.assertEqual(v.ERRORS, [])
+
+    def test_single_quoted_onerror_may_contain_double_quotes(self):
+        reset()
+        v.check_onerror_inner_quote('<img onerror=\'alert("ok")\'>', "mmd", "测试")
+        self.assertEqual(v.ERRORS, [])
+
+    def test_double_quoted_onerror_with_inner_quote_errors(self):
+        reset()
+        v.check_onerror_inner_quote('<img onerror="alert("bad")">', "mmd", "测试")
+        self.assertTrue(any("裸双引号" in m for m in v.ERRORS))
+
 
 class TestEventNewlines(unittest.TestCase):
     def test_multiline_onclick_oldmmd(self):
@@ -97,6 +118,9 @@ class TestEventNewlines(unittest.TestCase):
 class TestTypeGuess(unittest.TestCase):
     def test_mmd_regex(self):
         self.assertEqual(v.looks_like({"regex_scripts": [], "statusbar": "<x>"}), "regex")
+
+    def test_mmd_regex_missing_statusbar_still_recognized(self):
+        self.assertEqual(v.looks_like({"regex_scripts": []}), "regex")
 
     def test_card(self):
         self.assertEqual(v.looks_like({"spec": "chara_card_v2", "data": {}}), "card")
@@ -174,6 +198,11 @@ class TestRegexNonString(unittest.TestCase):
         ], "statusbar": ""}, "mmd")
         self.assertTrue(any("非字符串" in m for m in v.WARNS))
 
+    def test_regex_scripts_must_be_array(self):
+        reset()
+        v.validate_regex({"regex_scripts": None, "statusbar": "<s>", "beginning": ""}, "mmd")
+        self.assertTrue(any("regex_scripts 应为数组" in m for m in v.ERRORS))
+
 
 class TestWorldbookArrayForm(unittest.TestCase):
     def test_looks_like_recognizes_array_entries(self):
@@ -187,6 +216,22 @@ class TestWorldbookArrayForm(unittest.TestCase):
             {"comment": "蓝灯", "content": "<style>.a{}</style>", "constant": True}
         ]}, "st")
         self.assertFalse(any("entries 应为对象" in m for m in v.ERRORS))
+
+    def test_worldbook_script_oldmmd_error(self):
+        reset()
+        v.validate_worldbook({"entries": {
+            "0": {"comment": "脚本", "content": "<script>x</script>", "constant": True}
+        }}, "oldmmd")
+        self.assertTrue(any("script" in m.lower() for m in v.ERRORS))
+
+    def test_card_book_script_oldmmd_error(self):
+        reset()
+        v.validate_card({"spec": "chara_card_v2", "data": {
+            "character_book": {"entries": [
+                {"comment": "脚本", "content": "<script>x</script>"}
+            ]}
+        }}, "oldmmd")
+        self.assertTrue(any("script" in m.lower() for m in v.ERRORS))
 
 
 if __name__ == "__main__":

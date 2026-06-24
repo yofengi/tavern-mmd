@@ -20,6 +20,6 @@ description: 制作酒馆美化（全局美化/状态栏）
 产出 json 后执行：
 1. **子代理审核**（省主上下文）：派子代理跑 `python <skill>/scripts/validate.py <文件> --platform <平台>`，把完整报告写入项目 `工作/审核记录.md`（含时间戳、文件名、结果）。
 2. **有 ERROR 时修复闭环**：主AI读报告 → 派第二个子代理修复 → 子代理1复审；若仍 ERROR，主AI 亲自接手。每轮写入 `工作/审核记录.md`。
-3. **主AI 交互测试**（子代理做不了）：跑 `python <skill>/scripts/build-preview.py <文件> --platform <平台> -o 工作/preview.html`，用自带 Preview 工具打开，截图看渲染，并实测交互：点击选项按钮、切换标签页、展开侧边栏/折叠面板。发现问题改源码 → 回第1步复审。
-4. **问用户预览**：能调 Preview 工具的，附截图；不能的，提示用户用浏览器打开 `工作/preview.html`。
+3. **主AI 交互测试**（子代理做不了）：跑 `python <skill>/scripts/build-preview.py <文件> --platform <平台> --mode both`，默认生成 `<文件>-preview-<平台>.html`（三面板诊断）和 `<文件>-panorama-<平台>.html`（全景预览）。用自带 Preview 工具先看三面板，再看全景，并实测交互：点击选项按钮、切换标签页、展开侧边栏/折叠面板。发现问题改源码 → 回第1步复审。
+4. **问用户预览**：能调 Preview 工具的，附截图；不能的，提示用户用浏览器打开生成的 `-preview-` 与 `-panorama-` 两份 HTML。
 5. 无子代理的 agent：主AI 顺序自跑 validate → 修复 → preview → 交互测试。

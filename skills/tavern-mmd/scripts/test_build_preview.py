@@ -23,6 +23,13 @@ class TestExtractFragments(unittest.TestCase):
         ]}
         self.assertEqual(bp.extract_fragments(obj), [])
 
+    def test_nonstring_replace_is_skipped(self):
+        obj = {"regex_scripts": [
+            {"scriptName": "坏字段", "replaceString": 123},
+            {"scriptName": "正常", "replaceString": "<div>x</div>"},
+        ]}
+        self.assertEqual([f[0] for f in bp.extract_fragments(obj)], ["正常"])
+
 
 class TestFragmentIsolation(unittest.TestCase):
     def test_fragments_wrapped_in_isolated_iframe(self):
@@ -105,12 +112,23 @@ class TestPipelinePreview(unittest.TestCase):
             ],
         }
         html = bp.assemble_preview(obj, "mmd", "t.json")
-        self.assertIn("第一句话整合预览", html)
+        self.assertIn("第一句话剩余预览", html)
         self.assertIn("状态栏单独预览", html)
         self.assertIn("悬浮组件预览", html)
         self.assertIn("正文", html)
         self.assertIn("z-status-box", html)
         self.assertIn("z-float-ball", html)
+
+    def test_nested_statusbar_div_is_kept_whole(self):
+        rendered = '正文<div class="z-status-box"><div>inner</div><div>tail</div></div>结尾'
+        first, status, _ = bp.split_preview_panels(rendered)
+        self.assertIn('<div class="z-status-box"><div>inner</div><div>tail</div></div>', status)
+        self.assertNotIn("<div>tail</div></div>", first)
+
+    def test_oldmmd_es6_marker_handles_gt_inside_event_body(self):
+        html = bp.apply_platform_limits('<img onerror="if(c>0){let x=1}">', "oldmmd")
+        self.assertIn("data-mmd-es6", html)
+        self.assertIn("旧版MMD不支持ES6", html)
 
     def test_statusbar_panel_keeps_onerror_engine_when_runtime_creates_ui(self):
         obj = {
