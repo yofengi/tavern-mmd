@@ -194,7 +194,7 @@ python <skill>/scripts/validate.py output/文件.json --platform <mmd|oldmmd>
 - `<script>`/`ES6`/`innerHTML` → 旧版MMD红线，按报告改写
 - `悬空标记` → `statusbar`/`beginning` 里有 `<标记>` 但 `regex_scripts` 没有对应 `findRegex` 消费；会在页面裸露，必须补正则或删标记
 
-可选预览（状态栏/美化必做）：`python <skill>/scripts/build-preview.py output/文件.json --platform <mmd|oldmmd>`（默认 `--mode both`）。MMD 导入 json 会生成两份：**三面板沙箱**（①第一句话整合预览，若第一句话含选项菜单/图片/特殊美化会一起显示；②状态栏单独预览；③悬浮组件预览，侧边栏/悬浮球）用于逐组件审核；**全景预览**（`-panorama-` 文件）把所有组件组合进一个模拟 MMD 聊天页，底部固定主输入框+发送按钮，发送出现用户气泡+占位AI气泡，用于二次审核组合效果。主AI 用 Preview 工具先看三面板、再看全景，全景不默认关闭留给用户自查。
+可选预览（状态栏/美化必做）：`python <skill>/scripts/build-preview.py output/文件.json --platform <mmd|oldmmd>`（默认 `--mode both`）。MMD 导入 json 会生成两份：**三面板沙箱**（①第一句话剩余预览，显示扣除单独抽检的状态栏/悬浮组件后的正文、选项菜单/图片/特殊美化；②状态栏单独预览；③悬浮组件预览，侧边栏/悬浮球）用于逐组件审核；**全景预览**（`-panorama-` 文件）把所有组件组合进一个模拟 MMD 聊天页，底部固定主输入框+发送按钮，发送出现用户气泡+占位AI气泡，用于二次审核组合效果。主AI 用 Preview 工具先看三面板、再看全景，全景不默认关闭留给用户自查。
 
 > `--platform mmd`（当前 MMD）下，`<script>`/ES6/onerror多行均不报红（实测支持），只对 onclick 代码字面量/赋值告警；`--platform oldmmd` 保持全红线最严格。校验当前 MMD 产出务必带 `--platform mmd`，否则会误报 ES6/script。
 

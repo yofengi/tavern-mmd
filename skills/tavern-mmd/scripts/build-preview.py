@@ -6,11 +6,11 @@ tavern-mmd 预览脚本 build-preview.py
 主AI 用自带 Preview 工具打开看渲染、测交互（子代理无法与渲染工具交互）。
 
 用法:
-  python build-preview.py <文件> --platform <oldmmd|mmd|st> [-o 输出.html]
+  python build-preview.py <文件> --platform <oldmmd|mmd|st> [--mode panels|panorama|both] [-o 输出.html]
 
 平台渲染差异:
   st     : 原样渲染，<script>/ES6 全执行
-  oldmmd : <script>剥离并裸露源码(红框)；onerror/onclick内ES6标红但仍执行；onerror点火器正常
+  oldmmd : <script>剥离并裸露源码(红框)；onerror/onclick 内 ES6 标红提示真实旧版会截断
   mmd    : <script>/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行
 
 退出码: 0=生成成功  2=用法/读取错误
@@ -31,25 +31,41 @@ except (AttributeError, ValueError):
 def load(path):
     with open(path, "rb") as f:
         rawb = f.read()
-    txt = rawb.decode("utf-8-sig", errors="replace")
+    txt = rawb.decode("utf-8-sig")
     return json.loads(txt)
+
+
+def _script_list(obj):
+    if isinstance(obj, dict):
+        scripts = obj.get("regex_scripts", [])
+        return scripts if isinstance(scripts, list) else []
+    if isinstance(obj, list):
+        return obj
+    return []
+
+
+def _script_count(obj):
+    return len(_script_list(obj))
+
+
+def _text_field(obj, name):
+    v = obj.get(name, "") if isinstance(obj, dict) else ""
+    return v if isinstance(v, str) else ""
 
 
 def extract_fragments(obj):
     """返回 [(scriptName, findRegex, replaceString), ...]，仅含含HTML的替换。"""
     frags = []
-    if isinstance(obj, dict) and "regex_scripts" in obj:
-        scripts = obj.get("regex_scripts", [])
-    elif isinstance(obj, list):
-        scripts = obj
-    else:
-        scripts = []
-    for sc in scripts:
+    for sc in _script_list(obj):
         if not isinstance(sc, dict):
             continue
         rs = sc.get("replaceString", "")
         name = sc.get("scriptName", sc.get("name", ""))
         fr = sc.get("findRegex", "")
+        if not isinstance(rs, str):
+            continue
+        if not isinstance(fr, str):
+            fr = ""
         # 含任意 HTML 标签的替换都渲染；跳过纯信标转换器（无标签的占位文本）
         if re.search(r"<[a-zA-Z][a-zA-Z0-9]*[\s/>]", rs):
             frags.append((name, fr, rs))
@@ -134,8 +150,8 @@ def apply_regex_pipeline(obj):
     """模拟 MMD：statusbar + beginning 经 regex_scripts 全量替换后的 HTML。"""
     if isinstance(obj, list):
         return ""
-    text = str(obj.get("statusbar", "")) + str(obj.get("beginning", ""))
-    for sc in obj.get("regex_scripts", []):
+    text = _text_field(obj, "statusbar") + _text_field(obj, "beginning")
+    for sc in _script_list(obj):
         if not isinstance(sc, dict):
             continue
         fr = sc.get("findRegex", "")
@@ -159,7 +175,7 @@ def find_dangling_markers(obj):
     改为 post-pipeline 残留检测：被消费的标记不会出现在最终 HTML 里。）"""
     if isinstance(obj, list):
         return []
-    hay = str(obj.get("statusbar", "")) + str(obj.get("beginning", ""))
+    hay = _text_field(obj, "statusbar") + _text_field(obj, "beginning")
     rendered = apply_regex_pipeline(obj)
     errors = []
     seen = set()
@@ -193,6 +209,39 @@ def _panel(title, content, platform, badge=""):
             '</iframe></div>' % (label, _html_to_srcdoc(content, platform)))
 
 
+def _scan_tag_end(html, start):
+    quote = None
+    i = start + 1
+    while i < len(html):
+        ch = html[i]
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch == '"' or ch == "'":
+            quote = ch
+        elif ch == ">":
+            return i + 1
+        i += 1
+    return None
+
+
+def _iter_all_tags(html):
+    """轻量标签扫描器：找到任意开始标签，且尊重单双引号内的 >。"""
+    pos = 0
+    while True:
+        start = html.find("<", pos)
+        if start == -1:
+            return
+        if start + 1 >= len(html) or html[start + 1] in "/!":
+            pos = start + 1
+            continue
+        end = _scan_tag_end(html, start)
+        if end is None:
+            return
+        yield start, end, html[start:end]
+        pos = end
+
+
 def _iter_tags(html, tag_name):
     """轻量标签扫描器：找到 <tag ...>，且尊重单双引号内的 >。
     用于扫描 img onerror 引擎；正则的 [^>]* 会被 JS 里的 c>0 截断。"""
@@ -203,23 +252,69 @@ def _iter_tags(html, tag_name):
         start = low.find(needle, pos)
         if start == -1:
             return
-        i = start + len(needle)
-        quote = None
-        while i < len(html):
-            ch = html[i]
-            if quote:
-                if ch == quote:
-                    quote = None
-            elif ch == '"' or ch == "'":
-                quote = ch
-            elif ch == ">":
-                end = i + 1
-                yield start, end, html[start:end]
-                pos = end
-                break
-            i += 1
-        else:
+        after = start + len(needle)
+        if after < len(html) and (html[after].isalnum() or html[after] in "_-:"):
+            pos = after
+            continue
+        end = _scan_tag_end(html, start)
+        if end is None:
             return
+        yield start, end, html[start:end]
+        pos = end
+
+
+def _attr_value(tag, attr):
+    m = re.search(r"\b%s\s*=\s*([\"'])([\s\S]*?)\1" % re.escape(attr), tag, re.I)
+    return m.group(2) if m else ""
+
+
+def _tag_has_class(tag, class_name):
+    return class_name in _attr_value(tag, "class").split()
+
+
+def _find_balanced_tag_end(html, open_start, open_end, tag_name):
+    """从一个开始标签位置找到同名闭合标签结尾；失败时退回开始标签结尾。"""
+    low = html.lower()
+    name = tag_name.lower()
+    depth = 1
+    pos = open_end
+    while True:
+        next_open = low.find("<" + name, pos)
+        next_close = low.find("</" + name, pos)
+        if next_close == -1:
+            return open_end
+        if next_open != -1 and next_open < next_close:
+            after = next_open + len(name) + 1
+            if after < len(html) and (html[after].isalnum() or html[after] in "_-:"):
+                pos = after
+                continue
+            tag_end = _scan_tag_end(html, next_open)
+            if tag_end is None:
+                return open_end
+            depth += 1
+            pos = tag_end
+            continue
+        close_end = low.find(">", next_close)
+        if close_end == -1:
+            return open_end
+        depth -= 1
+        pos = close_end + 1
+        if depth == 0:
+            return pos
+
+
+def _event_tag_has_es6(tag):
+    for m in re.finditer(r"\bon\w+\s*=\s*([\"'])([\s\S]*?)\1", tag, re.I):
+        body = m.group(2)
+        if re.search(r"=>|\blet\b|\bconst\b|`", body):
+            return True
+    return False
+
+
+def _add_attr_to_tag(tag, attr_text):
+    if tag.endswith("/>"):
+        return tag[:-2] + " " + attr_text + "/>"
+    return tag[:-1] + " " + attr_text + ">"
 
 
 def _is_floating_engine_tag(tag):
@@ -267,11 +362,21 @@ def split_preview_panels(rendered):
     status_parts = []
     floating_parts = []
     rest = rendered
-    # 1) 静态状态栏骨架（KV/已渲染状态栏）
-    for pat in [r"<div[^>]*class=[\"'][^\"']*z-status-box[^\"']*[\"'][^>]*>[\s\S]*?</div>"]:
-        for m in list(re.finditer(pat, rest, re.I)):
-            status_parts.append(m.group(0))
-            rest = rest.replace(m.group(0), "", 1)
+    # 1) 静态状态栏骨架（KV/已渲染状态栏）。用平衡标签扫描，避免嵌套 div 被截断。
+    status_spans = []
+    last_end = -1
+    for start, end, tag in _iter_tags(rest, "div"):
+        if not _tag_has_class(tag, "z-status-box"):
+            continue
+        ext_end = _find_balanced_tag_end(rest, start, end, "div")
+        if start < last_end:
+            continue
+        status_spans.append((start, ext_end, rest[start:ext_end]))
+        last_end = ext_end
+    for start, end, chunk in status_spans:
+        status_parts.append(chunk)
+    for start, end, chunk in sorted(status_spans, key=lambda x: x[0], reverse=True):
+        rest = rest[:start] + rest[end:]
 
     # 2) 运行时引擎（<img onerror>）：一次扫描分类悬浮/状态栏，再从后往前删除，避免删一个就让
     #    后续 start/end 偏移失效。MMD 真正的悬浮球/抽屉是运行时注入的可拖动按钮，position:fixed
@@ -306,12 +411,12 @@ def assemble_preview(obj, platform, src_name):
     audit = "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
                     for x in find_dangling_markers(obj))
     body = "\n".join([
-        _panel("第一句话整合预览", first, platform, "beginning+statusbar"),
+        _panel("第一句话剩余预览", first, platform, "beginning remainder"),
         _panel("状态栏单独预览", status, platform, "status"),
         _panel("悬浮组件预览", floating, platform, "floating/sidebar"),
         audit,
     ])
-    banner = make_banner(platform, src_name, len(obj.get("regex_scripts", [])))
+    banner = make_banner(platform, src_name, _script_count(obj))
     return PAGE_TEMPLATE % {"platform": platform, "banner": banner,
                             "body": body, "marker_css": MARKER_CSS}
 
@@ -413,7 +518,7 @@ def assemble_panorama(obj, platform, src_name):
     frame_doc = "<style>%s</style><style>%s</style>%s" % (MARKER_CSS, PANORAMA_CSS, processed)
     srcdoc = html_mod.escape(frame_doc, quote=True)
 
-    n = len(obj.get("regex_scripts", [])) if isinstance(obj, dict) else len(obj)
+    n = _script_count(obj)
     banner = make_banner(platform, src_name, n).replace("预览平台", "全景预览 ｜ 平台")
     audit = ""
     if isinstance(obj, dict):
@@ -471,15 +576,18 @@ def apply_platform_limits(rs, platform):
             return '<div class="mmd-warn-badge" title="当前MMD已确认支持 script，正常执行">✓script</div>' + full
     out = re.sub(r"<script\b[\s\S]*?</script>", script_repl, out, flags=re.I)
 
-    # 2. onerror/onclick 内 ES6 语法：仅旧版MMD会截断，标黄高亮（不阻止执行，便于AI测交互）
-    #    当前MMD已确认支持ES6，不标记。
-    def es6_mark(m):
-        tag = m.group(0)
-        if re.search(r"on\w+\s*=\s*\"[^\"]*(=>|\blet\b|\bconst\b|`)[^\"]*\"", tag):
-            return tag.replace(">", ' data-mmd-es6="真实平台此处会截断">', 1)
-        return tag
+    # 2. onerror/onclick 内 ES6 语法：旧版MMD真实平台不支持，会截断；预览只标黄提示。
     if platform == "oldmmd":
-        out = re.sub(r"<[a-zA-Z][^>]*on\w+\s*=[^>]*>", es6_mark, out)
+        parts = []
+        pos = 0
+        for start, end, tag in _iter_all_tags(out):
+            if re.search(r"\bon\w+\s*=", tag, re.I) and _event_tag_has_es6(tag):
+                parts.append(out[pos:start])
+                parts.append(_add_attr_to_tag(tag, 'data-mmd-es6="真实旧版MMD不支持ES6，此处会截断"'))
+                pos = end
+        if parts:
+            parts.append(out[pos:])
+            out = "".join(parts)
 
     return out
 
@@ -525,7 +633,7 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif}
 def _build_panels_html(obj, platform, src_name):
     """三面板诊断（MMD导入json）或逐片段iframe（本地酒馆数组）。返回 (html, 片段数)。"""
     if isinstance(obj, dict) and "regex_scripts" in obj and ("beginning" in obj or "statusbar" in obj):
-        return assemble_preview(obj, platform, src_name), len(obj.get("regex_scripts", []))
+        return assemble_preview(obj, platform, src_name), _script_count(obj)
     frags = extract_fragments(obj)
     if not frags:
         print("[WARN] 未找到含HTML的替换片段（可能是纯数据转换器）。")
@@ -543,7 +651,7 @@ def main():
 
     try:
         obj = load(args.file)
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
         print("[ERROR] 读取/解析失败: %s" % e)
         print("提示: 先用 validate.py 确认 JSON 合法。")
         sys.exit(2)

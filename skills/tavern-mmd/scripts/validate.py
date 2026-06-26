@@ -58,7 +58,11 @@ def check_bom(rawb):
 
 def load_json(rawb):
     """返回 (obj, 已去BOM文本) 或 (None, 文本)。失败时记录错误。"""
-    txt = rawb.decode("utf-8-sig", errors="replace")
+    try:
+        txt = rawb.decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        err("文件不是合法 UTF-8: byte %d: %s。请用无 BOM 的 UTF-8 保存。" % (e.start, e.reason))
+        return None, ""
     try:
         obj = json.loads(txt)
         ok("JSON 语法合法")
@@ -80,8 +84,8 @@ def load_json(rawb):
 
 # ============ 平台红线检查（作用于解析后的 HTML/JS 字符串） ============
 
-def _extract_event_handler_bodies(s):
-    """提取所有 onerror=/onclick= 属性值（JS 代码体），返回 [(attr_name, body), ...]。
+def _extract_event_handler_attrs(s):
+    """提取所有 onerror=/onclick= 属性值（JS 代码体），返回 [(attr_name, quote, body), ...]。
     尊重引号边界：onerror="..." 或 onerror='...'，取引号内整段。"""
     out = []
     for m in re.finditer(r"\b(onerror|onclick)\s*=\s*(\"|')", s, re.I):
@@ -91,8 +95,45 @@ def _extract_event_handler_bodies(s):
         end = s.find(quote, start)
         if end == -1:
             continue
-        out.append((attr, s[start:end]))
+        out.append((attr, quote, s[start:end]))
     return out
+
+
+def _extract_event_handler_bodies(s):
+    """提取所有 onerror=/onclick= 属性值（JS 代码体），返回 [(attr_name, body), ...]。"""
+    return [(attr, body) for attr, _quote, body in _extract_event_handler_attrs(s)]
+
+
+def _scan_tag_end(s, start):
+    quote = None
+    i = start + 1
+    while i < len(s):
+        ch = s[i]
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch == '"' or ch == "'":
+            quote = ch
+        elif ch == ">":
+            return i + 1
+        i += 1
+    return None
+
+
+def _attr_tail_has_junk(tail):
+    """判断属性闭合引号后到标签结尾前是否出现非属性语法垃圾。
+    onerror="alert("x")" 会在第一个内部引号处提前闭合，后续 x")" 不是合法属性序列。"""
+    i = 0
+    while i < len(tail):
+        while i < len(tail) and tail[i].isspace():
+            i += 1
+        if i >= len(tail) or tail[i] == "/":
+            return False
+        m = re.match(r"[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+))?", tail[i:])
+        if not m:
+            return True
+        i += m.end()
+    return False
 
 
 def check_onerror_inner_quote(s, platform, where):
@@ -105,13 +146,17 @@ def check_onerror_inner_quote(s, platform, where):
     if platform not in ("oldmmd", "mmd"):
         return
     bad = 0
-    for m in re.finditer(r'onerror="', s):
-        start = m.end()
-        endm = re.search(r'">', s[start:])
-        if not endm:
+    for m in re.finditer(r"\bonerror\s*=\s*\"", s, re.I):
+        tag_start = s.rfind("<", 0, m.start())
+        tag_end = _scan_tag_end(s, tag_start) if tag_start != -1 else None
+        if tag_end is None:
             continue
-        body = s[start:start + endm.start()]
-        bad += body.count('"')
+        value_start = m.end()
+        value_end = s.find('"', value_start)
+        if value_end == -1 or value_end >= tag_end:
+            continue
+        if _attr_tail_has_junk(s[value_end + 1:tag_end - 1]):
+            bad += 1
     if bad > 0:
         err('%s onerror="" 内部含 %d 个裸双引号——会提前闭合属性、img 结构破坏、'
             '引擎不绑定、面板静默不渲染。内部字符串改单引号，CFG/CSS 用单引号 JS '
@@ -227,7 +272,7 @@ def check_interactive_event_newlines(s, where, platform):
 def looks_like(obj):
     """猜测 JSON 类型。"""
     if isinstance(obj, dict):
-        if "regex_scripts" in obj and "statusbar" in obj:
+        if "regex_scripts" in obj:
             return "regex"  # MMD 导入 json
         if "spec" in obj and "data" in obj:
             return "card"
@@ -344,6 +389,9 @@ def validate_regex(obj, platform):
             if k not in obj:
                 warn("MMD 导入json 缺字段 %s" % k)
         scripts = obj.get("regex_scripts", [])
+        if not isinstance(scripts, list):
+            err("MMD 导入json regex_scripts 应为数组，当前为 %s。" % type(scripts).__name__)
+            scripts = []
         sb = obj.get("statusbar", "")
         ok("识别为 MMD 导入json 格式（%d 条正则）" % len(scripts))
         if isinstance(sb, str) and sb:
@@ -433,7 +481,7 @@ def validate_card(obj, platform):
     cb = data.get("character_book", {})
     for e in cb.get("entries", []) if isinstance(cb, dict) else []:
         c = e.get("content", "")
-        if isinstance(c, str) and ("<style" in c or "onerror=" in c or "onclick=" in c):
+        if isinstance(c, str) and re.search(r"<(?:script|style)\b|on(?:error|click)\s*=", c, re.I):
             check_platform_redlines(c, platform, "卡内条目[%s]" % e.get("comment", "?"))
             check_interactive_event_newlines(c, "卡内条目[%s]" % e.get("comment", "?"), platform)
 
@@ -461,8 +509,9 @@ def validate_worldbook(obj, platform):
         if e.get("constant") is True and e.get("selective") is True:
             warn("%s 蓝灯(constant=true)却 selective=true，通常蓝灯 selective=false。" % tag)
         c = e.get("content", "")
-        if isinstance(c, str) and ("<style" in c or "onerror=" in c):
+        if isinstance(c, str) and re.search(r"<(?:script|style)\b|on(?:error|click)\s*=", c, re.I):
             check_platform_redlines(c, platform, tag)
+            check_interactive_event_newlines(c, tag, platform)
 
 
 # ============ 主流程 ============

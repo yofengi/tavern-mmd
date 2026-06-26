@@ -9,7 +9,7 @@
 MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著差异：
 
 - 当前 MMD 支持 `<script>` 与 ES6（实测全支持）；旧版 MMD 禁止 `<script>`、CSP 严格审查 DOM 属性内的 JS、仅支持 ES5
-- 正则限额 30 条（findRegex ≤ 1000 字符、replaceString ≤ 20000 字符），导入格式与本地酒馆不同
+- 正则限额 130 条（findRegex ≤ 1000 字符、replaceString ≤ 20000 字符），导入格式与本地酒馆不同
 - 角色卡仅支持 chara_card_v2（不识别 v3），整卡只能用 png 导入（不能直接导入 json 整卡）
 - 不支持酒馆助手、MVU 变量框架、STScript
 
@@ -180,7 +180,7 @@ commands/                         # 8 个斜杠指令
 |---|---|---|---|
 | `<script>` | ✅ | ✅（已确认） | ❌ → img onerror 点火器 |
 | ES6+ | ✅ | ✅ 无限制（已确认实测全支持） | ❌ ES5 only |
-| 正则导入 | json | MMD 专用 json（4 字段）或手填，≤30 条 | 同当前 MMD |
+| 正则导入 | json | MMD 专用 json（4 字段）或手填，≤130 条 | 同当前 MMD |
 | 状态栏 | 雷达法 / KV V4.0 | 首选混合态雷达法 | 同当前 MMD |
 | MVU/STScript | ✅ | ❌（保守） | ❌ |
 
