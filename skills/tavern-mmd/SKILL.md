@@ -64,6 +64,14 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 ├── plan.md      # 任务规划：勾选框步骤清单、决策记录、进度
 ├── 资料/        # 用户素材、讨论记录、被否决方向存档
 ├── 工作/        # 制作中间文件（条目草稿、代码草稿）
+│   ├── 世界书/        # 世界书源文件工作目录（仅世界书项目或含世界书组件时创建）
+│   │   ├── worldbook.config.json
+│   │   ├── index.md
+│   │   ├── notes.md
+│   │   ├── entries/
+│   │   ├── drafts/
+│   │   ├── patches/
+│   │   └── archive/
 │   └── 美化决策.md  # 仅美化项目：选用风格、混搭维度、单点覆盖（token 原值→新值+原因）的留痕
 └── output/      # 最终交付物
 ```
@@ -73,6 +81,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 - 完成 plan.md 中一步立即打勾，不批量补记
 - 新会话续作：先读 main.md 再读 plan.md，禁止跳过直接动工
 - 做美化时，风格选择与每次单点覆盖都记入 `工作/美化决策.md`（无美化则不建此文件）；详见 beautify/style-system.md 第5节
+- 世界书项目：新增/导入/删除/移动/重命名/重排条目必须用 `scripts/worldbook_tool.py`；`output/*.json` 是 build 产物，不作为常规编辑源；修改前先读 `工作/世界书/index.md` 并用 `show`/`search` 定位 `entry_id`。
 
 ## 产出规范
 

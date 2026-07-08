@@ -1,6 +1,40 @@
 # tavern-mmd 脚本
 
-两个纯 Python 标准库脚本（无 pip 依赖），任何能跑 `python` 的 agent 通用。
+纯 Python 标准库脚本（无 pip 依赖），任何能跑 `python` 的 agent 通用。
+
+## worldbook_tool.py — 世界书源文件工具
+
+统一管理大世界书的源文件、索引、搜索、构建和同步检查。工作层使用稳定 `entry_id`，导出 JSON 的 `uid` / `order` 由 build 阶段重排生成。
+
+```bash
+python <skill>/scripts/worldbook_tool.py init "工作/世界书"
+python <skill>/scripts/worldbook_tool.py add "工作/世界书" --layer "30-角色层" --title "角色：莉娅" --keys "莉娅,Lia" --constant true --summary "女主核心设定"
+python <skill>/scripts/worldbook_tool.py import "工作/世界书" "output/原世界书.json" --layer "40-场景物品事件层"
+python <skill>/scripts/worldbook_tool.py show "工作/世界书" --entry e0001
+python <skill>/scripts/worldbook_tool.py search "工作/世界书" exact "银钥匙"
+python <skill>/scripts/worldbook_tool.py search "工作/世界书" fuzzy "魔法反噬" --limit 5
+python <skill>/scripts/worldbook_tool.py move "工作/世界书" --entry e0001 --to-layer "20-驱动层"
+python <skill>/scripts/worldbook_tool.py reorder "工作/世界书" --entry e0001 --prefix 5
+python <skill>/scripts/worldbook_tool.py rename "工作/世界书" --entry e0001 --title "角色：莉娅·银钥"
+python <skill>/scripts/worldbook_tool.py delete "工作/世界书" --entry e0001
+python <skill>/scripts/worldbook_tool.py build "工作/世界书" --out "output/世界书.json"
+python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/世界书.json"
+```
+
+目录结构：
+
+```text
+工作/世界书/
+├── worldbook.config.json      # 层级顺序、order生成规则、next_entry_number
+├── index.md                   # 生成的导航索引；AI读它定位，不手改结构字段
+├── notes.md                   # 设计说明、约束、人工决策、变更摘要
+├── entries/                   # 正式条目源文件；一条一文件，参与 build
+├── drafts/                    # 未入库草稿，不参与 build
+├── patches/                   # add/move/rename/delete/build 操作日志
+└── archive/                   # delete 默认归档位置，不参与 build
+```
+
+铁律：新增、导入、删除、移动、重命名、重排条目必须调用本脚本；AI 可以编辑 `entries/` 下的条目正文和非结构性 frontmatter，但编辑后必须重新 `build` + `check`。
 
 ## validate.py — 静态审核
 
@@ -75,5 +109,5 @@ python make_card_image.py <卡JSON> [--bg 底图路径] [-o 输出路径]
 ## 测试
 
 ```bash
-python -m unittest test_validate test_build_preview -v
+python -m unittest test_validate test_build_preview test_make_card_image test_worldbook_tool -v
 ```
