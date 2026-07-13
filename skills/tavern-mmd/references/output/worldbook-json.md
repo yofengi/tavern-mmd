@@ -8,6 +8,8 @@
 
 **注意**：`entries` 是以 uid 字符串为键的对象，不是数组。
 
+> **索引源文件工作流说明**：使用 tavern-mmd 的 `工作/世界书/` 工作流时，`entries` 源文件中的稳定定位编号是 `entry_id`，不是导出 JSON 的 `uid`。导出 JSON 的 `uid` 与 `order` 由 `scripts/worldbook_tool.py build` 按当前层级和文件顺序生成，可在重排后变化。常规修改应回到源文件，再重新 build；不要手动把 output JSON 当作工作源。
+
 ```json
 {
   "entries": {
@@ -111,7 +113,7 @@
 
 > `selective` 实际控制次关键词（`keysecondary`）过滤逻辑，仅在 `keysecondary` 非空时生效；绿灯条目按惯例设 `true`（与卡内条目 `selective = !constant` 约定一致，也是酒馆UI新建条目的默认值）。
 
-**本 skill 约定**：新建条目默认 `preventRecursion: true`，`excludeRecursion: true`（脚本源码默认为 false，需手动或脚本参数覆盖）。
+**本 skill 约定**：新建条目默认 `preventRecursion: true`，`excludeRecursion: true`；使用 `worldbook_tool.py build` 会自动补齐。确需改写递归、depth、role、sticky、cooldown、keysecondary 等高级字段时，可在源文件 JSON frontmatter 中加入对应独立世界书字段，build 会保留这些字段。
 
 ---
 
@@ -123,10 +125,32 @@
 
 ---
 
-## 6. 校验命令
+## 6. 源文件到 JSON 的字段映射
+
+| 源文件 frontmatter / 正文 | 独立世界书 JSON | 说明 |
+|---|---|---|
+| `entry_id` | 不默认导出 | 工作层稳定定位 ID；可通过配置选择写入 comment 前缀，但默认保持导出标题干净 |
+| `title` | `comment` | 平台 UI 里显示的条目标题 |
+| `keys` | `key` | 主关键词数组 |
+| `constant` | `constant` | 蓝灯为 true，绿灯为 false |
+| `position` | `position` | 独立世界书数字 position |
+| 正文 | `content` | 条目注入内容 |
+| 高级字段（如 `keysecondary`、`depth`、`role`、`sticky`、`cooldown`、`scanDepth`、`caseSensitive`、`extensions`） | 同名字段 | 可选写入源文件 frontmatter；build 会透传到独立世界书 JSON |
+| 层级与文件顺序 | `uid` / `order` | build 阶段自动生成，可重排 |
+
+---
+
+## 7. 校验命令
 
 ```bash
-python -m json.tool output/世界书名.json > /dev/null && echo OK
+python -m json.tool "output/世界书名.json"
 ```
 
-输出 `OK` 即 JSON 格式合法。
+命令退出码为 0 即 JSON 格式合法。若在 POSIX/Git Bash 中想静默校验，可追加 `> /dev/null`；Windows PowerShell 可追加 `> $null`。
+
+使用源文件工作流时还要运行：
+
+```bash
+python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/世界书名.json"
+python <skill>/scripts/validate.py "output/世界书名.json" --type worldbook --platform mmd
+```

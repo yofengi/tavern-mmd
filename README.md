@@ -2,7 +2,7 @@
 
 为 **MMD（魅魔岛 / sexyai.ai）** 和 **本地酒馆 SillyTavern** 创建角色卡、世界书、美化（状态栏 / 全局美化）的 Claude Code Skill。
 
-完全自包含的纯文档型 skill：不依赖 MCP server、Python 或 Node 脚本，安装即用。
+skill 本体是自包含 Markdown 文档；另附纯 Python 标准库辅助脚本，用于审核、预览、世界书源文件管理和角色卡 PNG 导出。
 
 ## 为什么需要这个 skill
 
@@ -21,7 +21,7 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 |---|---|
 | 三平台支持 | 当前 MMD（支持 `<script>`/ES6）/ 旧版 MMD（不支持 `<script>`，ES5）/ 本地酒馆 SillyTavern |
 | 角色卡创作 | 标准流程（快问快答）与深度共创流程（开放讨论 + 方案收敛）两种模式 |
-| 世界书制作 | 三阶段流程（规划 → 总纲 → 展开），蓝绿灯策略、token 预算、递归控制 |
+| 世界书制作 | 索引源文件工作流（entry_id 稳定、uid/order build 重排）、蓝绿灯策略、token 预算、递归控制 |
 | 状态栏 | 首选混合态雷达法（特征嗅探 + 动态DOM + 双轨生命周期 + 七重防御）；KV V4.0 轻量备选 |
 | 全局美化 | MMD uni-app 界面类名速查（41 个选择器）+ CSS 变量主题架构 + 日夜切换 |
 | 项目管理 | 每个项目独立文件夹（main.md / plan.md / 资料 / 工作 / output），断点续作 |
@@ -29,9 +29,10 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 
 ## 审核与预览脚本
 
-skill 自带两个纯 Python 标准库脚本（零依赖，全 agent 通用），AI 会根据 skill 指引在交付前自行调用，用法详见 `skills/tavern-mmd/scripts/README.md`。
+skill 自带多个纯 Python 标准库脚本（零依赖，全 agent 通用），AI 会根据 skill 指引在制作与交付前自行调用，用法详见 `skills/tavern-mmd/scripts/README.md`。
 
 - **JSON 格式审核**：AI 调用 `scripts/validate.py` 对导入 json 做静态审核（JSON 合法性、BOM、双重转义、平台红线、字符数限额、v2 与世界书字段）。
+- **世界书源文件工具**：AI 调用 `scripts/worldbook_tool.py` 管理 `工作/世界书/` 的 add/delete/move/rename/show/search/build/check，避免直接编辑大 JSON。
 - **状态栏 / 全局美化预览**：AI 调用 `scripts/build-preview.py` 生成 HTML 沙箱，再用 agent 的 Preview 工具自行查看渲染、测交互。
 
 > ⚠️ 渲染沙箱是标准浏览器渲染，不一定能暴露状态栏在 MMD 上的所有问题（如 markdown 管线把换行解析成空 `<p>` 撑出的空白条），状态栏 / 美化仍需实机导入 MMD 验证。
@@ -155,7 +156,7 @@ skills/tavern-mmd/
     │   └── sillytavern.md        #   本地酒馆（position 表、正则字段）
     ├── creation/                 # 创作规则
     │   ├── character.md          #   角色写作（绝对零度 / 八股化 / 具体性）
-    │   ├── worldbook.md          #   世界书三阶段流程 + 条目规划表
+    │   ├── worldbook.md          #   世界书索引源文件工作流 + 蓝绿灯策略 + 条目规划
     │   ├── opening.md            #   开场白三要素
     │   └── style.md              #   文风条目模板
     ├── beautify/                 # 美化方案
