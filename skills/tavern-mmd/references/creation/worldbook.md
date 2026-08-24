@@ -92,7 +92,7 @@ python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/
 ```
 
 - `entry_id` 是工作层稳定 ID，不等于导出 JSON 的 `uid`。
-- `title` 导出为 JSON `comment`。
+- `title` 导出为 JSON `comment`，**MMD 平台上限 20 字**（中文一字算 1，标点计入），超限 `add`/`rename` 会直接拒绝、`check` 报错。别用 `【】`/`·` 装饰，摘要写进 `summary` 而不是标题。目标平台是本地酒馆时在 `worldbook.config.json` 设 `"platform": "st"` 关掉该检查。
 - `keys` 导出为 JSON `key`。
 - 正文导出为 JSON `content`。
 - `uid` 与 `order` 由 build 阶段生成，可以因移动/重排而改变。
@@ -102,6 +102,7 @@ python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/
 - 禁用@D depth≥1（打断对话流）；depth=0仅用于行为纠正指令（role=system），不放设定。
 - 绿灯keys：英文逗号分隔，含全名/昵称/外号。
 - token预算：单条目≤800字为宜；总纲≤500字；蓝灯总量控制（常驻全算token）——多角色卡蓝灯条目数≤5。
+- 条目标题（`title`→`comment`）≤20字（MMD硬上限，截断）；不加装饰符，`【】`和`·`同样占额度。
 - 新增、删除、移动、重命名、重排条目必须用 `worldbook_tool.py`；不要手工维护 `uid`、`order`、`index.md` 表格。
 
 ## 内容写法

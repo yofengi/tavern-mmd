@@ -9,6 +9,7 @@ description: 制作酒馆世界书（输出可导入json）
 3. 收集资料：用户提供的素材存入"资料/"，更新main.md。
 4. 读取 `references/creation/worldbook.md`，按索引源文件工作流执行：
    - 初始化 `工作/世界书/`：`python <skill>/scripts/worldbook_tool.py init "工作/世界书"`
+   - 目标平台是本地酒馆时，把 `工作/世界书/worldbook.config.json` 的 `platform` 改为 `"st"`（默认 `"mmd"`：会套用 20 字条目标题上限，超限的 `add`/`rename` 被硬拒绝）
    - 在 `notes.md`/对话/plan.md 中列层级与条目规划 → 必须用户确认后才动工；`index.md` 是生成导航，只读不写规划
    - 若修改既有独立世界书 JSON，先导入源文件：`python <skill>/scripts/worldbook_tool.py import "工作/世界书" "output/原世界书.json" --layer "40-场景物品事件层"`
    - 结构操作（新增/删除/移动/重命名/重排）统一调用 `worldbook_tool.py`，不要手改 UID/order/index 表格

@@ -28,6 +28,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | MVU/STScript/酒馆助手 | ✅ | ❌（保守） | ❌ |
 | 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | 同当前MMD |
 | 世界书导入 | json/png | png/json/角色卡连带 | 同当前MMD |
+| 世界书条目标题 | 无限制 | **≤20字**（`comment`；中文一字算1、标点计入，超出截断） | 同当前MMD |
 
 **当前MMD已实测**：`<script>` 与 ES6 解禁、`onerror` 可多行可用双引号、正则上限 130 条。`<script>` 不能做 per-message 自渲染（`document.currentScript` 不可用 + 同段脚本只加载一次被去重），状态栏引擎仍只能 img onerror。MVU/STScript 等未确认能力仍按无处理（保守）。
 

@@ -129,8 +129,8 @@
 
 | 源文件 frontmatter / 正文 | 独立世界书 JSON | 说明 |
 |---|---|---|
-| `entry_id` | 不默认导出 | 工作层稳定定位 ID；可通过配置选择写入 comment 前缀，但默认保持导出标题干净 |
-| `title` | `comment` | 平台 UI 里显示的条目标题 |
+| `entry_id` | 不默认导出 | 工作层稳定定位 ID；可通过配置选择写入 comment 前缀，但默认保持导出标题干净（开启后前缀 8 字也占标题额度） |
+| `title` | `comment` | 平台 UI 里显示的条目标题。**MMD 上限 20 字**：按字符数计，中文一字算 1，标点空格同样计入，超出导入后被截断；本地酒馆无限制。别加 `【】`/`·` 等装饰符（同样占额度）。详见 ../platforms/mmd.md §7 |
 | `keys` | `key` | 主关键词数组 |
 | `constant` | `constant` | 蓝灯为 true，绿灯为 false |
 | `position` | `position` | 独立世界书数字 position |

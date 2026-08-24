@@ -41,6 +41,9 @@ try:
 except (AttributeError, ValueError):
     pass
 
+# MMD 世界书条目标题（comment）硬上限，按字符数计，中文一字算 1。
+MAX_COMMENT_LEN = 20
+
 
 def js_literal(val):
     """Python → JS 字面量，字符串单引号（铁律1：禁 json.dumps 的双引号）。"""
@@ -479,7 +482,8 @@ def build_worldbook_json(config):
     content = build_protocol_md(config["FIELDS"], config["TRIGGER"], config["TITLE"])
     return {"entries": {"0": {
         "uid": 0,
-        "comment": "【%s · 状态栏生成协议】" % config["TITLE"],
+        # 标题受 MMD 20 字上限约束，不加【】· 装饰（装饰符同样占额度）
+        "comment": "%s状态栏协议" % config["TITLE"],
         "content": content,
         "constant": True,
         "disable": False,
@@ -520,6 +524,11 @@ def check_consistency(config):
         errs.append("引擎键名 %s != 字段键名 %s" % (engine_keys, field_keys))
     if '"' in engine:
         errs.append('引擎含裸双引号 "（会提前闭合 onerror，面板静默不渲染），改单引号')
+
+    comment = build_worldbook_json(config)["entries"]["0"]["comment"]
+    if len(comment) > MAX_COMMENT_LEN:
+        errs.append("世界书条目标题超 MMD 上限 %d 字（%d 字）: %s"
+                    % (MAX_COMMENT_LEN, len(comment), comment))
 
     obj = build_mmd_json(config)
     for sc in obj["regex_scripts"]:
