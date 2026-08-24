@@ -26,6 +26,8 @@ DEFAULT_CONFIG = {
     "uid_strategy": "rebuild_sequential",
     "order_strategy": "layer_base_plus_step",
     "order_step": 10,
+    # 目标平台，决定是否套用 MMD 平台限额（标题 20 字等）。mmd / oldmmd / st，默认取严。
+    "platform": "mmd",
     "export": {"include_entry_id_in_comment": False},
     "layers": [
         {"dir": "00-世界设定层", "name": "世界设定层", "order_base": 0,
@@ -52,9 +54,51 @@ PASSTHROUGH_FIELDS = {
 }
 
 
+# MMD 条目标题（导出为 JSON comment）硬上限，按字符数计，中文一字算 1。
+# 超限部分在平台侧被截断；本地酒馆无此限制。
+MAX_COMMENT_LEN = 20
+
+
 def die(message, code=2):
     print("[ERROR] " + message, file=sys.stderr)
     raise SystemExit(code)
+
+
+def include_entry_id_in_comment(config):
+    return bool(config.get("export", {}).get("include_entry_id_in_comment", False))
+
+
+def enforces_comment_limit(config):
+    """本地酒馆标题无长度限制，只有 MMD（当前版/旧版）需要查。"""
+    return config.get("platform", "mmd") != "st"
+
+
+def export_comment(title, entry_id, config):
+    """条目导出后的实际 comment，含可选 entry_id 前缀。"""
+    if include_entry_id_in_comment(config):
+        return "[%s] %s" % (entry_id, title)
+    return title
+
+
+def comment_length_problem(title, entry_id, config):
+    """标题超限时返回提示文本，未超限返回 None。按导出后的 comment 计长。"""
+    if not enforces_comment_limit(config):
+        return None
+    if not isinstance(title, str):
+        return None  # 非字符串标题由别处报错，这里不参与计长（与 validate.py 口径一致）
+    comment = export_comment(title, entry_id, config)
+    if len(comment) <= MAX_COMMENT_LEN:
+        return None
+    prefix_note = "（已含 entry_id 前缀）" if include_entry_id_in_comment(config) else ""
+    return "标题%s共 %d 字，超过 MMD 上限 %d 字，导入后会被截断: %s" % (
+        prefix_note, len(comment), MAX_COMMENT_LEN, comment)
+
+
+def require_title_length(title, entry_id, config):
+    """生成路径上的前置拦截：不写出注定被平台截断的源文件。"""
+    problem = comment_length_problem(title, entry_id, config)
+    if problem:
+        raise ValueError(problem)
 
 
 def _default_config_copy():
@@ -455,10 +499,7 @@ def layer_base_map(config):
 
 
 def default_worldbook_entry(entry, uid, order, config):
-    include_id = config.get("export", {}).get("include_entry_id_in_comment", False)
-    comment = entry["title"]
-    if include_id:
-        comment = "[%s] %s" % (entry["entry_id"], comment)
+    comment = export_comment(entry["title"], entry["entry_id"], config)
     constant = parse_bool(entry.get("constant"))
     return {
         "uid": uid,
@@ -515,7 +556,7 @@ def entry_to_worldbook_entry(entry, uid, order, config):
     out["uid"] = uid
     out["order"] = order
     out["displayIndex"] = uid
-    out["comment"] = "[%s] %s" % (entry["entry_id"], entry["title"]) if config.get("export", {}).get("include_entry_id_in_comment", False) else entry["title"]
+    out["comment"] = export_comment(entry["title"], entry["entry_id"], config)
     out["content"] = entry.get("content", "")
     out["key"] = entry.get("keys", [])
     out["constant"] = parse_bool(out.get("constant"))
@@ -591,6 +632,10 @@ def check_project(root, out_path=None):
         seen[eid] = entry["path"]
         if not entry.get("title"):
             errors.append("%s 标题为空" % eid)
+        else:
+            problem = comment_length_problem(entry["title"], eid, cfg)
+            if problem:
+                errors.append("%s %s" % (eid, problem))
         if entry.get("status") == "archived" and _is_under(entry["path"], root / "entries"):
             errors.append("归档条目出现在 entries 中: %s" % eid)
         if entry.get("layer") not in valid_layers:
@@ -665,6 +710,7 @@ def cmd_add(args):
     cfg = ensure_project(root)
     require_layer(cfg, args.layer)
     entry_id = allocate_entry_id(cfg, existing_entry_ids(root))
+    require_title_length(args.title, entry_id, cfg)
     save_config(root, cfg)
     layer_dir = root / "entries" / args.layer
     prefix = next_sort_prefix(layer_dir)
@@ -694,6 +740,7 @@ def cmd_import(args):
     entries = data.get("entries") if isinstance(data, dict) else None
     if not isinstance(entries, dict):
         raise ValueError("导入文件不是独立世界书 JSON：缺少 entries 对象")
+    long_titles = []
     for key in sorted(entries, key=lambda k: int(k) if str(k).isdigit() else 999999):
         entry = entries[key]
         if not isinstance(entry, dict):
@@ -707,14 +754,21 @@ def cmd_import(args):
         meta = entry_meta_from_json(entry, entry_id, args.layer, title)
         write_entry_file(path, meta, entry.get("content", ""))
         log_patch(root, "import", {"entry_id": entry_id, "source_uid": key, "path": path.relative_to(root).as_posix()})
+        # 导入的标题不是本工具写的，超限也照样落地，交给 check/rename 收拾，不阻断导入
+        problem = comment_length_problem(title, entry_id, cfg)
+        if problem:
+            long_titles.append((entry_id, problem))
     refresh_index(root)
     print("[OK] imported %d entries" % len(entries))
+    for entry_id, problem in long_titles:
+        print("[WARN] %s %s（需 rename 缩短）" % (entry_id, problem))
     return 0
 
 
 def cmd_rename(args):
     root = Path(args.root)
     entry = find_entry(root, args.entry)
+    require_title_length(args.title, entry["entry_id"], load_config(root))
     old_path = entry["path"]
     meta = dict(entry)
     content = meta.pop("content")
@@ -831,9 +885,17 @@ def cmd_build(args):
     with out.open("w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    render_index(root, active_entries(root), load_config(root), build_map)
+    cfg = load_config(root)
+    render_index(root, active_entries(root), cfg, build_map)
     log_patch(root, "build", {"entry": "project", "out": str(out), "entries": len(data["entries"])})
     print("[OK] built %s (%d entries)" % (out, len(data["entries"])))
+    # add/rename 已在入口拦超限标题，这里兜手改 frontmatter 的情况：不阻断导出，但必须吭声
+    if enforces_comment_limit(cfg):
+        for entry in data["entries"].values():
+            comment = entry.get("comment", "")
+            if isinstance(comment, str) and len(comment) > MAX_COMMENT_LEN:
+                print("[WARN] 导出标题 %d 字超过 MMD 上限 %d 字，导入后会被截断: %s"
+                      % (len(comment), MAX_COMMENT_LEN, comment))
     return 0
 
 

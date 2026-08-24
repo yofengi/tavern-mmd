@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """worldbook_tool.py 单元测试。运行: python -m unittest test_worldbook_tool -v"""
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 import worldbook_tool as wt
+
+TITLE_20 = "这是一个刚好二十个字的世界书条目的标题啊"    # 恰好 20 字，合规边界
+TITLE_21 = "这是一个整整二十一个字的世界书条目超长标题"    # 21 字，超限
+TITLE_12 = "十二个字的普通标题啊啊啊"                  # 12 字，加 "[e0001] " 前缀后恰好 20
+TITLE_13 = "十三个字的普通标题啊啊啊啊"                # 13 字，加前缀后 21，超限
 
 
 class TestProjectInitAndEntryParsing(unittest.TestCase):
@@ -375,6 +382,21 @@ class TestCheckWorldbook(unittest.TestCase):
             self.assertTrue(any("未知层级" in e for e in errors))
             self.assertTrue(any("keys 为空" in e for e in errors))
 
+    def test_check_detects_over_length_title(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            wt.ensure_project(root)
+            wt.main(["add", str(root), "--layer", "00-世界设定层", "--title", "短标题", "--constant", "true"])
+            entry = wt.find_entry(root, "e0001")
+            meta = dict(entry)
+            content = meta.pop("content")
+            path = meta.pop("path")
+            meta.pop("sort_prefix", None)
+            meta["title"] = TITLE_21
+            wt.write_entry_file(path, meta, content)
+            errors, warnings = wt.check_project(root, None)
+            self.assertTrue(any("超过 MMD 上限" in e for e in errors))
+
     def test_index_table_escapes_pipes(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d) / "wb"
@@ -383,6 +405,153 @@ class TestCheckWorldbook(unittest.TestCase):
             text = (root / "index.md").read_text(encoding="utf-8")
             self.assertIn("A\\|B", text)
             self.assertIn("x\\|y", text)
+
+
+class TestTitleLengthLimit(unittest.TestCase):
+    def test_add_rejects_over_length_title(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            wt.ensure_project(root)
+            rc = wt.main(["add", str(root), "--layer", "00-世界设定层",
+                          "--title", TITLE_21, "--constant", "true"])
+            self.assertEqual(rc, 2)
+            self.assertEqual(list((root / "entries" / "00-世界设定层").glob("*.md")), [])
+
+    def test_add_does_not_consume_entry_id_when_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            wt.ensure_project(root)
+            wt.main(["add", str(root), "--layer", "00-世界设定层",
+                     "--title", TITLE_21, "--constant", "true"])
+            wt.main(["add", str(root), "--layer", "00-世界设定层",
+                     "--title", "正常标题", "--constant", "true"])
+            self.assertEqual(wt.find_entry(root, "e0001")["title"], "正常标题")
+
+    def test_add_accepts_exactly_twenty_chars(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            wt.ensure_project(root)
+            rc = wt.main(["add", str(root), "--layer", "00-世界设定层",
+                          "--title", TITLE_20, "--constant", "true"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(wt.find_entry(root, "e0001")["title"], TITLE_20)
+
+    def test_rename_rejects_over_length_title(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            wt.ensure_project(root)
+            wt.main(["add", str(root), "--layer", "00-世界设定层",
+                     "--title", "原标题", "--constant", "true"])
+            rc = wt.main(["rename", str(root), "--entry", "e0001", "--title", TITLE_21])
+            self.assertEqual(rc, 2)
+            self.assertEqual(wt.find_entry(root, "e0001")["title"], "原标题")
+
+    def test_entry_id_prefix_counts_toward_limit(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            cfg = wt.ensure_project(root)
+            cfg["export"]["include_entry_id_in_comment"] = True
+            wt.save_config(root, cfg)
+            self.assertEqual(wt.main(["add", str(root), "--layer", "00-世界设定层",
+                                      "--title", TITLE_12, "--constant", "true"]), 0)
+            self.assertEqual(wt.main(["add", str(root), "--layer", "00-世界设定层",
+                                      "--title", TITLE_13, "--constant", "true"]), 2)
+
+    def test_st_platform_skips_limit(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            cfg = wt.ensure_project(root)
+            cfg["platform"] = "st"
+            wt.save_config(root, cfg)
+            rc = wt.main(["add", str(root), "--layer", "00-世界设定层",
+                          "--title", TITLE_21, "--constant", "true"])
+            self.assertEqual(rc, 0)
+            errors, _warnings = wt.check_project(root, None)
+            self.assertEqual([e for e in errors if "上限" in e], [])
+
+    def test_import_keeps_long_title_but_check_flags_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            src = Path(d) / "old.json"
+            src.write_text(json.dumps({"entries": {"0": {
+                "uid": 0, "comment": TITLE_21, "content": "正文",
+                "constant": True, "key": []}}}, ensure_ascii=False), encoding="utf-8")
+            wt.ensure_project(root)
+            self.assertEqual(wt.main(["import", str(root), str(src),
+                                      "--layer", "00-世界设定层"]), 0)
+            self.assertEqual(wt.find_entry(root, "e0001")["title"], TITLE_21)
+            errors, _warnings = wt.check_project(root, None)
+            self.assertTrue(any("超过 MMD 上限" in e for e in errors))
+
+    def test_import_warn_reports_length_consistent_with_limit(self):
+        """开启 entry_id 前缀时，WARN 报的字数必须是判定所用的（含前缀）长度，不能自相矛盾。"""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            src = Path(d) / "old.json"
+            src.write_text(json.dumps({"entries": {"0": {
+                "uid": 0, "comment": TITLE_13, "content": "正文",
+                "constant": True, "key": []}}}, ensure_ascii=False), encoding="utf-8")
+            cfg = wt.ensure_project(root)
+            cfg["export"]["include_entry_id_in_comment"] = True
+            wt.save_config(root, cfg)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(wt.main(["import", str(root), str(src),
+                                          "--layer", "00-世界设定层"]), 0)
+            out = buf.getvalue()
+            self.assertIn("[WARN]", out)
+            self.assertIn("21 字", out)          # 含前缀后的真实长度
+            self.assertNotIn("13 字超过", out)   # 不能报裸标题长度
+
+    def test_check_survives_non_string_title(self):
+        """非字符串 title 不应让 check 崩溃（长度判定跳过，交给别处报错）。"""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "wb"
+            wt.ensure_project(root)
+            wt.main(["add", str(root), "--layer", "00-世界设定层", "--title", "正常标题", "--constant", "true"])
+            entry = wt.find_entry(root, "e0001")
+            meta = dict(entry)
+            content = meta.pop("content")
+            path = meta.pop("path")
+            meta.pop("sort_prefix", None)
+            meta["title"] = 2026
+            wt.write_entry_file(path, meta, content)
+            errors, _warnings = wt.check_project(root, None)   # 不抛异常即达标
+            self.assertFalse(any("上限" in e for e in errors))
+
+    def test_build_warns_on_hand_edited_over_length_title(self):
+        """手改 frontmatter 绕过 add/rename 时，build 仍要吭声（不阻断导出）。"""
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d)
+            root = project / "工作" / "世界书"
+            wt.ensure_project(root)
+            wt.main(["add", str(root), "--layer", "00-世界设定层", "--title", "世界观总纲", "--constant", "true"])
+            entry = wt.find_entry(root, "e0001")
+            meta = dict(entry)
+            content = meta.pop("content")
+            path = meta.pop("path")
+            meta.pop("sort_prefix", None)
+            meta["title"] = TITLE_21
+            wt.write_entry_file(path, meta, content)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(wt.main(["build", str(root), "--out", "output/wb.json"]), 0)
+            out = buf.getvalue()
+            self.assertIn("[WARN]", out)
+            self.assertIn("超过 MMD 上限", out)
+
+    def test_build_quiet_on_st_platform(self):
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d)
+            root = project / "工作" / "世界书"
+            cfg = wt.ensure_project(root)
+            cfg["platform"] = "st"
+            wt.save_config(root, cfg)
+            wt.main(["add", str(root), "--layer", "00-世界设定层", "--title", TITLE_21, "--constant", "true"])
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(wt.main(["build", str(root), "--out", "output/wb.json"]), 0)
+            self.assertNotIn("[WARN]", buf.getvalue())
 
 
 if __name__ == "__main__":

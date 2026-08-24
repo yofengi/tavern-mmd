@@ -234,10 +234,6 @@ class TestWorldbookArrayForm(unittest.TestCase):
         self.assertTrue(any("script" in m.lower() for m in v.ERRORS))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestNullFieldsNoCrash(unittest.TestCase):
     def test_card_null_data_no_crash(self):
         reset()
@@ -258,3 +254,55 @@ class TestNullFieldsNoCrash(unittest.TestCase):
             "character_book": {"entries": [{"comment": "x", "content": 123}]}
         }}, "mmd")
         self.assertTrue(True)
+
+
+TITLE_20 = "这是一个刚好二十个字的世界书条目的标题啊"    # 恰好 20 字，合规边界
+TITLE_21 = "这是一个整整二十一个字的世界书条目超长标题"    # 21 字，超限
+
+
+class TestCommentLength(unittest.TestCase):
+    def test_worldbook_over_length_title_error_on_mmd(self):
+        reset()
+        v.validate_worldbook({"entries": {
+            "0": {"comment": TITLE_21, "content": "正文", "constant": True}
+        }}, "mmd")
+        self.assertTrue(any("超过 MMD 上限" in m for m in v.ERRORS))
+
+    def test_worldbook_over_length_title_error_on_oldmmd(self):
+        reset()
+        v.validate_worldbook({"entries": {
+            "0": {"comment": TITLE_21, "content": "正文", "constant": True}
+        }}, "oldmmd")
+        self.assertTrue(any("超过 MMD 上限" in m for m in v.ERRORS))
+
+    def test_exactly_twenty_chars_passes(self):
+        reset()
+        v.validate_worldbook({"entries": {
+            "0": {"comment": TITLE_20, "content": "正文", "constant": True}
+        }}, "mmd")
+        self.assertFalse(any("上限" in m for m in v.ERRORS))
+
+    def test_st_platform_has_no_title_limit(self):
+        reset()
+        v.validate_worldbook({"entries": {
+            "0": {"comment": TITLE_21, "content": "正文", "constant": True}
+        }}, "st")
+        self.assertFalse(any("上限" in m for m in v.ERRORS))
+
+    def test_card_book_over_length_title_error(self):
+        reset()
+        v.validate_card({"spec": "chara_card_v2", "data": {
+            "character_book": {"entries": [{"comment": TITLE_21, "content": "正文"}]}
+        }}, "mmd")
+        self.assertTrue(any("超过 MMD 上限" in m for m in v.ERRORS))
+
+    def test_nonstring_comment_no_crash(self):
+        reset()
+        v.validate_worldbook({"entries": {
+            "0": {"comment": None, "content": "正文", "constant": True}
+        }}, "mmd")
+        self.assertFalse(any("上限" in m for m in v.ERRORS))
+
+
+if __name__ == "__main__":
+    unittest.main()

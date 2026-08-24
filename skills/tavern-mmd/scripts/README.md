@@ -25,7 +25,7 @@ python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/
 
 ```text
 工作/世界书/
-├── worldbook.config.json      # 层级顺序、order生成规则、next_entry_number
+├── worldbook.config.json      # 层级顺序、order生成规则、next_entry_number、platform
 ├── index.md                   # 生成的导航索引；AI读它定位，不手改结构字段
 ├── notes.md                   # 设计说明、约束、人工决策、变更摘要
 ├── entries/                   # 正式条目源文件；一条一文件，参与 build
@@ -35,6 +35,8 @@ python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/
 ```
 
 铁律：新增、导入、删除、移动、重命名、重排条目必须调用本脚本；AI 可以编辑 `entries/` 下的条目正文和非结构性 frontmatter，但编辑后必须重新 `build` + `check`。
+
+标题限额：条目 `title`（导出为 `comment`）在 MMD 上限 **20 字**（中文一字算 1，标点计入）。`add`/`rename` 超限直接拒绝并返回 2，`check` 报 error，`build` 不阻断导出但打 `[WARN]`（兜手改 frontmatter 的情况）；`import` 不阻断（保留既有数据），只打 `[WARN]`，随后用 `rename` 缩短。目标平台为本地酒馆时在 `worldbook.config.json` 设 `"platform": "st"` 关闭该检查；开启 `export.include_entry_id_in_comment` 时 `[e0001] ` 前缀 8 字也计入。
 
 ## validate.py — 静态审核
 
@@ -54,7 +56,7 @@ python validate.py <文件> [--type regex|card|worldbook] [--platform oldmmd|mmd
 - 平台红线(oldmmd)：`<script>`→错误、ES6→错误、innerHTML/cssText→错误、内联事件裸换行→错误
 - 平台红线(mmd)：script/ES6 已实测支持→放行；onerror 多行放行；onclick 代码字面量/直接赋值告警；innerHTML/cssText 仍按需提示
 - 角色卡：spec/同步；MMD平台强制 v2（spec=chara_card_v2、无 group_only_greetings）
-- 世界书：entries字段、蓝绿灯配置
+- 世界书：entries字段、蓝绿灯配置、条目标题 `comment` ≤20字（mmd/oldmmd 报错，st 不查）——`--platform` 省略时默认 oldmmd，审本地酒馆世界书务必显式传 `--platform st`，否则标题会被误报超限
 
 ## build-preview.py — 平台保真预览
 

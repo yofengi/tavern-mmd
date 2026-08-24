@@ -3,6 +3,8 @@
 本文档适用于旧版MMD / sexyai.top 平台的交互模块开发；状态栏具体方案（三段正则模板、数据格式、继承机制）见 `../beautify/statusbar.md`，全局CSS美化见 `../beautify/global-css.md`。
 
 > 旧版 MMD 已冻结、不再更新。本文档保持旧版基线（ES5 only、禁 `<script>`、onclick 净化等）不动。**唯一已随平台同步的项**：正则总数上限由 30 提升至 **130 条**（平台级能力，新旧版一致）；findRegex 1000 / replaceString 20000 字符上限不变。
+>
+> **世界书条目标题 20 字上限**同为平台级限制，新旧版一致，见 `mmd.md` §7。
 
 ---
 

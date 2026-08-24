@@ -26,6 +26,9 @@ try:
 except (AttributeError, ValueError):
     pass  # 旧 Python 或已重定向时忽略
 
+# MMD 世界书条目标题（comment）硬上限，按字符数计，中文一字算 1。本地酒馆无此限制。
+MAX_COMMENT_LEN = 20
+
 ERRORS = []
 WARNS = []
 OKS = []
@@ -161,6 +164,17 @@ def check_onerror_inner_quote(s, platform, where):
         err('%s onerror="" 内部含 %d 个裸双引号——会提前闭合属性、img 结构破坏、'
             '引擎不绑定、面板静默不渲染。内部字符串改单引号，CFG/CSS 用单引号 JS '
             '字面量序列化（勿用 json.dumps）。' % (where, bad))
+
+
+def check_comment_length(comment, platform, where):
+    """世界书条目标题（comment）长度。MMD 上限 20 字，超出在平台侧被截断；st 无限制。"""
+    if platform not in ("oldmmd", "mmd"):
+        return
+    if not isinstance(comment, str):
+        return
+    if len(comment) > MAX_COMMENT_LEN:
+        err("%s 标题共 %d 字，超过 MMD 上限 %d 字——导入后标题被截断。"
+            "请精简标题，去掉【】·— 等装饰符（装饰符同样占额度）。" % (where, len(comment), MAX_COMMENT_LEN))
 
 
 def check_platform_redlines(s, platform, where):
@@ -480,6 +494,9 @@ def validate_card(obj, platform):
     # 卡内世界书条目里如带 HTML（美化/状态栏），也查红线
     cb = data.get("character_book", {})
     for e in cb.get("entries", []) if isinstance(cb, dict) else []:
+        if not isinstance(e, dict):
+            continue
+        check_comment_length(e.get("comment", ""), platform, "卡内条目[%s]" % e.get("comment", "?"))
         c = e.get("content", "")
         if isinstance(c, str) and re.search(r"<(?:script|style)\b|on(?:error|click)\s*=", c, re.I):
             check_platform_redlines(c, platform, "卡内条目[%s]" % e.get("comment", "?"))
@@ -502,6 +519,8 @@ def validate_worldbook(obj, platform):
             err("条目 %s 不是对象" % uid)
             continue
         tag = "条目[%s]" % e.get("comment", uid)
+        # 标题长度（MMD 20 字上限）
+        check_comment_length(e.get("comment", ""), platform, tag)
         # 绿灯必须有 key
         if e.get("constant") is False and not e.get("key"):
             warn("%s 是绿灯(constant=false)但 key 为空——永不触发。" % tag)
