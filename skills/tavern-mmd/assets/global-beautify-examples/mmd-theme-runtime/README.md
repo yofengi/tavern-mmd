@@ -1,6 +1,15 @@
 # MMD 三态主题运行时
 
-这是面向**当前 MMD（魅魔岛 / sexyai.top）**的全局主题运行时资产，不声明也不测试 oldmmd 兼容性。成品 `mmd-theme-runtime.mmd.json` 可导入当前 MMD 正则系统；日间酒红/羊皮纸与夜间深灰/柔酒红只是示例 preset，不是固定视觉规范。
+这是面向**当前 MMD（魅魔岛 / sexyai.top，`/mmd`）**的全局主题运行时资产。成品 `mmd-theme-runtime.mmd.json` 可导入当前 MMD 正则系统（MMD 专用 4 字段格式）；日间酒红/羊皮纸与夜间深灰/柔酒红只是示例 preset，不是固定视觉规范。
+
+> 🚨 **不适用于 MMD沙盒模式（`/mmdsandbox`），也不声明、不测试沙盒兼容性。** 本资产整套机制都是为当前 MMD 的约束设计的，在沙盒模式逐条失效：
+>
+> - 主题状态写在 `html[data-zmr-mode="day|night"]` 上 —— 沙盒模式禁 `html{}` / `body{}` / `:root{}` 全局选择器（官方校验 WARN），根钩子是 `[data-chat="root"]`；且**作者自写 `data-*` 会被净化删掉**，`data-zmr-mode` 这类自定义属性在那里立不住。
+> - 激活与点火依赖 `img onerror` —— 沙盒模式**官方明令禁止** `img onerror` 点火器（teapot 系）。
+> - `MutationObserver` 清污哨兵 + route supervisor + owner/version 租约 —— 沙盒模式不需要：平台自带 `data-theme="light|dark"`、10 个 `--chat-*` 变量与 `theme:change` 事件，换肤只是在 `[data-chat="root"]` 上改变量。
+> - 导入格式也不同：沙盒模式是**顶层恰好 6 键**的正则 JSON（含 `chatVersion: 1`），本资产的 4 字段 json 导进去不成立。
+>
+> 沙盒模式换肤请读 `../../../references/beautify/global-css.md`「沙盒模式换肤」与 `../../../references/platforms/mmd-sandbox.md` §6。
 
 ## 文件与模块
 

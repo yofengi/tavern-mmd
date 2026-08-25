@@ -4,7 +4,7 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 
 本文档给出**两个平台都验证过**的认证写法，供后续直接调用/改配色。预览验证用 `scripts/build-preview.py`（悬浮组件会被自动归入"悬浮组件预览"面板，全景预览里与其他组件组合显示）。
 
-> **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（无空白条）；代价：多一层 `attachShadow` 包装。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 双引号包裹、内部全单引号、禁内部裸双引号。本文下方 light DOM 写法仍是跨版本基线；shadow 变体用于需要强隔离的组件。全局主题 CSS 本身不可 shadow 化，因为它必须作用于平台 light DOM。
+> **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（无空白条）；代价：多一层 `attachShadow` 包装。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 属性用双引号包裹时内部全单引号、禁内部裸双引号（属性改用单引号包裹则内部可写双引号）。本文下方 light DOM 写法是当前 MMD 与本地酒馆的基线；shadow 变体用于需要强隔离的组件。全局主题 CSS 本身不可 shadow 化，因为它必须作用于平台 light DOM。**这两种写法都不适用于沙盒模式**（见下方平台红线表）。
 
 ### 主题切换 / 设置 UI 的职责边界
 
@@ -16,17 +16,23 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 
 ## 平台红线（决定写法）
 
-| 限制 | oldmmd | mmd（当前） |
-|---|---|---|
-| `<script>` | 剥离不执行 → **必须 img onerror 点火** | 可用，但 img onerror 仍是跨版本回退首选 |
-| `style.cssText=` | 报 Unexpected identifier → **禁用** | 仅告警 |
-| `el.innerHTML=` | 易被破坏 → **禁用** | 仅告警 |
-| `onerror` 多行 | CSP 破坏多行 → **必须单行** | 可多行 |
-| 内联 `onclick` 写 DOM 赋值 | 单行可用 | **会被净化** → 用 `el.onclick=function(){}` |
-| `el.style.left/top=`（单属性） | ✅ 允许 | ✅ 允许 |
-| `classList.add/remove/toggle` | ✅ 允许 | ✅ 允许 |
+| 限制 | 当前 MMD `/mmd` | 本地酒馆 `/st` | MMD沙盒模式 `/mmdsandbox` |
+|---|---|---|---|
+| `<script>` | 可用（document-level 一次性 bootstrap）；per-message 渲染仍须 img onerror | 可用 | **一等公民**，装卡即抽出、整卡跑一次 |
+| `img onerror` 点火器 | ✅ per-message 唯一可靠载体 | ✅ 可用 | 🚨 **官方明令禁止**（teapot 系） |
+| `style.cssText=` | 仅告警 | ✅ 允许 | 【待验证】官方未提及；按纯 DOM API 保守处理 |
+| `el.innerHTML=` | 仅告警 | ✅ 允许 | 【待验证】官方未提及；按纯 DOM API 保守处理 |
+| `onerror` 多行 | ✅ 可多行（属性用双引号包裹时内部禁裸双引号） | ✅ 可多行 | 不适用（onerror 被禁） |
+| 内联 `onclick` | **只放行干净调用/引用表达式**，禁代码字面量与直接 DOM 赋值 → 用 `el.onclick=function(){}` | ✅ 允许 | ✅ 普通标签 `onclick="tap()"` 可用（顶层 `function` 挂 `window`）；**`svg` 内部 `onclick` 会被删** |
+| 作者自写 `data-*` | ✅ 允许（轻主板 `data-s` 就靠它） | ✅ 允许 | 🚨 **会被净化删掉** → 用 `class` 或 `id` |
+| `el.style.left/top=`（单属性） | ✅ 允许 | ✅ 允许 | ✅ 允许（算出来的值写内联 `style`） |
+| `classList.add/remove/toggle` | ✅ 允许 | ✅ 允许 | ✅ 允许 |
+| 长期悬浮 UI 挂哪 | `document.body.appendChild` + `position:fixed` | 同左 | 🚨 **挂舞台 `sdk.stage`**，不能挂气泡（气泡滚出屏幕即销毁） |
+| z-index | `9999` 级即可 | 无约束 | **作者段 1000–1999**；超了会挡平台长按菜单 |
 
-**统一结论（两版通用的最稳写法）**：
+> 🚨 **沙盒模式不要用本文档的写法。** 本文档全部组件的地基是「`img onerror` 点火器 + `createElement` 注入 `document.body`」，这在沙盒模式里两头都不成立：点火器被官方禁，长期浮层要挂舞台而不是 body。沙盒模式做悬浮 UI 的正确形状：专开一条规则只放 `<script>` → `sdk.stage.open('content')` + `sdk.stage.el()` 里装配面板（关掉再开内容还在，不必重建）→ 气泡内的按钮用 `sdk.on('message:mount')` 绑事件。规范见 `../platforms/mmd-sandbox.md` §4.6（舞台）、§5.2（净化与白名单）、§6.3（z-index）。**本文档的交互设计（拖动、菜单翻转、防冒泡、单例防重）思路可参考，载体与挂载点必须整体重写。**
+
+**统一结论（当前 MMD 与本地酒馆通用的最稳写法）**：
 1. 静态外观（尺寸/配色/圆角/阴影/默认位置）→ **预定义 CSS 类**（放进美化 `<style>`），不用 `cssText`。
 2. 开关状态（菜单显隐、抽屉滑入滑出）→ **`classList.toggle('z-open')`** + CSS 类里写 `.z-open{...}`，不用改 `style.display`/`style.transform` 字符串。
 3. 拖动位置、菜单翻转坐标这类**连续数值** → 用**单属性** `el.style.left=x+'px'`（validate 只拦 `cssText`/`innerHTML`，放行单属性）。
@@ -202,6 +208,6 @@ fillTA('请按格式输出：'+F('姓名')+F('职业')+L+'HP=当前/上限'+R+' 
 3. **触发标记**：`<悬浮球>`/`<侧边栏>` 写进第一句话（`beginning`）或 `statusbar`，由对应正则消费——别留**悬空标记**（validate 会报错）。
 4. **菜单动作**：改 `acts` 数组与 `mi.onclick` 分支即可换行为（回填输入框/开抽屉/打开你自己的弹层）。回填输入框统一用选择器 `.uni-textarea-textarea`（与状态栏选项按钮一致）。
 5. **序列化**：`replaceString` 必须脚本序列化成单行（换行转 `\n`、引号转 `\"`、无 BOM），禁手写多行——见 ../output/regex-output.md 2.3。
-6. **验证**：`validate.py --platform <mmd|oldmmd>` 必 0 错 → `build-preview.py`（默认 `--mode both`）看三面板"悬浮组件预览"+全景预览，实测拖动、菜单跟随、翻转、选项点击。oldmmd 与 mmd 同一套写法都已验证通过。
+6. **验证**：`validate.py --platform mmd` 必 0 错 → `build-preview.py --platform mmd`（默认 `--mode both`）看三面板"悬浮组件预览"+全景预览，实测拖动、菜单跟随、翻转、选项点击。本文写法在当前 MMD 与本地酒馆均已验证通过；沙盒模式请勿套用（见「平台红线」）。
 
 > 现成资产与生成器：`../../assets/shadowcast-examples/` 下的 `build_float.py`、`悬浮球侧边栏-影渲法.mmd.json` 和 `README.md`。生成器当前默认输出名以脚本 `--help` / README 为准；用 `../../scripts/build-preview.py` 生成预览，不再引用仓库中不存在的 fixture 脚本。

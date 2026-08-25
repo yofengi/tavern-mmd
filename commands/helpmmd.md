@@ -6,17 +6,25 @@ description: 查看 tavern-mmd 全部指令说明（平台指令×任务指令�
 
 # tavern-mmd 指令帮助
 
-本套指令分两个维度：**平台指令**设定目标酒馆平台，**任务指令**执行具体制作。两者自由组合，例如先 `/oldmmd` 再 `/beautify` = 给旧版MMD做美化。
+本套指令分两个维度：**平台指令**设定目标酒馆平台，**任务指令**执行具体制作。两者自由组合，例如先 `/mmdsandbox` 再 `/beautify` = 给 MMD 沙盒模式做美化。
 
 ## 平台指令（设定本次制作的目标平台）
 
 | 指令 | 平台 | 关键特点 |
 |---|---|---|
-| `/mmd` | 当前MMD（魅魔岛/sexyai.top） | 支持`<script>`与ES6（实测全支持）；正则≤130条、角色卡仅v2 |
-| `/oldmmd` | 旧版MMD | 禁`<script>`（用img onerror点火器）、ES5 only、正则手填≤130条 |
+| `/mmd` | 当前MMD（魅魔岛/sexyai.top，旧聊天页） | 支持`<script>`与ES6（实测全支持）；状态栏走 img onerror；正则≤130条、findRegex必须包斜杠、角色卡仅v2 |
+| `/mmdsandbox` | MMD沙盒模式（同站**新聊天页**，`chatVersion: 1`） | `<script>`一等公民（整卡只跑一次）+官方SDK 30能力/12事件+舞台+跨设备存档；导入正则json为**6键**；findRegex可用纯字面量；禁img onerror；不产v2卡与整卡PNG |
 | `/st` | 本地酒馆SillyTavern | 无限制：script/ES6+可用、正则json直接导入、世界书全字段 |
 
 平台会写入项目 main.md；未设定平台时，任务指令会先弹窗询问。
+
+### `/mmd` 还是 `/mmdsandbox`？
+
+两者是同一个站的两套聊天页，技术写法**互不通用**，选错的产出不报错、只是不生效。判断办法：
+
+- 卡是**新建**的、且在创卡页确认过是「新页 / 新版对话框」（`chatVersion: 1`）→ `/mmdsandbox`
+- 老卡，或不确定 → `/mmd`。`chatVersion` **只在新建卡导入时被读取**，给已存在的卡导入该字段会被忽略，**没法把老卡升级成新页**
+- 需要可点按钮、常驻面板（地图/背包）、跨设备存进度 → 只有 `/mmdsandbox` 做得到
 
 ## 任务指令（执行具体制作）
 
@@ -30,19 +38,22 @@ description: 查看 tavern-mmd 全部指令说明（平台指令×任务指令�
 
 ## 常用组合示例
 
-- `/oldmmd` → `/beautify` 选状态栏：旧版MMD状态栏（首选混合态雷达法，产出可导入json）
+- `/mmd` → `/beautify` 选状态栏：当前MMD状态栏（首选混合态雷达法，产出可导入json）
+- `/mmdsandbox` → `/beautify` 选状态栏：新聊天页状态栏（`<script>`+SDK，长期面板挂舞台）
 - `/st` → `/worldbook`：本地酒馆世界书（可用全部字段，产出json直接导入）
 - `/mmd` → `/cardplanmax`：从零共创一张当前MMD完整角色卡
-- 不带指令直接聊（如"给旧版MMD做个状态栏"）也会自动触发 tavern-mmd skill
+- 不带指令直接聊（如"给MMD新版对话框做个状态栏"）也会自动触发 tavern-mmd skill
 
 ## 产出物
 
-| 产出 | 本地酒馆 | MMD（新旧同） |
-|---|---|---|
-| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD仅识别v2） |
-| 世界书 | 世界书 json | 同左 |
-| 正则 | 正则脚本 json | MMD导入json（首选）；手填清单 .md 备选 |
+| 产出 | 本地酒馆 `/st` | 当前MMD `/mmd` | 沙盒模式 `/mmdsandbox` |
+|---|---|---|---|
+| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD仅识别v2） | **不产v2卡、不产整卡PNG**；交付=6键导入正则json + 独立persona文本 |
+| 世界书 | 世界书 json | 同左 | 独立json（根对象只留`entries`），不能并进正则json |
+| 正则 | 正则脚本 json | MMD导入json（4键，首选）；手填清单 .md 备选 | 导入正则json（**6键**：多`chatVersion`/`personality`）；手填清单 .md 备选 |
 
-做整张角色卡时，完成后会用弹窗问**输出形态**：内嵌正则的整卡 PNG / 内嵌正则的整卡 JSON / 分离式（角色卡 + 独立正则 json + 状态栏规则.md）。内嵌正则的整卡会把状态栏生成规则作为蓝灯条目放进卡内世界书。单独做美化/状态栏时，默认交付 = 正则 json + 状态栏规则.md。
+做整张角色卡时（`/mmd` 与 `/st`），完成后会用弹窗问**输出形态**：内嵌正则的整卡 PNG / 内嵌正则的整卡 JSON / 分离式（角色卡 + 独立正则 json + 状态栏规则.md）。内嵌正则的整卡会把状态栏生成规则作为蓝灯条目放进卡内世界书。单独做美化/状态栏时，默认交付 = 正则 json + 状态栏规则.md。
+
+**沙盒模式没有这个弹窗**：形态固定为「6键正则 json + 独立 persona 文本 +（可选）独立世界书 json」。persona 必须另贴——导入页不读 `personality` 字段。交付时会提醒你：**这张卡必须新建，并在创卡页确认是新页**，否则整套方案零效果。
 
 每个项目使用独立文件夹（main.md / plan.md / 资料 / 工作 / output 五件套），中断后新会话读 main.md+plan.md 可无缝续作。

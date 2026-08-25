@@ -1,21 +1,24 @@
 # 当前MMD平台技术规范（支持 `<script>`、ES6）
 
-> 本文档描述当前版本MMD（魅魔岛/sexyai.top）。各节分别标注实测、官方文档、保守处理或待验证；只有明确标为实测的条目才可视为探针/真实对话结论。
-> 旧版 MMD 已冻结、不再更新；当前 MMD 仍在迭代，本文档随实测更新。未实测的能力（MVU/STScript/酒馆助手等）仍按无处理（保守）。
+> 本文档描述当前 MMD（魅魔岛/sexyai.top）**主聊天页**。各节分别标注实测、官方文档、保守处理或待验证；只有明确标为实测的条目才可视为探针/真实对话结论。当前 MMD 仍在迭代，本文档随实测更新。未实测的能力（MVU/STScript/酒馆助手等）仍按无处理（保守）。
+>
+> 状态栏具体方案（三段正则模板、数据格式、继承机制）见 `../beautify/statusbar.md`，全局CSS美化见 `../beautify/global-css.md`。
+>
+> **另有「沙盒模式」新聊天页**（角色卡 `chatVersion: 1` 开启），执行模型与本文档不同（官方 SDK、`<script>` 一等公民、禁 `img onerror`），单独成规范见 `mmd-sandbox.md`。本文档所述规则**不适用于**沙盒模式。
 
-## 与旧版的差异（全部已实测）
+## 0. 能力速查（全部已实测/已确认）
 
-| 项目 | 旧版 | 当前版 | 状态 |
-|---|---|---|---|
-| `<script>` 标签 | ❌ 被剥离 | ✅ 可执行；**per-message 自渲染/定位不可用**；document-level 一次性 bootstrap 与全局 handler 定义可用 | 已实测边界 |
-| ES6+ 语法 | ❌ ES5 only | ✅ 全支持（img onerror 载体下，7/7 探针全绿），**推荐 ES6** | 已实测 |
-| `onerror` 多行 / 双引号 | ❌ 单行 only、须单引号 | ✅ 可多行、可用双引号，代码可写干净 | 已实测 |
-| `onclick` 净化 | 放行极简单行赋值 | **收紧**：只放行"干净调用/引用表达式"，禁代码字面量与直接DOM赋值 | 已实测 |
-| 正则总数上限 | 30 条 | **130 条** | 已实测 |
-| findRegex/replaceString 上限 | 1000 / 20000 | 同旧版 1000 / 20000 | 已确认 |
-| 角色卡导入 | 仅 chara_card_v2 | 同旧版（仅v2，不识别v3） | 已确认 |
-| 原生 KV `$field` 状态栏 | — | ✅ 平台内置（`【状态】hp::85【/状态】` → 替换里用 `$hp`，纯HTML零JS） | 官方文档 |
-| MVU/STScript/酒馆助手 | ❌ | ❌ 按无处理 | 保守 |
+| 项目 | 当前 MMD | 状态 |
+|---|---|---|
+| `<script>` 标签 | ✅ 可执行；**per-message 自渲染/定位不可用**；document-level 一次性 bootstrap 与全局 handler 定义可用 | 已实测边界 |
+| ES6+ 语法 | ✅ 全支持（img onerror 载体下，7/7 探针全绿），**推荐 ES6** | 已实测 |
+| `onerror` 多行 / 双引号 | ✅ 可多行、可用双引号，代码可写干净（内部禁裸双引号，见 §2） | 已实测 |
+| `onclick` 净化 | 只放行"干净调用/引用表达式"，禁代码字面量与直接 DOM 赋值 | 已实测 |
+| 正则总数上限 | **130 条** | 已实测 |
+| findRegex / replaceString 上限 | 1000 / 20000 字符 | 已确认 |
+| 角色卡导入 | 仅 chara_card_v2（不识别 v3） | 已确认 |
+| 原生 KV `$field` 状态栏 | ✅ 平台内置（`【状态】hp::85【/状态】` → 替换里用 `$hp`，纯HTML零JS） | 官方文档 |
+| MVU/STScript/酒馆助手 | ❌ 按无处理 | 保守 |
 
 ---
 
@@ -33,7 +36,7 @@
 | 可选链 | `o?.a?.b` | ✅ |
 | ES5 基准 | `[1,2,3].join('-')` | ✅ |
 
-**结论**：旧版"遇到 `=>` 从该处截断、ES5 only"的限制在当前版**已不存在**。新写引擎/交互代码**推荐 ES6**——同一功能代码更短、可读可改、bug 更少。前提：以上在 `img onerror` 载体内测得。
+**结论**：ES6 语法无任何截断或拦截，新写引擎/交互代码**推荐 ES6**——同一功能代码更短、可读可改、bug 更少。前提：以上在 `img onerror` 载体内测得。
 
 ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）：
 - 展开运算符做不可变更新：`const next = { ...上一轮状态, 好感: 上一轮状态.好感 + 3 }`
@@ -43,15 +46,15 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 
 ---
 
-## 2. `onerror` 已彻底解放（实测）
+## 2. `onerror` 的书写自由度（实测）
 
-| 写法 | 旧版 | 当前版 |
-|---|---|---|
-| 单行 `onerror` | ✅ | ✅ |
-| 多行 `onerror`（属性值带换行） | ❌ | ✅ 可用 |
-| 属性内双引号（`onerror='...'` 内用 `"`） | ❌ | ✅ 可用 |
+| 写法 | 实测 |
+|---|---|
+| 单行 `onerror` | ✅ 可用 |
+| 多行 `onerror`（属性值带换行） | ✅ 可用 |
+| 属性内双引号（`onerror='...'` 单引号包裹时内部用 `"`） | ✅ 可用 |
 
-`onerror` 内代码可写成正常多行函数、随意用双引号。这是当前版对引擎作者最实在的提效——复杂状态栏从"全挤一行、只能单引号的天书"变成"人能手写手改的正常代码"。
+`onerror` 内代码可写成正常多行函数、可用双引号（前提是属性本身用单引号包裹，见下方红线）。复杂状态栏引擎可以按人能手写手改的正常代码来写，不必挤成一行。
 
 > 🚨 **真红线：onerror="" 内部禁裸双引号（2026-06-17 浏览器+MMD 实机三组对照确认）**。`onerror="..."` 双引号包裹时，内部 JS 任何 `"` 会提前闭合属性 → 后段 JS 拆成无效裸属性 → img 结构破坏 → 引擎不绑定 → **面板静默不渲染（不爆代码但完全不显示）**。修法：内部字符串全用单引号；注入的配置（CFG/CSS）用单引号 JS 字面量序列化，**勿用 `json.dumps`/`JSON.stringify`**（产双引号）。`validate.py` 已检查此项。
 >
@@ -61,7 +64,7 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 
 ---
 
-## 3. `onclick` 放行规则（实测，比旧版收紧）
+## 3. `onclick` 放行规则（实测）
 
 **核心判据：`onclick` 属性值里只能是"干净的调用/引用表达式"，不能出现代码字符串字面量或直接 DOM 赋值语句。**
 
@@ -71,11 +74,11 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 | `onclick="eval(getElementById('FUNC').dataset.s)"` | ✅ 放行（E1） | 干净的调用表达式；eval 本体未被 CSP 拦，执行了 data-s 里的 DOM 操作 |
 | `el.onclick=function(){}`（img onerror 里 JS 赋值绑定） | ✅ 放行 | 净化器只扫 HTML 属性文本，扫不到 JS 赋的 handler |
 | `onclick="eval('...代码...')"`（代码字符串塞进属性） | ❌ 净化（E2） | 属性内出现代码字面量，命中净化规则 |
-| `onclick="this.x='y'"`（直接 DOM 赋值） | ❌ 不触发 | 赋值语句也算代码，被净化（旧版曾放行极简单行，当前版收紧） |
+| `onclick="this.x='y'"`（直接 DOM 赋值） | ❌ 不触发 | 赋值语句也算代码，被净化 |
 
 **两条合法交互路径（当前 MMD 二选一，均已实测）**：
 1. **`window.__fn` 全局函数**（官方推荐）：在 `<script>` 或 `img onerror` 里定义 `window.__fn = window.__fn || function(){...}`，无参数按钮使用已验证的 canonical 形式 `onclick="window.__fn&&__fn()"`。
-2. **轻主板 + 胖遥控器**（见 `mmd-old.md` §5.3，当前 MMD **已复测可用**）：复杂逻辑存进隐藏元素的 `data-s` 属性，`onclick="eval(getElementById('FUNC').dataset.s)"` 只做干净的 eval 调用——正因为踩中"属性内是干净调用、代码在 data-s 里"才放行。
+2. **轻主板 + 胖遥控器**（见 §10.3，已复测可用）：复杂逻辑存进隐藏元素的 `data-s` 属性，`onclick="eval(getElementById('FUNC').dataset.s)"` 只做干净的 eval 调用——正因为踩中"属性内是干净调用、代码在 data-s 里"才放行。
 
 > 雷达引擎的选项按钮一直能点，用的就是路径 ③ `el.onclick=function(){}`（img onerror 里 JS 赋值绑定）——净化器扫不到 JS 赋的 handler。
 
@@ -173,7 +176,7 @@ per-message 点火器若要唤醒主题，只能调用已存在的全局 API，�
 | **固定传输字符** | **15000 字** | 截断 |
 | 单条正则 replaceString | 20000 字 | 截断 |
 | 单条正则 findRegex | 1000 字 | 失效 |
-| 正则条数 | 130 条（当前MMD；旧版同） | 无法再加 |
+| 正则条数 | 130 条 | 无法再加 |
 | **世界书条目标题** | **20 字**（`comment` 字段） | 截断 |
 | 角色卡格式 | 仅 chara_card_v2 | v3 不识别 |
 | 角色卡图片 | 仅 PNG（JPG 读不出 chara 数据）| 导入无数据 |
@@ -189,7 +192,7 @@ per-message 点火器若要唤醒主题，只能调用已存在的全局 API，�
 - 标题只是平台 UI 里的定位标签，不参与注入，不用写全描述——摘要写进源文件 `summary`。
 - 若开了 `include_entry_id_in_comment`，`[e0001] ` 前缀（8 字符，随 entry_id 位数增长）也计入这 20 字，标题本身只剩 12 字，一般不建议开。
 
-脚本已强制此限：`worldbook_tool.py add/rename` 超限直接拒绝（不写出源文件、退出码 2），`check` 报 error，`build` 不阻断导出但打 `[WARN]`（兜手改 frontmatter 的情况），`import` 保留既有数据只打 `[WARN]`，`validate.py --platform mmd|oldmmd` 对 `comment` 报 error。若项目目标平台是本地酒馆，在 `worldbook.config.json` 里设 `"platform": "st"` 可关掉该检查（`validate.py` 侧对应传 `--platform st`）。
+脚本已强制此限：`worldbook_tool.py add/rename` 超限直接拒绝（不写出源文件、退出码 2），`check` 报 error，`build` 不阻断导出但打 `[WARN]`（兜手改 frontmatter 的情况），`import` 保留既有数据只打 `[WARN]`，`validate.py --platform mmd` 对 `comment` 报 error。若项目目标平台是本地酒馆，在 `worldbook.config.json` 里设 `"platform": "st"` 可关掉该检查（`validate.py` 侧对应传 `--platform st`）。
 
 ### 固定传输字符（15000 字上限）
 
@@ -218,12 +221,48 @@ per-message 点火器若要唤醒主题，只能调用已存在的全局 API，�
 
 ## 8. 正则系统
 
-- **总数 ≤ 130 条**（当前版，旧版 30 已同步提至 130）；findRegex ≤ 1000 字符；replaceString ≤ 20000 字符。
+- **总数 ≤ 130 条**；findRegex ≤ 1000 字符（超出后正则失效）；replaceString ≤ 20000 字符（超出后被截断，超限拆多条）。
 - **findRegex 必须是 `/pattern/flags` slash literal**（2026-06-17 实测铁律）：四字段 JSON 导入与 UI 手填都不得使用裸模式。不带斜杠（如 `\[k=([^\]]+)\]`）时平台正则控制台**测试能过、实际聊天界面不替换**；写成 `/\[k=([^\]]+)\]/` 才生效。固定标记也必须写成 `/<标记>/`。
 - **正则跑在 markdown(vditor) 之前**：正则替换产出的 HTML 还要再过一遍 markdown 管线（`*x*` 会被吃成斜体）。靠正则直接吐可见文本会被 markdown 误伤；数据藏 `display:none` + UI 由 JS `createElement` 生成（或进 shadow）则绕开。
 - **聊天运行在 `chatIframe` 内**：浏览器控制台默认 TOP frame 查不到状态栏 DOM，须切执行上下文到 chatIframe；`document` 作用域、数据扫描同理。
 - 导入方式：json 批量导入（MMD 专用 4 字段格式 pageDepth/statusbar/beginning/regex_scripts）或平台 UI 逐条手填，见 ../output/regex-output.md。
-- random 标签三种用法、避坑：沿用 `mmd-old.md` §4.2-4.3（与平台无关）。
+
+### 8a. `random` 标签三种用法
+
+平台级正则特性，写在 `replaceString` 里。
+
+**用法1：多个独立 random 标签各自随机。** 同一 `replaceString` 中多个 `random` 标签**各自独立**随机，互不干扰。
+
+```
+replaceString: 你抽到了武器：(random(长剑|战斧|法杖)) 和防具：(random(皮甲|锁子甲|布袍))。
+可能结果：  "你抽到了武器：长剑 和防具：布袍。"
+           "你抽到了武器：战斧 和防具：皮甲。"
+```
+
+**用法2：在语句中无缝嵌入。** `random` 标签可嵌入句子任意位置，生成流畅文本。
+
+```
+replaceString: 石头剪刀布，我决定出 (random(石头|剪刀|布)) 来一决胜负！
+可能结果：  "石头剪刀布，我决定出 剪刀 来一决胜负！"
+```
+
+**用法3：捕获组 `$1` 作为 random 选项。** 将 `findRegex` 中捕获到的内容作为 `random` 标签的动态选项，实现最强联动。
+
+```
+findRegex:     /我选择(.+)/
+replaceString: 你选择了 $1 啊，这真是个 (random(不错的|绝妙的|有待商榷的|$1 自己的)) 选择。
+
+当用户输入："我选择苹果"
+可能结果1（常规项）：  "你选择了 苹果 啊，这真是个 绝妙的 选择。"
+可能结果2（$1被选中）："你选择了 苹果 啊，这真是个 苹果 自己的 选择。"
+```
+
+**避坑两条**：
+
+- 使用捕获组作为 `random` 选项时，确保 `findRegex` 能**稳定准确**捕获预期内容，不稳定的正则会导致 `random` 出现非预期文本。
+- 时刻注意 `replaceString` 总字符数，复杂 `random` 组合（尤其多个长选项）会快速消耗 20000 字符额度。
+
+> 另有官方文字变量形态 `{{random:A::B::C}}`（见 §6），两种写法并存。
 
 ---
 
@@ -233,19 +272,144 @@ per-message 点火器若要唤醒主题，只能调用已存在的全局 API，�
 2. **交互（点击/折叠/切图）**：走 §3 两条合法路径（`window.__fn` 或轻主板 eval）。
 3. **全局美化**：先在 ../beautify/global-css.md 选择静态换肤或运行时主题包；需要 day/night/native、玩家微调或路由重入时再读 ../beautify/theme-runtime.md。全局运行时是文档级单例，不属于 per-message 渲染。
 4. **正则交付**：json 导入（4 字段）或手填、130 条限额，见 ../output/regex-output.md。
+5. **任何交互模块动手前先过 §10**：结构红线（img 位置、stopPropagation、时间戳 ID、换行空白条）与四种核心架构模式（onerror 点火器、轻主板+胖遥控器、纯CSS radio 切换、appendChild 置顶）都在那一节。
 
 ---
 
-## 10. 沿用旧版的通用规则（与平台版本无关）
+## 10. 结构红线与核心架构模式
 
-以下条目旧版当前版**完全一致**，直接沿用 `mmd-old.md`：
+本节是所有交互模块（状态栏、面板、模态框、悬浮组件）共用的地基，与具体功能无关。
 
-- **§1 结构红线**：`<img onerror>` 必须在容器闭合 `</div>` 之前；最外层容器 `onclick="event.stopPropagation()"` 防冒泡。
-- **§4 正则系统**：random 标签三种用法、字符数避坑（总数上限改 130）。
-- **§5 核心架构**：§5.1 onerror 点火器、§5.2 纯CSS radio:checked 切换、§5.3 轻主板+胖遥控器（**当前版已复测可用**）、§5.4 appendChild 置顶、§5.5 时间戳唯一ID。
-- **MMD 换行空白条陷阱**：markdown 管线（vditor）把标签间换行补成空 `<p>`，浏览器预览查不出，详见 `../beautify/statusbar-radar.md` 与 `mmd-old.md` §1“三级：交互限制”表。
+### 10.1 结构红线（违反即整块失效）
 
-**当前版与旧版的唯一交互差异**：旧版曾放行极简单行 inline 赋值（`this.x='y'`），当前版收紧——inline 赋值也被净化，交互一律走 §3 的 `window.__fn` 或轻主板 eval。`<img onerror>` 内可用 ES6、可多行（旧版须 ES5 单行），但纯 DOM API 原则（避免 `innerHTML` 字符串拼接被实体化）仍建议遵守。
+| 红线 | 现象 / 后果 | 做法 |
+|:---|:---|:---|
+| `<img onerror>` 必须在容器内部 | `img.closest('.容器')` 返回 `null`，整段 JS 逻辑一行都跑不起来 | 点火器 `<img onerror>` 必须位于最外层容器闭合 `</div>` **之前**，不能放在容器外 |
+| 事件冒泡污染（PC端） | 模块内点击冒泡到聊天气泡父容器，意外触发编辑/复制等默认行为 | 最外层容器加 `onclick="event.stopPropagation()"` |
+| 重复 ID 让 `getElementById` 失灵 | 所有聊天记录渲染在同一页面文档，重复 ID 引发 JS 串台；**这是"第二次使用就失效"的根本原因** | 所有 ID 带时间戳后缀，见 §10.5 |
+| 单条正则注入 HTML 超 20000 字符 | 被截断或整体失效 | 压缩代码、CSS 用短类名、超限拆多条正则 |
+
+> 🚨 **换行空白条陷阱**：MMD 气泡走 markdown 管线（vditor），注入 HTML 的标签间换行/空行会被解析器补成空 `<p>`，空 `<p>` 带默认 margin 撑出大块横向空白条。**浏览器预览查不出**（预览按 CSS 折叠空白），内容少的页尤其明显。修法：注入 HTML 写成单行无缝（标签间零换行）；防御 CSS 加 `.容器 p:empty{display:none!important}` + `.容器 p{margin:0!important}` + `.容器 br{display:none!important}`。走 §6b 的 Shadow DOM 方案可对此完全免疫。状态栏侧详见 ../beautify/statusbar-radar.md「MMD换行空白条陷阱」。
+
+### 10.2 onerror 点火器（per-message 唯一可靠载体）
+
+见 §4：`<script>` 做不了 per-message 自渲染，逐条消息渲染只能用 `img onerror`。基础骨架：
+
+```html
+<img src="x" style="display:none" onerror='(function(img){const box=img.closest(".容器类名");if(!box)return;/* 逻辑写这里，可多行、可用 ES6 */img.remove()})(this)'>
+```
+
+关键要点：
+- 用 IIFE `(function(img){ ... })(this)` 包装，`img` 即触发元素本身，`this` 是可靠的自定位手段。
+- `img` 标签必须在最外层容器闭合 `</div>` **之前**（§10.1）。
+- 执行完毕调用 `img.remove()` 清理 DOM；中途抛错会留下残留 img，这正是 §12 的关键判据。
+- 代码**可多行、可写 ES6**（§1、§2）；但属性用双引号包裹时内部禁裸双引号（§2 红线），骨架示例故意用单引号包裹属性。
+
+### 10.3 轻主板 + 胖遥控器
+
+**突破 `onclick` 净化限制的稳定架构**（当前 MMD 已复测可用，见 §3 路径 2）。
+
+原理：把复杂 JS 逻辑作为纯文本字符串存在隐藏 `<p>` 的 `data-s` 属性里（轻主板），按钮 `onclick` 只执行极简 `eval(...)` 调用（胖遥控器）。
+
+架构优势：
+- **代码与结构分离**：复杂逻辑存为纯文本，不触发平台对属性内代码字面量的净化。
+- **绕过 CSP 限制**：`data-*` 属性不受内容安全策略约束。
+- **配合时间戳**：每个主板独立时间戳 ID，同一页面多次生成互不干扰。
+
+```html
+<!-- 轻主板：存储复杂逻辑 -->
+<p id="FUNC_CALCULATE_1729584719271" style="display:none"
+   data-s="var input=document.getElementById('INPUT_1729584719271').value;var result=parseFloat(input)*2;document.getElementById('OUTPUT_1729584719271').textContent='结果:'+result;"></p>
+
+<!-- 最外层容器，阻止冒泡 -->
+<div id="CALC_MODULE_1729584719271" onclick="event.stopPropagation()">
+    <input type="text" id="INPUT_1729584719271" placeholder="输入数字">
+    <!-- 胖遥控器：onclick 只做 eval 触发 -->
+    <button onclick="eval(document.getElementById('FUNC_CALCULATE_1729584719271').dataset.s)">
+        计算
+    </button>
+    <div id="OUTPUT_1729584719271">结果将显示在这里</div>
+</div>
+```
+
+> 当前 MMD 下 `data-s` 内不必再压成 ES5 单行，可正常用 ES6；但它仍是属性值，双引号规则照 §2 办（属性用双引号包裹时内部字符串用单引号）。若不需要传参，§3 的 `window.__fn` 路径更简单，优先考虑。
+
+### 10.4 纯CSS切换（radio + `:checked`）
+
+完全不依赖 JS 的动态显隐，天然免疫所有 JS 净化规则，标签页/分页首选。
+
+```html
+<style>
+    .page { display: none; }
+    #radio1_时间戳:checked ~ .container .page1 { display: block; }
+    #radio2_时间戳:checked ~ .container .page2 { display: block; }
+</style>
+
+<!-- 隐藏 radio 作状态控制器 -->
+<input type="radio" id="radio1_时间戳" name="nav_时间戳" checked style="display:none">
+<input type="radio" id="radio2_时间戳" name="nav_时间戳" style="display:none">
+
+<div class="container">
+    <!-- label 触发 radio 切换 -->
+    <label for="radio1_时间戳">第一页</label>
+    <label for="radio2_时间戳">第二页</label>
+    <div class="page page1">第一页内容</div>
+    <div class="page page2">第二页内容</div>
+</div>
+```
+
+注意：所有 `id`、`name`、`for` 属性都必须含时间戳后缀保证唯一性（§10.5），`<label>` 的 `for` 与目标 `input` 的 `id` 时间戳必须一致。
+
+### 10.5 appendChild 置顶（模态框/浮窗覆盖整页）
+
+DOM 原理（4 步）：
+1. 聊天气泡及其内部的原始容器在 DOM 树中位置固定。
+2. 执行 `document.body.appendChild(container)` 时，容器**从原始位置移除**并**重新挂载**到 `<body>` 最末尾。
+3. 容器在 DOM 树中的位置比所有聊天消息、导航栏都更靠后（后来居上）。
+4. 配合 `position: fixed` 定位，该元素在视觉上浮动于所有内容之上。
+
+关键 CSS：
+```css
+position: fixed;                   /* 脱离文档流，相对视口定位 */
+top: 50%; left: 50%;
+transform: translate(-50%, -50%);  /* 水平垂直居中 */
+z-index: 9999;                     /* appendChild 已保证顺序，z-index 作保险 */
+```
+
+**避坑5条：**
+1. **时间戳一致性**：同一模态框系统所有 ID 必须使用相同时间戳。
+2. **冒泡处理**：模态框内容区必须有 `onclick="event.stopPropagation()"`；遮罩层点击用于关闭。
+3. **显示顺序**：先 `appendChild(overlay)` 再 `appendChild(modal)`，确保模态框在遮罩层之上。
+4. **z-index 保险**：`appendChild` 已保证 DOM 顺序，仍建议设 `z-index: 9999`。
+5. **性能**：频繁 `appendChild` 触发重排；需要频繁切换的元素只 `appendChild` 一次，后续仅切 `display`。
+
+> 遮罩层 + 模态框的开关逻辑，当前 MMD 可直接写成 §3 路径 1 的 `window.__fn` 全局函数（比塞进 `data-s` 更好读）；若逻辑需要按元素带参，再走 §10.3 轻主板。
+
+### 10.6 时间戳唯一ID
+
+**根本原因**：平台把所有聊天记录渲染在同一页面文档，重复 ID 导致 `getElementById` 失灵（这是"第二次使用就失效"的根本原因）。
+
+生成方式：`Date.now()` 取当前毫秒时间戳。命名格式 `元素类型_功能描述_时间戳`，例如 `BUTTON_SAVE_1729584719271`、`INPUT_NAME_1729584719271`、`FUNC_TOGGLE_1729584719271`。
+
+**检查清单4条：**
+- [ ] 每次生成新模块都生成新时间戳（不复用旧时间戳）
+- [ ] 同一模块内所有 ID 使用**相同**时间戳后缀
+- [ ] JS 代码中引用的 ID 也含时间戳（`data-s` 内部的 ID 字符串同样要含）
+- [ ] `<label>` 的 `for` 与目标 `input` 的 `id` 时间戳一致
+
+### 10.7 仍然不可靠的载体与交互细节
+
+以下条目来自旧基线社区文档，未在当前 MMD 逐项复测，按保守处理（**证据等级：社区文档，待复验**）：
+
+| 项 | 现象 | 做法 |
+|:---|:---|:---|
+| 脚本自动/懒加载 | `onload`、`onmouseenter` 等不可靠或被阻止，不能用于初始化核心逻辑 | per-message 初始化一律用 `onerror` 点火器 |
+| 跨 img 状态传递 | 多个 img 标签之间无法共享状态 | 同一模块的初始化逻辑集中在**单个** img 内 |
+| `alert()` | 被平台静默阻止，且中断代码执行不报错 | 调试信息用 DOM 元素在页面内显示，禁用 `alert()` |
+| 装饰性伪元素阻挡点击 | 按钮点不动 | 装饰性伪元素加 `pointer-events: none`；交互元素设 `position: relative` 与适当 `z-index` |
+| `innerHTML` 字符串拼接 / `style.cssText` 赋值 | 旧基线上会被实体化或报错 | 当前 MMD 未复测其严重度，仍建议纯 DOM API（`createElement` + `textContent` + `appendChild` + `className` 切预定义类）；`validate.py` 对当前 MMD 按告警处理 |
+
+---
 
 ---
 
@@ -293,3 +457,18 @@ onerror 引擎类故障（不显示、代码暴露、面板空白）的错误**�
 5. **node 复核源码本身**：把原始 replaceString 的 onerror 体抽出，`new Function('img', inner)` 解析。node 通过但浏览器报 SyntaxError → 差异来自渲染管线（污染/markdown），不是源码——回到第 4 步。
 
 > 经验：onerror 故障**九成是"渲染管线动了源码"而非源码本身错**（交叉污染、信标啃断、双引号闭合属性、markdown 实体化）。先比对"原始 vs 渲染后"，比逐行读源码快得多。
+
+### 12a. 症状 → 原因速查表
+
+> 注：表中 data-env/data-st/data-opt/zy/findData 为状态栏方案专属概念，详见 `../beautify/statusbar.md`；其余条目适用于任何交互模块。
+
+| 症状 | 原因 | 解决方案 |
+|:---|:---|:---|
+| 所有字段显示 `--` | 数据解析失败（img 位置错误或 JS 被截断） | 检查 img 标签是否在 `</div>` 之前（§10.1）；检查 data-env/data-st 属性格式 |
+| 代码暴露原样显示 | 正则链断裂，或平台把 HTML 实体化 | 检查正则标记是否正确（§11）；排查 `onclick` 内是否含代码字面量被净化（§3）；排查 `onerror="..."` 内是否有裸双引号（§2） |
+| 选项不显示 | `data-opt` 未提供（不继承字段） | 确保每次都输出 `data-opt` |
+| 资源条不显示 | `zy` 格式错误 | 检查 `名称:当前值/最大值` 格式（冒号、斜杠） |
+| 点击无反应 | 伪元素阻挡点击，或按钮整体被净化删除 | 加 `pointer-events: none`（§10.7）；逻辑改走 §3 两条合法路径 |
+| 继承失效 | `findData` 的 selector 参数错误，或 img 在容器外导致 box 为 `null` | 检查选择器；确认 img 标签位置（§10.1） |
+| 面板内出现横向空白条（预览正常，导入后才有） | 注入 HTML 的换行被 markdown 管线补成空 `<p>`，空 `<p>` 带 margin 撑出空条；内容少的页更明显 | HTML 压成单行无换行；防御 CSS `p:empty{display:none!important}` + `p{margin:0!important}` + `br{display:none!important}`；或走 §6b Shadow DOM 免疫。详见 ../beautify/statusbar-radar.md |
+| 组件静默不显示、每条正则单看都合法 | 跨正则触发标记交叉污染 | 见 §11，把标记字面量拆开拼接 |

@@ -6,12 +6,20 @@ tavern-mmd 预览脚本 build-preview.py
 主AI 用自带 Preview 工具打开看渲染、测交互（子代理无法与渲染工具交互）。
 
 用法:
-  python build-preview.py <文件> --platform <oldmmd|mmd|st> [--mode panels|panorama|both] [-o 输出.html]
+  python build-preview.py <文件> --platform <mmd|mmdsandbox|st> [--mode panels|panorama|both] [-o 输出.html]
 
 平台渲染差异:
-  st     : 原样渲染，<script>/ES6 全执行
-  oldmmd : <script>剥离并裸露源码(红框)；onerror/onclick 内 ES6 标红提示真实旧版会截断
-  mmd    : <script>/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行
+  st         : 原样渲染，<script>/ES6 全执行
+  mmd        : <script>/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行
+               findRegex 强制 /pattern/flags，裸字面量按结构错误处理
+               inline onclick 按当前MMD净化 allowlist 过滤
+  mmdsandbox : MMD沙盒模式（新聊天页，chatVersion:1）。<script> 一等公民 + 官方 SDK
+               findRegex 走官方 classifyPattern：/pattern/flags 为正则，其余非空串为字面量
+               （字面量是官方首选写法）；写成 /…/ 但语法错 → 平台整条静默丢弃，预览判 ERROR
+               不施加当前MMD 的 onclick 净化；改为提示 svg 内 onclick 与自写 data-* 会被净化删除
+               <style>/<script> 装卡即抽出，不论规则有没有匹配到都装上（官方首选写法
+               「专开一条只放 script/style、匹配式谁都不引用」在预览里照样生效）
+               全景模式额外注入 [data-chat]/[data-slot] 钩子与 10 个 --chat-* 变量
 
 退出码: 0=生成成功  1=致命审计失败（不写文件）  2=用法/读取错误
 """
@@ -62,15 +70,73 @@ def _text_field(obj, name):
     return v if isinstance(v, str) else ""
 
 
+_SANDBOX_SLASH_FORM = re.compile(r"^/([\s\S]+)/([gimsuy]*)$")
+
+
+def _escape_for_slash_literal(pattern):
+    """把 pattern 里未转义的 / 与行终止符改写成等价转义，供 slash 字面量解析器复用。
+    JS 里 \\/ 与 /、\\n 与裸换行在正则源码中语义相同，改写不改变匹配行为。"""
+    out = []
+    escaped = False
+    for ch in pattern:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escaped = True
+            continue
+        if ch == "/":
+            out.append("\\/")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\u2028":
+            out.append("\\u2028")
+        elif ch == "\u2029":
+            out.append("\\u2029")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def classify_sandbox_pattern(raw):
+    """复刻沙盒模式官方 classifyPattern：返回 (kind, value, reason)。
+    kind 取 empty / literal / regex / bad-regex。
+    literal 时 value 是待字面量替换的串；regex 时 value 是规范化后的 /pattern/flags。"""
+    if not isinstance(raw, str):
+        return "bad-regex", "", "findRegex 必须是字符串"
+    trimmed = re.sub(r"^`|`$", "", raw.strip())
+    if not trimmed:
+        return "empty", "", None
+    m = _SANDBOX_SLASH_FORM.match(trimmed)
+    if not m:
+        return "literal", trimmed, None
+    pattern, flags = m.group(1), m.group(2)
+    if len(set(flags)) != len(flags):
+        return "bad-regex", "", "flags 重复（JS RegExp 会抛错）"
+    if "g" not in flags:
+        flags += "g"          # 缺 g 平台自动补 → 总是全文替换
+    canonical = "/%s/%s" % (_escape_for_slash_literal(pattern), flags)
+    reason = _js_regex_structure_error(canonical)
+    if reason:
+        return "bad-regex", "", reason
+    return "regex", canonical, None
+
+
 def _mmd_top_level_error(obj, platform):
-    if platform not in ("oldmmd", "mmd"):
+    # 沙盒模式导入 JSON 是 6 键白名单（含 chatVersion/personality），与当前MMD 四字段
+    # schema 不同，不能套用；沙盒的顶层结构审核归 validate.py。
+    if platform != "mmd":
         return None
     errors = _mmd_regex_top_level_errors(obj)
     return errors[0] if errors else None
 
 
 def find_structure_errors(obj, platform):
-    if platform not in ("oldmmd", "mmd"):
+    if platform != "mmd":
         return []
     return _mmd_regex_schema_errors(obj)
 
@@ -89,12 +155,22 @@ def extract_fragments(obj, platform=None):
         fr = raw_fr if isinstance(raw_fr, str) else ""
         if not isinstance(rs, str):
             continue
-        if platform in ("oldmmd", "mmd") and raw_fr not in ("", None):
+        if platform == "mmd" and raw_fr not in ("", None):
             if not isinstance(raw_fr, str) or _js_regex_structure_error(raw_fr):
                 continue
             regex, _flags, reason = _compile_js_regex_for_preview(raw_fr)
             if regex is None or reason:
                 continue
+        if platform == "mmdsandbox" and raw_fr not in ("", None):
+            # 字面量是官方首选写法，照常渲染；只有 /…/ 语法错（平台整条静默丢弃）
+            # 和预览器模拟不了的正则才跳过。
+            kind, value, _reason = classify_sandbox_pattern(raw_fr)
+            if kind == "bad-regex":
+                continue
+            if kind == "regex":
+                regex, _flags, reason = _compile_js_regex_for_preview(value)
+                if regex is None or reason:
+                    continue
         # 含任意 HTML 标签的替换都渲染；跳过纯信标转换器（无标签的占位文本）
         if re.search(r"<[a-zA-Z][a-zA-Z0-9]*[\s/>]", rs):
             frags.append((name, fr, rs))
@@ -114,8 +190,11 @@ def _parse_regex_literal(fr):
 
 
 def find_invalid_findregexes(obj, platform):
-    """返回真正的 MMD 结构/JS dialect 错误；不含预览器能力限制。"""
-    if platform not in ("oldmmd", "mmd"):
+    """返回真正的平台级 findRegex 错误；不含预览器能力限制。
+    mmd：必须是 /pattern/flags，裸字面量算结构错误。
+    mmdsandbox：字面量合法（官方首选），只有写成 /…/ 却语法错才算错误——
+    这种规则被平台整条静默丢弃，页面上看不出异常，必须在预览里点出来。"""
+    if platform not in ("mmd", "mmdsandbox"):
         return []
     invalid = []
     for i, sc in enumerate(_script_list(obj)):
@@ -124,7 +203,13 @@ def find_invalid_findregexes(obj, platform):
         fr = sc.get("findRegex", "")
         if fr in ("", None):
             continue
-        reason = "findRegex 必须是字符串" if not isinstance(fr, str) else _js_regex_structure_error(fr)
+        if platform == "mmdsandbox":
+            kind, _value, reason = classify_sandbox_pattern(fr)
+            if kind != "bad-regex":
+                continue
+            reason = "写成 /…/ 但正则语法错，平台会整条静默丢弃（%s）" % reason
+        else:
+            reason = "findRegex 必须是字符串" if not isinstance(fr, str) else _js_regex_structure_error(fr)
         if reason:
             name = sc.get("scriptName", sc.get("name", "#%d" % i))
             invalid.append((str(name), str(fr), reason))
@@ -132,17 +217,26 @@ def find_invalid_findregexes(obj, platform):
 
 
 def find_unsupported_preview_regexes(obj, platform):
-    """返回 JS 结构合法、但 Python 预览后端无法可靠模拟的规则。"""
-    if platform not in ("oldmmd", "mmd"):
+    """返回 JS 结构合法、但 Python 预览后端无法可靠模拟的规则。
+    沙盒模式只有正则形态才可能落到这里；字面量替换预览器完全能模拟。"""
+    if platform not in ("mmd", "mmdsandbox"):
         return []
     unsupported = []
     for i, sc in enumerate(_script_list(obj)):
         if not isinstance(sc, dict):
             continue
         fr = sc.get("findRegex", "")
-        if not isinstance(fr, str) or not fr or _js_regex_structure_error(fr):
+        if not isinstance(fr, str) or not fr:
             continue
-        regex, _flags, reason = _compile_js_regex_for_preview(fr)
+        if platform == "mmdsandbox":
+            kind, value, _reason = classify_sandbox_pattern(fr)
+            if kind != "regex":
+                continue
+        else:
+            if _js_regex_structure_error(fr):
+                continue
+            value = fr
+        regex, _flags, reason = _compile_js_regex_for_preview(value)
         if regex is None or reason:
             name = sc.get("scriptName", sc.get("name", "#%d" % i))
             unsupported.append((str(name), fr, reason or "未知限制"))
@@ -167,25 +261,62 @@ def _findregex_audit_html(obj, platform):
     return "".join(rows)
 
 
-def apply_regex_pipeline(obj, platform=None):
-    """模拟 JS 替换管线；MMD 系跳过结构错误和预览器不支持规则。"""
-    if _mmd_top_level_error(obj, platform):
-        return ""
-    if isinstance(obj, list):
-        return ""
-    text = _text_field(obj, "statusbar") + _text_field(obj, "beginning")
+_SANDBOX_ASSET_RE = re.compile(r"<(style|script)\b[\s\S]*?</\1\s*>", re.I)
+
+
+def _split_sandbox_assets(rs):
+    """把一条规则的 replaceString 拆成 (装卡即抽出的 style/script, 剩余可见 HTML)。"""
+    assets = "".join(m.group(0) for m in _SANDBOX_ASSET_RE.finditer(rs))
+    return assets, _SANDBOX_ASSET_RE.sub("", rs)
+
+
+def collect_sandbox_assets(obj):
+    """沙盒模式下 <style>/<script> 装卡那一刻被抽出、按规则顺序收集，
+    不论这条规则有没有匹配到都会装上（mmd-sandbox.md §2.1）。
+    因此官方首选的「专开一条只放 script/style、匹配式谁都不引用」写法必须照样生效。"""
+    parts = []
+    for sc in _script_list(obj):
+        if not isinstance(sc, dict):
+            continue
+        rs = sc.get("replaceString", "")
+        if not isinstance(rs, str):
+            continue
+        assets, _visible = _split_sandbox_assets(rs)
+        if assets:
+            parts.append(assets)
+    return "".join(parts)
+
+
+def _apply_pipeline_to_text(text, obj, platform=None):
+    """按规则顺序把替换管线作用在一段文本上。
+    沙盒模式：style/script 已由 collect_sandbox_assets 抽出，这里只替换可见 HTML，
+    避免同一段脚本既被 hoist 又随替换插入而执行两次。"""
     for sc in _script_list(obj):
         if not isinstance(sc, dict):
             continue
         fr = sc.get("findRegex", "")
         rs = sc.get("replaceString", "")
-        if not isinstance(fr, str) or not isinstance(rs, str) or not fr:
+        if not isinstance(rs, str):
             continue
-        if platform not in ("oldmmd", "mmd") and not fr.startswith("/"):
+        if platform == "mmdsandbox":
+            _assets, rs = _split_sandbox_assets(rs)
+            # 官方 classifyPattern 语义：字面量按转义后全文替换，/…/ 走正则，
+            # 语法错的 /…/ 被平台整条静默丢弃（不降级字面量）。
+            kind, value, _reason = classify_sandbox_pattern(fr)
+            if kind == "literal":
+                text = text.replace(value, rs)
+            elif kind == "regex":
+                regex, js_flags, reason = _compile_js_regex_for_preview(value)
+                if regex is not None and not reason:
+                    text = _replace_js_regex(text, regex, js_flags, rs)
+            continue
+        if not isinstance(fr, str) or not fr:
+            continue
+        if platform != "mmd" and not fr.startswith("/"):
             text = text.replace(fr, rs)
             continue
         if _js_regex_structure_error(fr):
-            if platform not in ("oldmmd", "mmd"):
+            if platform != "mmd":
                 text = text.replace(fr, rs)
             continue
         regex, js_flags, reason = _compile_js_regex_for_preview(fr)
@@ -195,12 +326,36 @@ def apply_regex_pipeline(obj, platform=None):
     return text
 
 
+def apply_regex_pipeline(obj, platform=None):
+    """模拟 JS 替换管线；当前MMD 跳过结构错误和预览器不支持规则。"""
+    if _mmd_top_level_error(obj, platform):
+        return ""
+    if isinstance(obj, list):
+        return ""
+    text = _text_field(obj, "statusbar") + _text_field(obj, "beginning")
+    return _apply_pipeline_to_text(text, obj, platform)
+
+
+def _svg_ranges(html):
+    """返回 [(start, end)]，覆盖每个 <svg>…</svg> 区间。"""
+    return [(start, _find_balanced_tag_end(html, start, end, "svg"))
+            for start, end, _tag in _iter_tags(html, "svg")]
+
+
 def find_dangling_markers(obj, platform=None):
-    """管线可完整模拟时，扫描每个自定义开始/结束标记 occurrence。"""
+    """管线可完整模拟时，扫描每个自定义开始/结束标记 occurrence。
+    沙盒模式白名单显式收录 svg 及 path/circle/rect/line/text 等绘图标签
+    （mmd-sandbox.md §5.2），但通用 HTML_TAGS 不含它们 → svg 内的标签会被误判成
+    悬空标记（致命）。故沙盒模式下剔除落在 <svg>…</svg> 区间内的 occurrence。"""
     if isinstance(obj, list) or find_unsupported_preview_regexes(obj, platform):
         return []
     rendered = apply_regex_pipeline(obj, platform)
-    return [marker for marker, _pos in _custom_marker_occurrences(rendered)]
+    occurrences = _custom_marker_occurrences(rendered)
+    if platform == "mmdsandbox":
+        ranges = _svg_ranges(rendered)
+        return [marker for marker, pos in occurrences
+                if not any(s <= pos < e for s, e in ranges)]
+    return [marker for marker, _pos in occurrences]
 
 
 class _OnclickSanitizer(HTMLParser):
@@ -273,7 +428,54 @@ def sanitize_mmd_onclick(html):
     return "".join(parser.parts), parser.removed
 
 
+_PLATFORM_DATA_ATTRS = ("data-chat", "data-slot", "data-theme", "data-composer",
+                        "data-from", "data-state", "data-msg-id")
+# 预览器自己注入的标记属性，不是作者写的，不参与沙盒净化告警。
+_PREVIEW_DATA_ATTRS = ("data-pano-scaffold", "data-pano-runtime-scaffold",
+                       "data-preview-tools", "data-preview-dynamic",
+                       "data-mmd-onclick-disabled", "data-message-role",
+                       "data-preview-hoisted")
+
+
+def find_sandbox_sanitized_attrs(content):
+    """沙盒模式净化会删两样东西：svg 内的 onclick、作者自写的 data-*。
+    返回 [(种类, 标签片段)]；只做浅层扫描，权威检查在 validate.py。"""
+    if not isinstance(content, str):
+        return []
+    found = []
+    svg_ranges = _svg_ranges(content)
+    for start, end, tag in _iter_all_tags(content):
+        in_svg = any(s <= start < e for s, e in svg_ranges)
+        if in_svg and re.search(r"\bonclick\s*=", tag, re.I):
+            found.append(("svg-onclick", tag))
+        for m in re.finditer(r'\b(data-[a-zA-Z0-9_-]+)\s*=', tag):
+            name = m.group(1).lower()
+            if name in _PLATFORM_DATA_ATTRS or name in _PREVIEW_DATA_ATTRS:
+                continue
+            found.append(("author-data-attr", "%s（%s）" % (m.group(1), tag[:80])))
+    return found
+
+
+def _sandbox_sanitize_audit_html(content, label="最终输出"):
+    rows = []
+    for kind, detail in find_sandbox_sanitized_attrs(content):
+        if kind == "svg-onclick":
+            rows.append('<div class="frag-warn">WARN svg 内的 onclick 会被沙盒净化删除：'
+                        '%s（%s）——改绑到普通标签或用 sdk.on(\'message:mount\') 绑定</div>'
+                        % (html_mod.escape(label), html_mod.escape(detail)))
+        else:
+            rows.append('<div class="frag-warn">WARN 作者自写 data-* 会被沙盒净化删除：'
+                        '%s（%s）——自己的节点改用 class 或 id</div>'
+                        % (html_mod.escape(label), html_mod.escape(detail)))
+    return "".join(rows)
+
+
 def _onclick_audit_html(content, platform, label="最终输出"):
+    """当前MMD：inline onclick 净化审计（致命）。
+    沙盒模式：普通标签 onclick 合法，不套用当前MMD 的纯度规则；改为提示官方明说会被
+    净化删掉的两样东西（svg 内 onclick / 自写 data-*），判 WARN。"""
+    if platform == "mmdsandbox":
+        return _sandbox_sanitize_audit_html(content, label)
     if platform != "mmd" or not isinstance(content, str):
         return ""
     _cleaned, removed = sanitize_mmd_onclick(content)
@@ -285,7 +487,8 @@ def _onclick_audit_html(content, platform, label="最终输出"):
 
 
 def find_invalid_onclicks(obj, platform):
-    """只审计实际进入最终渲染文本的 inline onclick；未命中替换不误报。"""
+    """只审计实际进入最终渲染文本的 inline onclick；未命中替换不误报。
+    仅当前MMD：沙盒模式允许普通标签 onclick="tap()" 调顶层函数，不适用此纯度规则。"""
     if platform != "mmd":
         return []
     if isinstance(obj, list):
@@ -323,20 +526,21 @@ def _default_output_path(input_path, kind, platform):
     return os.path.join(output_dir, "%s-%s-%s.html" % (stem, kind, platform))
 
 
-def _html_to_srcdoc(content, platform):
+def _html_to_srcdoc(content, platform, assets=""):
     processed = apply_platform_limits(content, platform)
-    frame_doc = "<style>%s</style>%s" % (MARKER_CSS, processed)
+    extra = apply_platform_limits(assets, platform) if assets else ""
+    frame_doc = "<style>%s</style>%s%s" % (MARKER_CSS, extra, processed)
     return html_mod.escape(frame_doc, quote=True)
 
 
-def _panel(title, content, platform, badge=""):
+def _panel(title, content, platform, badge="", assets=""):
     label = "%s%s" % (html_mod.escape(title), (" <span class=\"badge\">%s</span>" % html_mod.escape(badge)) if badge else "")
     if not content:
         return '<div class="frag"><div class="frag-label">%s</div><div class="frag-warn">（无内容）</div></div>' % label
     return ('<div class="frag"><div class="frag-label">%s</div>'
             '<iframe class="frag-frame" srcdoc="%s" sandbox="allow-scripts allow-same-origin" '
             'onload="this.style.height=this.contentWindow.document.body.scrollHeight+20+\'px\'">'
-            '</iframe></div>' % (label, _html_to_srcdoc(content, platform)))
+            '</iframe></div>' % (label, _html_to_srcdoc(content, platform, assets)))
 
 
 def _scan_tag_end(html, start):
@@ -431,20 +635,6 @@ def _find_balanced_tag_end(html, open_start, open_end, tag_name):
         pos = close_end + 1
         if depth == 0:
             return pos
-
-
-def _event_tag_has_es6(tag):
-    for m in re.finditer(r"\bon\w+\s*=\s*([\"'])([\s\S]*?)\1", tag, re.I):
-        body = m.group(2)
-        if re.search(r"=>|\blet\b|\bconst\b|`", body):
-            return True
-    return False
-
-
-def _add_attr_to_tag(tag, attr_text):
-    if tag.endswith("/>"):
-        return tag[:-2] + " " + attr_text + "/>"
-    return tag[:-1] + " " + attr_text + ">"
 
 
 def _is_floating_engine_tag(tag):
@@ -543,10 +733,13 @@ def assemble_preview(obj, platform, src_name):
     audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(rendered, platform)
     audit += "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
                      for x in find_dangling_markers(obj, platform))
+    # 沙盒模式：装卡即抽出的 style/script 与匹配无关，每个隔离 iframe 都要带上，
+    # 否则「只放 style/script 且谁都不引用」的官方首选写法在预览里等于不存在。
+    assets = collect_sandbox_assets(obj) if platform == "mmdsandbox" else ""
     body = "\n".join([
-        _panel("第一句话剩余预览", first, platform, "beginning remainder"),
-        _panel("状态栏单独预览", status, platform, "status"),
-        _panel("悬浮组件预览", floating, platform, "floating/sidebar"),
+        _panel("第一句话剩余预览", first, platform, "beginning remainder", assets),
+        _panel("状态栏单独预览", status, platform, "status", assets),
+        _panel("悬浮组件预览", floating, platform, "floating/sidebar", assets),
         audit,
     ])
     banner = make_banner(platform, src_name, _script_count(obj))
@@ -587,7 +780,7 @@ PANORAMA_PAGE_TEMPLATE = """<!DOCTYPE html>
 html,body{height:100%%;margin:0}
 body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;display:flex;flex-direction:column}
 .banner{padding:10px 16px;font-size:13px;font-weight:600;flex:0 0 auto}
-.banner-st{background:#1f6feb}.banner-mmd{background:#9e6a03}.banner-oldmmd{background:#6e1423}
+.banner-st{background:#1f6feb}.banner-mmd{background:#9e6a03}.banner-mmdsandbox{background:#1a7f5a}
 .frag{flex:1;margin:12px;display:flex;flex-direction:column;border:1px dashed #30363d;border-radius:8px;overflow:hidden;min-height:0}
 .frag-label{background:#161b22;color:#8b949e;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d;flex:0 0 auto}
 .frag-warn{background:#3a2d00;color:#f0c674;font-size:11px;padding:6px 12px}
@@ -613,10 +806,18 @@ PANORAMA_RUNTIME_SCAFFOLD = (
     "(function(){"
     "var D=document,W=window,seq=0;"
     "function chat(){return D.querySelector('.chat-body');}"
+    "function sandbox(){var r=D.querySelector('.page');return !!(r&&r.getAttribute('data-chat')==='root');}"
+    "function hook(it,touch,ct,side){if(!sandbox())return;"
+    "it.setAttribute('data-chat','message-frame');"
+    "touch.setAttribute('data-chat','message');"
+    "touch.setAttribute('data-from',side==='left'?'ai':'user');"
+    "touch.setAttribute('data-state','done');"
+    "ct.setAttribute('data-chat','message-body');}"
     "function add(side,text){var root=chat();if(!root)return null;"
     "var it=D.createElement('div');it.className='item';it.setAttribute('data-preview-dynamic','1');"
     "var touch=D.createElement('div');touch.className='touch-scope';"
     "var ct=D.createElement('div');ct.className='content '+side;ct.textContent=text;"
+    "hook(it,touch,ct,side);"
     "touch.appendChild(ct);it.appendChild(touch);root.appendChild(it);"
     "var pane=D.querySelector('.chat');if(pane)pane.scrollTop=pane.scrollHeight;return ct;}"
     "function syncRoute(hash){var active=/chat\\/chat/.test(hash);"
@@ -664,40 +865,123 @@ PANORAMA_SEND_SCAFFOLD = (
 )
 
 
+# 沙盒模式聊天页骨架的稳定钩子（mmd-sandbox.md §5）。挂到全景已有节点上，作者写的
+# [data-chat="root"] 选择器与 var(--chat-accent) 在预览里就能真的解析到。
+_SANDBOX_HOOKS = {
+    "root": ' data-chat="root" data-theme="light" data-composer="open"',
+    "header": ' data-chat="header"',
+    "header_title": ' data-chat="header-title"',
+    "header_extra": '<span data-slot="header-extra"></span>',
+    "messages": ' data-chat="messages"',
+    "list": ' data-chat="list"',
+    "frame": ' data-chat="message-frame"',
+    "msg_user": ' data-chat="message" data-from="user" data-state="done" data-msg-id="pano-1"',
+    "msg_ai": ' data-chat="message" data-from="ai" data-state="done" data-msg-id="pano-2"',
+    "body": ' data-chat="message-body"',
+    "stage": '<div data-chat="author-stage" class="pano-stage" hidden></div>',
+    "composer": ' data-chat="composer"',
+    "input": ' data-chat="input"',
+    "send": ' data-chat="send"',
+}
+
+
+def _panorama_hooks(platform):
+    """沙盒模式返回官方 data-* 钩子；其余平台全为空串（骨架一字不变）。"""
+    keys = ("root", "header", "header_title", "header_extra", "messages", "list", "frame",
+            "msg_user", "msg_ai", "body", "stage", "composer", "input", "send")
+    if platform != "mmdsandbox":
+        return {k: "" for k in keys}
+    return dict(_SANDBOX_HOOKS)
+
+
+# 沙盒模式 10 个 --chat-* 变量的预览默认值（mmd-sandbox.md §6.1）。定义在
+# [data-chat="root"] 上，作者换肤改变量、用 var() 取色在预览里行为一致。
+# 功能栏平台不给样式，这里只给最小可见占位，作者仍需自己写背景/高度/sticky。
+SANDBOX_CHROME_CSS = """[data-chat="root"]{--chat-bg:#ffffff;--chat-surface:#f5f6f8;--chat-text:#1f2328;
+  --chat-text-muted:#6b7280;--chat-border:#d8dbe0;--chat-accent:#1a7f5a;
+  --chat-bubble-user-bg:#1a7f5a;--chat-bubble-ai-bg:#f0f0f3;--chat-bubble-text:#1f2328;
+  --chat-viewport-height:100vh;background:var(--chat-bg);color:var(--chat-text)}
+[data-chat="root"][data-theme="dark"]{--chat-bg:#16181d;--chat-surface:#1f2329;--chat-text:#e6edf3;
+  --chat-text-muted:#9aa4b2;--chat-border:#30363d;--chat-bubble-ai-bg:#22262c;--chat-bubble-text:#e6edf3}
+[data-chat="messages"]{background:var(--chat-bg)}
+[data-chat="message"][data-from="ai"] [data-chat="message-body"]{background:var(--chat-bubble-ai-bg);color:var(--chat-bubble-text)}
+[data-chat="message"][data-from="user"] [data-chat="message-body"]{background:var(--chat-bubble-user-bg)}
+[data-slot="statusbar"]{position:sticky;top:0;z-index:800}
+[data-chat="author-stage"]{position:fixed;inset:0;z-index:2000;background:var(--chat-bg)}
+[data-chat="author-stage"][hidden]{display:none}"""
+
+
 def assemble_panorama(obj, platform, src_name):
     """全景预览：所有组件在同一文档里组合显示，模拟真实 MMD 聊天页。
-    底部固定输入栏（滚动不受影响）+ 发送按钮；发送追加用户气泡 + 占位AI气泡。"""
+    底部固定输入栏（滚动不受影响）+ 发送按钮；发送追加用户气泡 + 占位AI气泡。
+    沙盒模式额外把官方稳定钩子挂到同一套骨架上（见 _panorama_hooks）。"""
+    sandbox = platform == "mmdsandbox"
+    statusbar_html = ""
     if isinstance(obj, list):
         # 本地酒馆正则数组（无 beginning）：把各 HTML 片段堆进聊天区一条气泡。
         chat_inner = "".join("%s" % rs for _, _, rs in extract_fragments(obj, platform))
     else:
         chat_inner = apply_regex_pipeline(obj, platform)
+        if sandbox:
+            # 沙盒模式 statusbar 是独立的功能栏节点，不和消息正文同处一块。
+            statusbar_html = _apply_pipeline_to_text(_text_field(obj, "statusbar"), obj, platform)
+            chat_inner = _apply_pipeline_to_text(_text_field(obj, "beginning"), obj, platform)
 
     # 只对被测产物施加平台净化；测试脚手架随后拼入，避免被误当主题 script 剥离。
     tested_content = apply_platform_limits(chat_inner, platform)
+    hooks = _panorama_hooks(platform)
+    hoisted = ""
+    if sandbox:
+        # 装卡即抽出的 style/script，与匹配无关，整张卡只装一次。
+        assets = collect_sandbox_assets(obj)
+        if assets:
+            hoisted = ('<div data-preview-hoisted="1">%s</div>'
+                       % apply_platform_limits(assets, platform))
+    statusbar_node = ""
+    if sandbox and statusbar_html.strip():
+        # 角色卡 statusbar 留空 → 平台上这个节点整块不存在，预览照此处理。
+        statusbar_node = ('<div data-slot="statusbar" class="pano-statusbar">%s</div>'
+                          % apply_platform_limits(statusbar_html, platform))
     page = (
-        '%s'
-        '<div class="page">'
-        '<div class="topTabbar"><span>MMD Chat Preview</span><span class="pano-route-label">chat/chat</span></div>'
-        '<div class="chat chat-bg pano-chat" id="pano-chat">'
-        '<div class="chat-body">'
-        '<div class="item" data-message-role="user"><div class="touch-scope"><div class="content right">用户示例消息</div></div></div>'
-        '<div class="item" data-message-role="ai"><div class="touch-scope"><div class="content left">%s</div></div></div>'
+        '%(runtime)s'
+        '%(hoisted)s'
+        '<div class="page"%(root)s>'
+        '<div class="topTabbar"%(header)s><span%(header_title)s>MMD Chat Preview</span>'
+        '<span class="pano-route-label">chat/chat</span>%(header_extra)s</div>'
+        '%(statusbar)s'
+        '<div class="chat chat-bg pano-chat" id="pano-chat"%(messages)s>'
+        '<div class="chat-body"%(list)s>'
+        '<div class="item" data-message-role="user"%(frame)s><div class="touch-scope"%(msg_user)s>'
+        '<div class="content right"%(body)s>用户示例消息</div></div></div>'
+        '<div class="item" data-message-role="ai"%(frame)s><div class="touch-scope"%(msg_ai)s>'
+        '<div class="content left"%(body)s>%(tested)s</div></div></div>'
         '</div></div>'
-        '<div class="chat-bottom chat-input-scope pano-input-bar">'
-        '<textarea class="uni-textarea-textarea" rows="1" placeholder="输入消息（Enter 发送，Shift+Enter 换行）"></textarea>'
-        '<button class="pano-send send-msg" type="button">发送</button>'
+        '%(stage)s'
+        '<div class="chat-bottom chat-input-scope pano-input-bar"%(composer)s>'
+        '<textarea class="uni-textarea-textarea" rows="1" '
+        'placeholder="输入消息（Enter 发送，Shift+Enter 换行）"%(input)s></textarea>'
+        '<button class="pano-send send-msg" type="button"%(send)s>发送</button>'
         '</div>'
         '</div>'
-        '%s'
-    ) % (PANORAMA_RUNTIME_SCAFFOLD, tested_content, PANORAMA_SEND_SCAFFOLD)
+        '%(sendscaffold)s'
+    ) % dict(hooks, runtime=PANORAMA_RUNTIME_SCAFFOLD, tested=tested_content,
+             statusbar=statusbar_node, hoisted=hoisted,
+             sendscaffold=PANORAMA_SEND_SCAFFOLD)
 
-    frame_doc = "<style>%s</style><style>%s</style>%s" % (MARKER_CSS, PANORAMA_CSS, page)
+    chrome_css = SANDBOX_CHROME_CSS if sandbox else ""
+    frame_doc = "<style>%s</style><style>%s</style><style>%s</style>%s" % (
+        MARKER_CSS, PANORAMA_CSS, chrome_css, page)
     srcdoc = html_mod.escape(frame_doc, quote=True)
 
     n = _script_count(obj)
     banner = make_banner(platform, src_name, n).replace("预览平台", "全景预览 ｜ 平台")
     audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(chat_inner, platform)
+    if sandbox:
+        audit += ('<div class="frag-warn">NOTE 已模拟：[data-chat]/[data-slot] 钩子结构与 10 个 '
+                  '--chat-* 变量默认值，作者的平台选择器与 var() 在此可解析。'
+                  '未模拟：官方 SDK（sdk.on/stage/save/message 等全部不存在）、'
+                  '「消息生成中」占位、净化白名单、Markdown 管线、真实换肤与限频。'
+                  'SDK 相关行为必须回真实聊天页验证。</div>')
     if isinstance(obj, dict):
         audit += "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
                          for x in find_dangling_markers(obj, platform))
@@ -729,7 +1013,7 @@ def assemble_html(frags, platform, src_name, audit=""):
         srcdoc = html_mod.escape(frame_doc, quote=True)
         # 空白条风险警告（仅 MMD 系平台关心；标签间裸换行会被补成空<p>）
         warn_row = ""
-        if platform in ("oldmmd", "mmd") and detect_blank_bar_risk(rs):
+        if platform == "mmd" and detect_blank_bar_risk(rs):
             warn_row = ('<div class="frag-warn">⚠ 检测到标签间裸换行——'
                         'MMD markdown 管线会补成空&lt;p&gt;撑出横向空白条；'
                         '注入HTML请压成单行无换行（预览看不出此问题，详见 statusbar-radar.md）</div>')
@@ -746,7 +1030,8 @@ def assemble_html(frags, platform, src_name, audit=""):
 
 
 def apply_platform_limits(rs, platform):
-    """按平台改写 HTML；当前 MMD 额外禁用 allowlist 外的真实 inline onclick。"""
+    """按平台改写 HTML；当前 MMD 额外禁用 allowlist 外的真实 inline onclick。
+    沙盒模式不净化 onclick（普通标签 onclick 合法），<script> 同样保留并标角标。"""
     if platform == "st":
         return rs
 
@@ -754,47 +1039,28 @@ def apply_platform_limits(rs, platform):
     if platform == "mmd":
         out, _removed = sanitize_mmd_onclick(out)
 
-    # 1. <script>...</script>：oldmmd 剥离并裸露源码；mmd 保留但标黄
+    # <script>...</script>：mmd 与沙盒模式都放行，保留并标黄角标标明正常执行。
+    badge_title = ("沙盒模式 <script> 是一等公民，装卡即抽出、整张卡只跑一次"
+                   if platform == "mmdsandbox" else "当前MMD已确认支持 script，正常执行")
+
     def script_repl(m):
-        full = m.group(0)
-        if platform == "oldmmd":
-            return '<pre class="mmd-stripped">%s</pre>' % html_mod.escape(full)
-        else:  # mmd
-            return '<div class="mmd-warn-badge" title="当前MMD已确认支持 script，正常执行">✓script</div>' + full
+        return ('<div class="mmd-warn-badge" title="%s">✓script</div>'
+                % html_mod.escape(badge_title, quote=True)) + m.group(0)
     out = re.sub(r"<script\b[\s\S]*?</script>", script_repl, out, flags=re.I)
-
-    # 2. onerror/onclick 内 ES6 语法：旧版MMD真实平台不支持，会截断；预览只标黄提示。
-    if platform == "oldmmd":
-        parts = []
-        pos = 0
-        for start, end, tag in _iter_all_tags(out):
-            if re.search(r"\bon\w+\s*=", tag, re.I) and _event_tag_has_es6(tag):
-                parts.append(out[pos:start])
-                parts.append(_add_attr_to_tag(tag, 'data-mmd-es6="真实旧版MMD不支持ES6，此处会截断"'))
-                pos = end
-        if parts:
-            parts.append(out[pos:])
-            out = "".join(parts)
-
     return out
 
 
 def make_banner(platform, src_name, n):
     labels = {"st": "本地酒馆 SillyTavern（无限制渲染）",
               "mmd": "当前MMD（支持script/ES6）",
-              "oldmmd": "旧版MMD（禁script/ES5）"}
+              "mmdsandbox": "MMD沙盒模式（新聊天页 chatVersion:1；支持script/官方SDK）"}
     return ('<div class="banner banner-%s">预览平台: %s ｜ 来源: %s ｜ %d 个HTML片段</div>'
             % (platform, labels.get(platform, platform), html_mod.escape(src_name), n))
 
 
-# 平台限制标记的 CSS（红框源码/ES6描边/黄角标）。父文档与每个 iframe 子文档都要注入，
+# 平台限制标记的 CSS（onclick 禁用描边/黄角标）。父文档与每个 iframe 子文档都要注入，
 # 否则 apply_platform_limits 生成的标记元素在 iframe 里无样式（iframe 不继承父文档 CSS）。
-MARKER_CSS = """.mmd-stripped{display:block;margin:8px;padding:10px;border:2px solid #f85149;border-radius:6px;
-  background:#2d0a0a;color:#ff7b72;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}
-.mmd-stripped::before{content:'⚠ 旧版MMD会剥离此标签，不执行（源码裸露）：';display:block;color:#f85149;margin-bottom:6px;font-weight:600}
-[data-mmd-es6]{outline:2px solid #d29922 !important;outline-offset:1px;position:relative}
-[data-mmd-es6]::after{content:'⚠ES6:'attr(data-mmd-es6);position:absolute;top:-8px;right:0;background:#d29922;color:#000;font-size:9px;padding:1px 4px;border-radius:3px;z-index:99}
-[data-mmd-onclick-disabled]{outline:2px solid #f85149 !important;outline-offset:1px}
+MARKER_CSS = """[data-mmd-onclick-disabled]{outline:2px solid #f85149 !important;outline-offset:1px}
 [data-mmd-onclick-disabled]::after{content:'onclick disabled';font-size:9px;background:#f85149;color:#fff;padding:1px 4px}
 .mmd-warn-badge{display:inline-block;background:#d29922;color:#000;font-size:10px;padding:1px 6px;border-radius:3px;margin:2px}"""
 
@@ -806,7 +1072,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 <style>
 body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif}
 .banner{padding:10px 16px;font-size:13px;font-weight:600;position:sticky;top:0;z-index:9999}
-.banner-st{background:#1f6feb}.banner-mmd{background:#9e6a03}.banner-oldmmd{background:#6e1423}
+.banner-st{background:#1f6feb}.banner-mmd{background:#9e6a03}.banner-mmdsandbox{background:#1a7f5a}
 .frag{margin:16px;padding:0;border:1px dashed #30363d;border-radius:8px;overflow:hidden}
 .frag-label{background:#161b22;color:#8b949e;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d}
 .frag-warn{background:#3a2d00;color:#f0c674;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d}
@@ -834,7 +1100,7 @@ def _build_panels_html(obj, platform, src_name):
 def main():
     p = argparse.ArgumentParser(description="tavern-mmd 平台预览生成")
     p.add_argument("file")
-    p.add_argument("--platform", choices=["oldmmd", "mmd", "st"], required=True)
+    p.add_argument("--platform", choices=["mmd", "mmdsandbox", "st"], required=True)
     p.add_argument("--mode", choices=["panels", "panorama", "both"], default="both",
                    help="panels=三面板诊断；panorama=单页全景(模拟MMD聊天页)；both=两者都生成(默认)")
     p.add_argument("-o", "--output", help="输出HTML路径。仅单一 mode 时生效；both 模式忽略并按默认名各产一份")
@@ -849,7 +1115,7 @@ def main():
 
     findings = fatal_preview_findings(obj, args.platform)
     unsupported = find_unsupported_preview_regexes(obj, args.platform)
-    if args.platform in ("oldmmd", "mmd") and not _js_regex_oracle_available():
+    if args.platform in ("mmd", "mmdsandbox") and not _js_regex_oracle_available():
         print("[WARN] 未找到可用 Node.js；findRegex 仅执行结构 fallback，未经过真实 JS RegExp oracle。")
     for message in findings["structure"]:
         print("[ERROR] 非法结构: %s" % message)

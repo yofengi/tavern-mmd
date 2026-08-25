@@ -5,6 +5,8 @@
 > 现成生成器在 `../../assets/shadowcast-examples/`（`build_demo.py` 状态栏、`build_float.py` 悬浮组件），改字段/改配色即可复用。
 > **2.0 强化（吸收哨兵雷达法 sd3 卡【280366】的架构启发，浏览器三路验证通过）**：① shadow→light DOM 降级链，attachShadow 不可用环境照常渲染；② `adoptedStyleSheets` + 跨气泡缓存单张 sheet；③ 事务式渲染（建好再挂载，异常回退纯净态）。该卡是用户提供的社区资产快照，作者、原 URL 与许可证未记录，仅作兼容研究参考，不宣称原创；ShadowCast 2.0 为吸收架构启发后的重写实现。详见末节「2.0 强化」。
 
+> 🚨 **平台归属：本文档只针对当前 MMD（`/mmd`）与本地酒馆（`/st`）。MMD沙盒模式（`/mmdsandbox`）不可用本方案。** 两条独立原因：① 影渲法的点火载体是 `img onerror`，而沙盒模式**官方明令禁止 `img onerror` 点火器与 teapot 系写法**；② 沙盒的运行容器形态（iframe / Shadow DOM / 同文档）与 `document.currentScript` **官方原文均未说明**，`attachShadow` 自定位这套写法在那里没有依据，不得移植。沙盒模式做状态栏走「专开一条规则只放 `<script>`」+ `sdk.on('message:mount')` + 长期面板挂 `sdk.stage`，规范见 `../platforms/mmd-sandbox.md`。**本文档的双轨代谢、全量快照协议、schema 驱动字段设计仍可参考，渲染载体必须整体重写。**
+
 ## 一句话内核
 
 模型每轮吐**全量快照**到 light DOM 隐藏 span → `img onerror` 点火 → `attachShadow` 把 UI 渲进 **shadow root**（隔离）→ 数据留 light（可扫描跨轮恢复）、UI 进 shadow（不过 markdown、不被染色）。

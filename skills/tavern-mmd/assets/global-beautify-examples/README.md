@@ -18,7 +18,9 @@
 | **旧雷达日夜集成包** | 雷达状态栏、复制式日夜 CSS 与侧栏切换的组合结构 | 用户提供的社区快照启发，作者/原 URL/许可证未完整记录；虽已迁移 slash findRegex 并修复当前 MMD handler，但无 native/destroy/route 生命周期，不再推荐作全局主题基底 | [完整美化-日夜主题与雷达.json](../radar-examples/完整美化-日夜主题与雷达.json) |
 | **2026-06-21 日间 selector reference** | 米白 + 酒红历史配色、当时当前 MMD 的界面选择器、旧 CSS / 清污 / 引号规范化结构 | 未完整作用域；清污未记录 property delta；文本规范化不可逆；无 native/destroy/owner/version/完整路由重入 | [mmd-daytime-refined.md](mmd-daytime-refined.md) |
 
-Legacy 资产只适用于它标注的当前 MMD 历史版本，不适用于旧版 MMD或本地 SillyTavern，也不能称为当前“直接可用默认成品”。确需复现时先阅读资产首页风险说明，并重新做当前 MMD 实机验证。
+Legacy 资产只适用于它标注的当前 MMD 历史版本，不适用于本地 SillyTavern，也不能称为当前“直接可用默认成品”。确需复现时先阅读资产首页风险说明，并重新做当前 MMD 实机验证。
+
+> 🚨 **本目录全部资产都不能用在 MMD沙盒模式（`/mmdsandbox`）。** 它们的地基是 `img onerror` 激活器 + `body` / `html` 全局选择器 + 自建主题 runtime，这三样在沙盒模式分别是：**官方明令禁止**（`img onerror` 点火器属 teapot 系）、**官方校验 WARN**（`*{}` / `html{}` / `body{}` / `:root{}` 须改写成 `[data-chat="root"]`）、**没有必要**（平台自带 `data-theme` + 10 个 `--chat-*` 变量 + `theme:change` 事件）。把这里的 json 直接导进沙盒卡的结果是「样式对一半、切换按钮全不响应」，而且页面上没有报错提示。沙盒模式换肤请读 `../../references/beautify/global-css.md`「沙盒模式换肤」与 `../../references/platforms/mmd-sandbox.md` §6。
 
 ## 选型
 

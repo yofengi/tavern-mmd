@@ -18,5 +18,9 @@
 - json位置：first_mes=主开场白；alternate_greetings=数组
 
 ## MMD注意
-- MMD开场白区域类名 .prologue-content，支持HTML渲染——可包含状态栏触发标记
-- 开场白内不要依赖<script>（旧版MMD会剥离；当前MMD虽支持但跨平台不保险）——状态栏由正则替换接管，开场白只放<status>数据块
+
+- 当前 MMD 开场白区域类名 `.prologue-content`，支持HTML渲染——可包含状态栏触发标记
+- **开场白只放触发标记与数据块，渲染一律交给正则替换**：这是两个 MMD 平台共同的做法，理由是职责分离（开场白是玩家看见的第一句话，不是代码容器），不是因为平台剥离 `<script>`。
+  - **当前 MMD `/mmd`**：`<script>` 可执行，但**做不了 per-message 自渲染/定位**，状态栏引擎只能用 `img onerror`（见 `../platforms/mmd.md` §4）。开场白里塞 `<script>` 解决不了任何问题，只会让首条消息变脆。
+  - **MMD沙盒模式 `/mmdsandbox`**：`<script>` 是一等公民，但**写在 `beginning` 里没有意义** —— 脚本由平台从**规则的替换内容**里抽出、装卡跑一次。官方首选写法是专开一条规则只放 `<script>`（匹配式填正文用不到的词），`beginning` 只放触发串（如 `{{intro}}`）。`beginning` 硬上限 **10240 字**。
+- 若卡带状态栏：开场白末尾附首条完整数据块（当前 MMD 用 `<status>` 之类触发标记；沙盒模式的可见 UI 触发串必须能在 `statusbar` / `beginning` / 另一条规则的 `replaceString` 里找到，否则页面上永不出现）

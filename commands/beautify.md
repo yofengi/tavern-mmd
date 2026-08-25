@@ -6,15 +6,18 @@ description: 制作酒馆美化（全局美化/状态栏）
 
 1. 平台确认：按 SKILL.md 流程。美化方案强依赖平台，未设定必须先问。
 2. 用 AskUserQuestion 问类型：全局美化（整体界面换肤）/ 状态栏（每条消息末尾数据面板）/ 两者都要。
-2.1. **全局美化二档分流**：若包含全局美化，再问“静态换肤 / 当前 MMD 三态运行时主题包”。用户要求 day/night/native、玩家微调、设置面板、重置或记住偏好时，默认选三态运行时；旧版 MMD 只能选静态换肤。
+2.1. **全局美化分流（先按平台分，再问档位）**：
+   - `/mmd` 与 `/st`：问“静态换肤 / 当前 MMD 三态运行时主题包”。用户要求 day/night/native、玩家微调、设置面板、重置或记住偏好时，默认选三态运行时。
+   - `/mmdsandbox`：**不走上面二档**。沙盒模式有平台自己的 10 个 `--chat-*` 变量、`theme:change` 事件、舞台与服务端存档，是另一套全局美化故事；换肤在 `[data-chat="root"]` 上改变量，禁 `*`/`html`/`body`/`:root` 全局选择器，常驻面板挂 `sdk.stage` 而不是气泡。**先读 `references/platforms/mmd-sandbox.md`（§6 CSS、§4.5-4.6 存档与舞台）**，不要移植当前 MMD 的 runtime 主题包。
 2.5. **选风格（强制前置）**：读 references/beautify/style-system.md，用 AskUserQuestion 先选基调组（素雅/柔和/科技/考究/玩味/氛围）再选具体风格（可给 2-3 个 preview 描述），风格清单见 references/beautify/style-db/README.md；或按用户要求混搭维度。把选定风格/覆盖项记入 plan.md 与 工作/美化决策.md。默认风格仍可用旧的 #0d1117，但必须问过用户。
 3. 项目检查：无项目文件夹则确认项目名并创建五件套；已有则读 main.md+plan.md 续作。
 4. 按类型读取文档并制作：
-   - 状态栏：首选混合态雷达法 references/beautify/statusbar-radar.md（按其"制作工作流"节执行：字段五级分类→从 assets/radar-examples/ 选示例改造→四条正则+状态栏规则）；轻量场景或用户指定时用 references/beautify/statusbar.md（KV V4.0三段正则）。两者均需先用 AskUserQuestion（带preview）让用户选布局风格与数据字段（资源条/NPC好感/线索/选项等）。
+   - 状态栏（`/mmd`、`/st`）：首选混合态雷达法 references/beautify/statusbar-radar.md（按其"制作工作流"节执行：字段五级分类→从 assets/radar-examples/ 选示例改造→四条正则+状态栏规则）；轻量场景或用户指定时用 references/beautify/statusbar.md（KV V4.0三段正则）。两者均需先用 AskUserQuestion（带preview）让用户选布局风格与数据字段（资源条/NPC好感/线索/选项等）。
+   - 状态栏（`/mmdsandbox`）：**雷达法与 img onerror 引擎不可移植**（官方禁 onerror 点火器）。改走「专开一条只放 `<script>` 的规则」+ `message:done` 取 `msg.content` 解析后渲染；短小固定块可纯规则替换（`$1`/`$名字`）零 JS；常驻面板挂舞台。字段与布局风格照样先弹窗问，技术细节全看 references/platforms/mmd-sandbox.md（§3 占位陷阱、§7 正则、§12 写作策略）。
    - 全局美化：先读 references/beautify/global-css.md 做二档选型。静态换肤按其中单规则骨架；当前 MMD 只要需要 day/night/native、玩家微调、设置、重置或持久偏好候选，必须再读 references/beautify/theme-runtime.md，并优先从 assets/global-beautify-examples/mmd-theme-runtime/ 改造。该 runtime 协议与新资产是在社区快照提供架构启发后重新设计与实现的，实机状态以资产 README 为准，不得虚构已验证。assets/radar-examples/完整美化-日夜主题与雷达.json 仅为社区来源启发的 legacy 集成参考，不再推荐作当前全局主题基底。
-5. 代码草稿放"工作/"；每条正则统计字符数（MMD 限额预检，replaceString 达到 18000 即预警）；MMD 每条 findRegex 必须是 `/pattern/flags` slash literal。
+5. 代码草稿放"工作/"；每条正则统计字符数（MMD 限额预检，replaceString 达到 18000 即预警）。**当前 MMD** 每条 findRegex 必须是 `/pattern/flags` slash literal；**沙盒模式**不强制，纯字面量标记（`{{hud}}`）是首选，且 `id` 必须为负数。
 6. 自检：quality/checklist.md 结构/代码/正则/样式层全跑。
-7. 输出到 output/：本地酒馆=正则json；MMD=导入json（pageDepth/statusbar/beginning/regex_scripts四字段，首选）+手填清单.md（备选），格式均见 output/regex-output.md。**单独美化/状态栏流程的默认交付 = 正则 json + 状态栏规则.md**（独立的状态栏生成规则/模型侧协议文档），不强制塞进某张卡。更新main.md与plan.md。
+7. 输出到 output/：本地酒馆=正则json；当前MMD=导入json（pageDepth/statusbar/beginning/regex_scripts四字段，首选）+手填清单.md（备选）；沙盒模式=导入正则json（chatVersion/pageDepth/statusbar/beginning/personality/regex_scripts **六字段**，`chatVersion` 必须为 1）+手填清单.md（备选），并在交付说明里写明「必须新建卡、创卡页确认是新页」。格式均见 output/regex-output.md。**单独美化/状态栏流程的默认交付 = 正则 json + 状态栏规则.md**（独立的状态栏生成规则/模型侧协议文档），不强制塞进某张卡。更新main.md与plan.md。
 
 ## 交付前审核与预览（强制）
 

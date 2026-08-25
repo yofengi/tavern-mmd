@@ -8,11 +8,27 @@
 
 | 平台 | 方案 |
 |---|---|
-| 旧版MMD | 首选雷达法（statusbar-radar.md）；轻量场景用本文档 KV V4.0 |
-| 当前MMD | 同旧版 |
-| 本地酒馆 | 雷达法/KV V4.0 均可直接使用 |
+| 当前MMD `/mmd` | 首选雷达法（`statusbar-radar.md`）或影渲法（`statusbar-shadowcast.md`）；轻量场景用本文档 KV V4.0。载体一律 `img onerror` |
+| 本地酒馆 `/st` | 雷达法 / 影渲法 / KV V4.0 均可直接使用 |
+| MMD沙盒模式 `/mmdsandbox` | **本文档与雷达法／影渲法都不适用** —— 载体 `img onerror` 被官方明令禁止。改用 `<script>` + SDK，见下方「沙盒模式：另一套做法」 |
 
-> 平台技术红线（ES5、单行JS、img须在容器内等）见 `../platforms/mmd-old.md`，本文档专注状态栏本身。
+> 平台技术红线（img 须在容器内、时间戳唯一 ID、事件冒泡、换行空白条等）见 `../platforms/mmd.md` §10，本文档专注状态栏本身。
+
+### 沙盒模式：另一套做法（不要套用本文档）
+
+MMD沙盒模式（角色卡 `chatVersion: 1` 的新聊天页）的执行模型完全不同，本文档的 KV V4.0 与雷达法／影渲法**都不要移植过去**：
+
+| 本文档／雷达法的做法 | 沙盒模式 |
+|---|---|
+| `img onerror` 点火器做 per-message 渲染 | 🚨 **官方明令禁止**（teapot 系）。`<script>` 是一等公民，装卡即抽出、整卡只跑一次 |
+| 每条消息各自定位、各自渲染 | 用 `sdk.on('message:mount')` 给这条气泡里的按钮绑事件；回调内 `document.querySelector` **只在当前气泡内查找** |
+| 状态栏挂在气泡里 | 长期面板**必须挂舞台** `sdk.stage`（气泡滚出屏幕即销毁） |
+| 功能栏靠正则替换出可见 HTML | 同样靠规则，槽位是 `[data-slot="statusbar"]`；`statusbar` 字段留空则该节点整块不存在 |
+| 从 DOM 读正文做数据恢复 | 🚨 读到的可能是平台占位「消息生成中」。跟字用 `message:stream` 的 `msg.content`，收尾用 `message:done` 的 `msg.content` |
+
+沙盒模式的正确骨架是**专开一条规则只放 `<script>`**（匹配式填正文用不到的词，如 `{{卡名-kit}}`），脚本体里订阅事件；可见 UI 另开一条规则，触发串接到 `statusbar` 或 `beginning`。完整规范见 `../platforms/mmd-sandbox.md`（§2 执行模型、§3「消息生成中」陷阱、§4 SDK、§5 DOM 钩子、§6 CSS、§12 写作策略）。
+
+本文档以下内容**全部针对当前 MMD 与本地酒馆**。
 
 ---
 

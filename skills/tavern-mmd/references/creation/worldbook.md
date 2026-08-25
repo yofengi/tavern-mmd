@@ -92,7 +92,15 @@ python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/
 ```
 
 - `entry_id` 是工作层稳定 ID，不等于导出 JSON 的 `uid`。
-- `title` 导出为 JSON `comment`，**MMD 平台上限 20 字**（中文一字算 1，标点计入），超限 `add`/`rename` 会直接拒绝、`check` 报错。别用 `【】`/`·` 装饰，摘要写进 `summary` 而不是标题。目标平台是本地酒馆时在 `worldbook.config.json` 设 `"platform": "st"` 关掉该检查。
+- `title` 导出为 JSON `comment`，**两个 MMD 平台上限都是 20 字**（中文一字算 1，标点计入），超限 `add`/`rename` 会直接拒绝、`check` 报错。别用 `【】`/`·` 装饰，摘要写进 `summary` 而不是标题。目标平台是本地酒馆时在 `worldbook.config.json` 设 `"platform": "st"` 关掉该检查（本地酒馆无此限制）。判罚级别按平台分流：
+
+  | 平台 | 20 字标题 | 级别 |
+  |---|---|---|
+  | 当前 MMD `/mmd` | 检查 | **ERROR**（`validate.py --platform mmd` 对 `comment` 报错） |
+  | MMD沙盒模式 `/mmdsandbox` | 检查 | **WARN**（不阻断交付） |
+  | 本地酒馆 `/st` | 不检查 | — |
+
+  沙盒模式**继续保留**这条检查，因为沙盒是同一个 MMD 平台的新聊天页、不是新后端；20 字上限来源是 MMD **创卡页 UI** 对条目标题的截断，与 `chatVersion` 无关。**但降级为 WARN**，因为官方 `validate-worldbook.mjs` 里没有这项检查 —— 本 skill 不拿一条无官方脚本背书的平台侧 UI 限制去阻断交付。该限制在沙盒模式下**未复验**【待验证】；若实机确认新页放开了，直接删掉这条 WARN 即可。依据见 `../platforms/mmd-sandbox.md` §10.1。
 - `keys` 导出为 JSON `key`。
 - 正文导出为 JSON `content`。
 - `uid` 与 `order` 由 build 阶段生成，可以因移动/重排而改变。
@@ -102,7 +110,7 @@ python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/
 - 禁用@D depth≥1（打断对话流）；depth=0仅用于行为纠正指令（role=system），不放设定。
 - 绿灯keys：英文逗号分隔，含全名/昵称/外号。
 - token预算：单条目≤800字为宜；总纲≤500字；蓝灯总量控制（常驻全算token）——多角色卡蓝灯条目数≤5。
-- 条目标题（`title`→`comment`）≤20字（MMD硬上限，截断）；不加装饰符，`【】`和`·`同样占额度。
+- 条目标题（`title`→`comment`）≤20字（两个 MMD 平台的硬上限，截断；当前 MMD 判 ERROR、沙盒模式判 WARN，见「条目源文件格式」一节）；不加装饰符，`【】`和`·`同样占额度。
 - 新增、删除、移动、重命名、重排条目必须用 `worldbook_tool.py`；不要手工维护 `uid`、`order`、`index.md` 表格。
 
 ## 内容写法
@@ -115,9 +123,11 @@ python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/
 - 全字段可用（含position 2/4/5/6、sticky等）
 - 无固定传输字符硬上限（受模型上下文窗口限制）
 
-### MMD 平台
+### MMD 平台（当前 MMD 与沙盒模式共通）
 - 保守只用 position 0/1 + 蓝绿灯 + 递归控制；文风条目改↓Char蓝灯（@AT支持未验证）
-- **固定传输字符硬上限 15000 字**（会被截断）
+- **当前 MMD `/mmd`：固定传输字符硬上限 15000 字**（会被截断）
+- **MMD沙盒模式 `/mmdsandbox`**：15000 字固定传输上限**官方资料未提及**【待验证】。官方只给了字段级上限 `personality` 10000 字、`beginning` 10240 字（均为官方 ERROR）。稳妥做法是**继续按 15000 预算控制蓝灯总量并留 2000–3000 字缓冲**，直到实机复验。
+- **沙盒模式的世界书交付形态不同**：世界书**不能**塞进「导入正则」JSON（顶层出现 `entries` / `worldbook` / `characterBook` 等 → 官方 ERROR），必须单独交付，独立文件根对象**只保留 `entries`**。详见 `../platforms/mmd-sandbox.md` §10 与 `../output/worldbook-json.md`。
 
 **MMD 写卡留字符纪律**：
 
