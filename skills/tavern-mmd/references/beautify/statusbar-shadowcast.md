@@ -2,8 +2,8 @@
 
 > 当前 MMD（魅魔岛/sexyai.top）**实测验证**（11 靶探针 + 浏览器实机 + node 逻辑测试）的隔离式渲染方法。"影"=Shadow DOM 隔离，"渲"=渲染，对仗雷达法。
 > **不止状态栏**：同一套地基可做状态栏、可拖动悬浮球、侧边栏抽屉——凡"自包含、只管好自己"的 UI 组件皆可。**全局美化不可用**（它要穿透改平台元素，与隔离相反，见末节）。
-> 现成生成器在仓库 `g3-demo/`（`build_demo.py` 状态栏、`build_float.py` 悬浮组件），改字段/改配色即可复用。
-> **2.0 强化（吸收哨兵雷达法 sd3 卡【280366】实测优点，浏览器三路验证通过）**：① shadow→light DOM 降级链，attachShadow 不可用环境照常渲染；② `adoptedStyleSheets` + 跨气泡缓存单张 sheet；③ 事务式渲染（建好再挂载，异常回退纯净态）。详见末节「2.0 强化」。
+> 现成生成器在 `../../assets/shadowcast-examples/`（`build_demo.py` 状态栏、`build_float.py` 悬浮组件），改字段/改配色即可复用。
+> **2.0 强化（吸收哨兵雷达法 sd3 卡【280366】的架构启发，浏览器三路验证通过）**：① shadow→light DOM 降级链，attachShadow 不可用环境照常渲染；② `adoptedStyleSheets` + 跨气泡缓存单张 sheet；③ 事务式渲染（建好再挂载，异常回退纯净态）。该卡是用户提供的社区资产快照，作者、原 URL 与许可证未记录，仅作兼容研究参考，不宣称原创；ShadowCast 2.0 为吸收架构启发后的重写实现。详见末节「2.0 强化」。
 
 ## 一句话内核
 
@@ -66,7 +66,7 @@
 <div class="g3-host"><span class="g3-data" style="display:none">$1</span>
   <img src=x style="display:none" onerror="引擎">
 </div>
-  │ onerror 点火（per-message，script 不持久故必用 onerror）
+  │ onerror 点火（per-message 需逐气泡定位；同段 script 去重且不能自定位）
   ▼
 引擎：读同气泡 .g3-data → split 解析 → 缺失字段扫历史 .g3-host 折叠兜底
   → buildPanel() 在内存里建好整个面板（不挂载）
@@ -82,7 +82,7 @@ light 路径：g3- 前缀类名零冲突，面板照常显示（降级兜底，�
 ### 关键设计点
 
 - **数据在 light DOM 隐藏 span**：实测其 textContent 经 markdown 后**一字不差**（含 `*`/`|`/`/`），可被后续消息全局扫描做跨轮恢复。**绝不把数据放 shadow 内**（shadow 跨气泡扫不到、reload 即失）。
-- **每轮全量快照**：per-message 渲染**无跨气泡状态**（实测 localStorage 跨气泡读为 NULL），不可依赖"只吐变化+继承"；引擎侧虽有历史兜底，但模型全量最稳。
+- **每轮全量快照**：per-message 组件不把 localStorage 作为状态继承合同；模型每轮全量输出，引擎只把历史 DOM 折叠作为兜底。仓库曾记录跨气泡读取为 `NULL`，但该记录缺完整日期、环境与探针代码，必须复验，不能据此推导 runtime 或平台存储语义。
 - **host 留在气泡内**：状态栏属于该消息、随气泡走、per-message 更新。**不可挂 body**（会变全局单例、没法逐条更新）。
 
 ### 双轨代谢（长线防中毒，零额外 token）
@@ -112,7 +112,7 @@ light 路径：g3- 前缀类名零冲突，面板照常显示（降级兜底，�
 ### 悬浮球要点（实测全绿）
 
 - **挂 body 挣脱气泡 stacking context**：`document.body.appendChild(wrap)`，shadow 内 `position:fixed` + `z-index:2147483647`，浮在消息气泡和输入框之上（解决"放开场白球被消息盖住"）。
-- **单例防重**：`if(document.getElementById('zsf-ball-wrap'))return;`——每条消息 onerror 都触发，但已存在就跳过，屏幕只有一个球。reload 后球消失、再发消息重新点火重建（script/DOM 不持久，正常）。
+- **单例防重**：`if(document.getElementById('zsf-ball-wrap'))return;`——每条消息 onerror 都触发，但已存在就跳过，屏幕只有一个球。完整 reload 会重建 document，body 注入节点随之消失；后续消息可重新点火创建，这不是 `<script>` 能力或持久性的结论。
 - **拖动**：`mousedown/touchstart` 记起点 → `mousemove` 改 `style.left/top`（单属性放行）→ 移动超 3px 记为拖动、否则算点击展开菜单。本体夹取进视口（`Math.max/min`，注意铁律1 不能用 `<`/`>`）。
 - **菜单跟随 + 翻转避裁**：拖动时 `reposition()` 重算菜单坐标；上方放得下放上方、否则翻下方；水平夹取进视口。
 - **回填输入框**：选择器用 `'textarea, input'+LB+'type=text'+RB`（LB/RB 由 `fromCharCode` 拼，避铁律3），`dispatchEvent(new Event('input',{bubbles:true}))`。
@@ -129,7 +129,7 @@ shadow 内 `el.onclick=function(){}` 与 `el.addEventListener` 两种都通（�
 
 ## 富 UI 状态栏（雷达法移植，`assets/shadowcast-examples/` 的 `shadowcast_core.py`）
 
-`build_demo.py` 只有 `bar`/`text`/`list` 三类型，适合简单固定面板。要做雷达法那种 RPG/养成富交互状态栏（面包屑地点、带 tooltip 的资源条、XP 条、属性网格、装备名↔说明交叉绑定、可切页背包、敌人卡、可点击选项写回输入框），用 `radar-converted/` 的 **`shadowcast_core.py` 共享引擎**——同一影渲法地基（shadow 隔离 + 2.0 降级链 + 事务渲染），但内置更多字段类型：
+`build_demo.py` 只有 `bar`/`text`/`list` 三类型，适合简单固定面板。要做雷达法那种 RPG/养成富交互状态栏（面包屑地点、带 tooltip 的资源条、XP 条、属性网格、装备名↔说明交叉绑定、可切页背包、敌人卡、可点击选项写回输入框），用 `../../assets/shadowcast-examples/shadowcast_core.py` 共享引擎——同一影渲法地基（shadow 隔离 + 2.0 降级链 + 事务渲染），但内置更多字段类型：
 
 | type | 渲染 | 协议格式 |
 |---|---|---|
@@ -148,10 +148,10 @@ shadow 内 `el.onclick=function(){}` 与 `el.addEventListener` 两种都通（�
 
 `build_rpg.py`（西幻RPG）/`build_manor.py`（宅邸养成）是两个**只含 config** 的场景脚本（FIELDS + 主题 CSS + 标题），引擎全复用 core——改 bug 只动 core，所有场景同步。`multi:True` 字段允许同名键重复（read 累积成数组）。这套由雷达法资产转换而来：转后删掉雷达法整套对抗哨兵补丁（引号修复/font→span/染色哨兵）与信标转换器（`/\[k=v\]/` 扫整条气泡），换成单块 `<g3>` 捕获 + shadow 隔离。**全局美化部分不可转**（穿透 vs 隔离相反，见末节）。
 
-## 生成器工作流（`g3-demo/`）
+## 生成器工作流（`../../assets/shadowcast-examples/`）
 
-1. **改单一真相源**：`build_demo.py` 的 `FIELDS`（状态栏字段：key/label/type/format/example/volatile）或 `build_float.py` 的 `MENU_ITEMS`/`DRAWER_ITEMS`/`COLORS`。
-2. **生成**：`python build_demo.py`（产 `g3-statusbar.mmd.json` + `协议.md`）/ `python build_float.py`（产 `float-shadow.mmd.json`）。
+1. **改单一真相源**：同目录 `build_demo.py` 的 `FIELDS`（状态栏字段：key/label/type/format/example/volatile）或 `build_float.py` 的 `MENU_ITEMS`/`DRAWER_ITEMS`/`COLORS`。
+2. **生成**：在该目录运行 `python build_demo.py`（产 `状态栏-影渲法.mmd.json` + `状态栏-模型侧协议.md`）/ `python build_float.py`（当前默认产 `float-shadow.mmd.json`，也可用 `--out` 指定文件名）。
 3. **构建期 guard 自动校验**：内部裸双引号、字面`[键=值]`、字符数 ≤20000/1000、findRegex 带斜杠、键名三方一致（字段=引擎 CFG=测试数据）。（裸 `<`/`>` 经实机证实无害，不查。）
 4. **审核**：`python scripts/validate.py <json> --platform mmd` 须 0 错（已认识影渲法，不误报悬空/反斜杠）。
 5. **预览**：`python scripts/build-preview.py <json> --platform mmd`，浏览器/Preview 工具看渲染与交互（已支持影渲法引擎）。
@@ -239,4 +239,4 @@ var normKey=function(k){var n=ALIAS[k.toLowerCase()];return n?n:k;};
 
 ## 与 mmd.md 的关系
 
-平台级实测事实（attachShadow 可用、shadow 不过 markdown、自定义标签存活、聊天在 chatIframe 内、正则在 markdown 前跑、script 不持久）见 `../platforms/mmd.md` §6b、§7。本文档专注影渲法本身的架构与写法。换风格（配色/字体/布局）见 `style-system.md`——只换 shadow 内 CSS 的变量值，引擎逻辑不动。
+平台级实测事实（attachShadow 可用、shadow 不过 markdown、自定义标签存活、聊天在 chatIframe 内、正则在 markdown 前跑、同段 script 去重且不能 per-message 自定位）见 `../platforms/mmd.md` §6b、§8 与 §4。本文档专注影渲法本身的架构与写法。换风格（配色/字体/布局）见 `style-system.md`——只换 shadow 内 CSS 的变量值，引擎逻辑不动。

@@ -18,19 +18,19 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 
 | 能力 | 本地酒馆 /st | 当前MMD /mmd | 旧版MMD /oldmmd |
 |---|---|---|---|
-| `<script>` 标签 | ✅ | ✅ 可执行，但**做不了 per-message 自渲染**（仅用于定义 `window.__fn` 给 onclick 调）→ 状态栏引擎仍走 img onerror | ❌ → img onerror 点火器 |
+| `<script>` 标签 | ✅ | ✅ 可执行；**per-message 自渲染/定位不可用**，状态栏仍走 img onerror；document-level 一次性 bootstrap 与全局 handler 定义可用 | ❌ → img onerror 点火器 |
 | ES6+ 语法 | ✅ | ✅ 实测全支持（img onerror 载体下，7/7 语法探针全绿），**推荐 ES6** | ❌ ES5 only |
 | 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 同当前MMD |
 | 正则限额 | 无硬限制 | ≤130条；findRegex≤1000字符；replaceString≤20000字符 | ≤130条；同当前MMD |
 | 状态栏方案 | 雷达法/KV V4.0均可 | **动态/自创NPC：混合态雷达法**；固定字段：原生`$field`（最轻零JS）或 KV V4.0（带骨架），AI 择一 | 同当前MMD |
-| 全局美化 | 主题/自定义CSS | 正则包裹+uni-app类名覆盖+`!important`+body开关类（激活器可用script或img onerror） | 同当前MMD |
-| 事件处理 | 正常 | onclick仅放行"干净调用/引用表达式"（`__fn()`、`eval(x.dataset.s)`）；禁代码字符串字面量与直接DOM赋值；stopPropagation必加；时间戳ID | 同当前MMD（旧版略宽：曾放行极简单行赋值，当前版收紧） |
+| 全局美化 | 主题/自定义CSS | 静态换肤，或 day/night/native 三态运行时主题包（含玩家微调、route 生命周期） | 仅静态换肤；不套用当前 MMD runtime |
+| 事件处理 | 正常 | inline onclick 使用已验证的干净形式 `window.__fn&&__fn()` 或 `eval(getElementById('FUNC').dataset.s)`；禁代码字符串字面量与直接DOM赋值；复杂组件可动态绑定 handler；stopPropagation必加 | 同当前MMD（旧版略宽：曾放行极简单行赋值，当前版收紧） |
 | MVU/STScript/酒馆助手 | ✅ | ❌（保守） | ❌ |
 | 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | 同当前MMD |
 | 世界书导入 | json/png | png/json/角色卡连带 | 同当前MMD |
 | 世界书条目标题 | 无限制 | **≤20字**（`comment`；中文一字算1、标点计入，超出截断） | 同当前MMD |
 
-**当前MMD已实测**：`<script>` 与 ES6 解禁、`onerror` 可多行可用双引号、正则上限 130 条。`<script>` 不能做 per-message 自渲染（`document.currentScript` 不可用 + 同段脚本只加载一次被去重），状态栏引擎仍只能 img onerror。MVU/STScript 等未确认能力仍按无处理（保守）。
+**当前MMD已实测**：`<script>` 与 ES6 解禁、`onerror` 可多行可用双引号、正则上限 130 条。`<script>` 不能做 per-message 自渲染/定位（`document.currentScript` 不可用 + 同段脚本只加载一次被去重），状态栏引擎仍只能 img onerror；这不妨碍 document-level 单例用一次性 `<script>` bootstrap，并在重复入口复用既有实例。MVU/STScript 等未确认能力仍按无处理（保守）。
 
 ## 任务路由
 
@@ -43,13 +43,13 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 文风控制 | `references/creation/style.md` |
 | 美化风格选择/风格库/换配色换主题 | **先读** `references/beautify/style-system.md`（token契约+6维度+分装+覆盖）；风格清单见 `references/beautify/style-db/README.md` |
 | 状态栏 | 动态/自创NPC **首选** `references/beautify/statusbar-radar.md`（雷达法）或 `references/beautify/statusbar-shadowcast.md`（影渲法/ShadowCast，Shadow DOM 隔离、markdown 免疫、含双轨代谢，11靶验证+生成器）；固定字段走原生 `$field`（最轻）或 `statusbar.md`（KV V4.0），由 AI 择一 + 对应平台文档；换风格见 beautify/style-system.md |
-| 全局美化 | `references/beautify/global-css.md` + 对应平台文档；**现成范例**见 `assets/global-beautify-examples/README.md`；换风格见 beautify/style-system.md |
+| 全局美化 | `references/beautify/global-css.md` + 对应平台文档；先区分**静态换肤 / 当前 MMD 三态运行时主题包**。只要需要 day/night/native、玩家微调、设置或持久偏好候选，默认再读 `references/beautify/theme-runtime.md`；新资产优先见 `assets/global-beautify-examples/mmd-theme-runtime/README.md`，风格映射见 `style-system.md` |
 | 悬浮组件（可拖动悬浮球/侧边栏抽屉/带菜单的悬浮按钮） | `references/beautify/floating-components.md`（light DOM 认证写法：img onerror 注入 + CSS类 + classList，菜单跟随本体+翻转避裁+选项可点击；两版分流）；**Shadow DOM 隔离变体**见 `references/beautify/statusbar-shadowcast.md`（host 挂 body + shadow 内 fixed，样式不外泄/不被染色，已验证） |
 | 正则规则 | `references/beautify/regex-rules.md` |
 | 角色卡JSON输出 | `references/output/card-json.md` |
 | 世界书JSON输出 | `references/output/worldbook-json.md` |
 | 正则产出（json/MMD导入json/手填清单） | `references/output/regex-output.md` |
-| 雷达法现成示例资产 | `assets/radar-examples/`（西幻RPG状态栏、日夜主题全局美化集成案例） |
+| 雷达法现成示例资产 | `assets/radar-examples/`；可参考 `西幻RPG-正则与第一句话.json` 的状态栏结构。`完整美化-日夜主题与雷达.json` 是用户提供的社区快照启发的 legacy 集成参考（作者/原 URL/许可证未完整记录），虽已迁移 slash findRegex 和当前 MMD handler，但缺少 native/destroy/route 生命周期，不再推荐作全局主题基底 |
 | 影渲法（ShadowCast）现成资产 | `assets/shadowcast-examples/`（状态栏+悬浮球+侧边栏成品 json、生成器 build_demo.py/build_float.py、README；改字段重新生成或直接改造成品）。**富 UI 状态栏**（RPG/养成：面包屑/资源条tooltip/XP条/属性网格/装备说明/可切页背包/敌人卡/可点选项写回输入框）用同目录 `shadowcast_core.py` 共享引擎 + `build_rpg.py`/`build_manor.py` 场景脚本（雷达法移植，12种字段类型，含 rpg/manor 两套成品 json+蓝灯世界书） |
 | 交付前自检 | `references/quality/checklist.md` |
 
@@ -81,7 +81,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 - 创建任何文件后立即更新 main.md（一行：文件路径—用途—状态）
 - 完成 plan.md 中一步立即打勾，不批量补记
 - 新会话续作：先读 main.md 再读 plan.md，禁止跳过直接动工
-- 做美化时，风格选择与每次单点覆盖都记入 `工作/美化决策.md`（无美化则不建此文件）；详见 beautify/style-system.md 第5节
+- 做美化时，风格选择与每次单点覆盖都记入 `工作/美化决策.md`（无美化则不建此文件）；详见 beautify/style-system.md 的项目级制作覆盖
 - 世界书项目：新增/导入/删除/移动/重命名/重排条目必须用 `scripts/worldbook_tool.py`；`output/*.json` 是 build 产物，不作为常规编辑源；修改前先读 `工作/世界书/index.md` 并用 `show`/`search` 定位 `entry_id`。
 
 ## 产出规范
@@ -92,7 +92,7 @@ description: 为MMD（魅魔岛/sexyai.top）和本地酒馆SillyTavern创建角
 | 世界书 | SillyTavern 世界书 json | 同左 |
 | 正则 | 正则脚本 json | MMD导入json（pageDepth/statusbar/beginning/regex_scripts四字段，见 regex-output.md）；手填清单 .md 作备选 |
 
-所有 json 交付前必须语法校验：`python -m json.tool <文件> > /dev/null`。
+MMD 独立正则导入 JSON 的顶层必须恰好且仅有 `pageDepth/statusbar/beginning/regex_scripts` 四键，每条 `regex_scripts` 规则也必须恰好且仅有 `id/scriptName/findRegex/replaceString` 四键。所有 MMD `findRegex` 必须写成 `/pattern/flags` slash literal，固定标记也要包斜杠。所有 json 交付前必须语法校验：`python -m json.tool <文件> > /dev/null`。
 
 **整张角色卡可导出为图片**：MMD 用 png 导入整卡（不能导入 json 整卡；**jpg 已弃用**，实测 MMD 读不出卡数据），本地酒馆 png/json 均可。交付整卡图片前用弹窗问底图来源（默认米黄底图 / 用户图），用 `scripts/make_card_image.py` 生成（只产 png），详见 output/card-json.md 第 7 节。
 

@@ -77,7 +77,7 @@ python -m json.tool output/正则文件名.json > /dev/null && echo OK
 
 ## 第二节：MMD 导入 JSON（首选交付）
 
-MMD 平台支持直接导入专用 4 字段格式的 json（与本地酒馆正则 json 结构**不同**，字段更少）。
+MMD 平台支持直接导入专用 4 字段格式的 json（与本地酒馆正则 json 结构**不同**，字段更少）。顶层必须**恰好且仅有** `pageDepth`、`statusbar`、`beginning`、`regex_scripts` 四个键；`regex_scripts` 的每条规则也必须**恰好且仅有** `id`、`scriptName`、`findRegex`、`replaceString` 四个键，不得夹带 ST 字段或任意扩展键。
 
 ### 2.1 完整结构
 
@@ -90,7 +90,7 @@ MMD 平台支持直接导入专用 4 字段格式的 json（与本地酒馆正�
     {
       "id": -1,
       "scriptName": "响应式级联样式表部署",
-      "findRegex": "<css>",
+      "findRegex": "/<css>/",
       "replaceString": "<style>……</style>"
     },
     {
@@ -113,13 +113,15 @@ MMD 平台支持直接导入专用 4 字段格式的 json（与本地酒馆正�
 | `regex_scripts` | array | 正则数组，每条仅 4 字段 |
 | `regex_scripts[].id` | number | 固定 `-1` |
 | `regex_scripts[].scriptName` | string | 规则名 |
-| `regex_scripts[].findRegex` | string | 查找正则；字面标记直接写（`<css>`），正则表达式带 `/pattern/flags` |
+| `regex_scripts[].findRegex` | string | 查找正则；当前 MMD 与旧版 MMD 均必须写 slash literal（固定标记也写 `/<css>/`，一般表达式写 `/pattern/flags`） |
 | `regex_scripts[].replaceString` | string | 替换内容，可用 `$1` 捕获组 |
 
 注意：
 - **没有** placement/markdownOnly/promptOnly 等字段（MMD 正则仅作用于显示层）
+- **每条 `findRegex` 必须是 `/pattern/flags` slash literal**：固定触发标记也要包斜杠；裸值在控制台可能测试通过，但实际聊天不替换
 - 限额仍然适用：≤130条、findRegex≤1000字符、replaceString≤20000字符
-- 现成范例见 `../../assets/radar-examples/` 下两个"导入用"json
+- 现成状态栏范例可参考 `../../assets/radar-examples/西幻RPG-正则与第一句话.json`
+- `../../assets/radar-examples/完整美化-日夜主题与雷达.json` 是 **legacy 日夜集成包**，只作兼容研究，不再推荐作为新全局主题基底；需要 day/night/native 或生命周期管理时，优先使用 `../../assets/global-beautify-examples/mmd-theme-runtime/` 的新 runtime
 - 校验命令同第一节
 
 ### 2.3 JSON 字符串转义（最易踩的坑，必读）
@@ -150,7 +152,7 @@ obj = {
     "statusbar": "<wabisabi-ui>",
     "beginning": "",
     "regex_scripts": [
-        {"id": -1, "scriptName": "规则名", "findRegex": "<wabisabi-ui>", "replaceString": html}
+        {"id": -1, "scriptName": "规则名", "findRegex": "/<wabisabi-ui>/", "replaceString": html}
     ]
 }
 # ensure_ascii=False 保留中文；json.dumps 自动把换行转\n、引号转\"
@@ -196,9 +198,11 @@ python <skill>/scripts/validate.py output/文件.json --platform <mmd|oldmmd>
 
 可选预览（状态栏/美化必做）：`python <skill>/scripts/build-preview.py output/文件.json --platform <mmd|oldmmd>`（默认 `--mode both`）。MMD 导入 json 会生成两份：**三面板沙箱**（①第一句话剩余预览，显示扣除单独抽检的状态栏/悬浮组件后的正文、选项菜单/图片/特殊美化；②状态栏单独预览；③悬浮组件预览，侧边栏/悬浮球）用于逐组件审核；**全景预览**（`-panorama-` 文件）把所有组件组合进一个模拟 MMD 聊天页，底部固定主输入框+发送按钮，发送出现用户气泡+占位AI气泡，用于二次审核组合效果。主AI 用 Preview 工具先看三面板、再看全景，全景不默认关闭留给用户自查。
 
-> `--platform mmd`（当前 MMD）下，`<script>`/ES6/onerror多行均不报红（实测支持），只对 onclick 代码字面量/赋值告警；`--platform oldmmd` 保持全红线最严格。校验当前 MMD 产出务必带 `--platform mmd`，否则会误报 ES6/script。
+> `--platform mmd`（当前 MMD）下，`<script>`/ES6/onerror 多行均按实测能力放行；inline `onclick` 只认证平台已实测的 canonical 形式，代码字符串、赋值和未认证形式均记为 ERROR，并在 preview 中禁用。`--platform oldmmd` 保持全红线最严格。校验当前 MMD 产出务必带 `--platform mmd`，否则会误报 ES6/script。
 
 ### 2.6 平台原生替换语法（当前 MMD，写正则时可直接用）
+
+**当前 MMD inline handler 的权威可用形式**：无参数全局调用用 `onclick="window.__fn&&__fn()"`；轻主板调用用 `onclick="eval(getElementById('FUNC').dataset.s)"`。两者都是单一干净调用/引用表达式；不要把代码字符串直接塞进 `eval('...')`，也不要在属性里写 DOM 赋值。复杂组件还可在 `img onerror` 内用 `el.onclick=function(){...}` 动态绑定，避开 inline 属性净化。
 
 MMD 平台正则的 `replaceString` 内除了 HTML/CSS/JS，还可用平台内置语法：
 
@@ -231,7 +235,7 @@ MMD 平台正则的 `replaceString` 内除了 HTML/CSS/JS，还可用平台内�
 **findRegex**（填入"查找"框，X字符/限1000）：
 
 ```
-<status>
+/<status>/
 ```
 
 **replaceString**（填入"替换"框，X字符/限20000）：
@@ -259,7 +263,7 @@ MMD 平台正则的 `replaceString` 内除了 HTML/CSS/JS，还可用平台内�
 
 ### 3.2 MMD 平台填写注意事项
 
-- findRegex 字段：直接填写正则内容（不带 `/pattern/flags` 外层斜杠）或带斜杠均可，按 MMD 界面要求为准
+- findRegex 字段：必须填写 `/pattern/flags` 外层斜杠；固定标记也写成 `/<标记>/`
 - replaceString 字段：如含 HTML，注意转义确认界面接受原始 HTML
 - 每条填写后建议发条测试消息验证效果，再勾选 `- [ ] 已填写`
 - MMD 平台正则仅作用于显示层（等效 markdownOnly=true）

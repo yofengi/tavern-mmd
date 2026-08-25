@@ -13,13 +13,22 @@ tavern-mmd 预览脚本 build-preview.py
   oldmmd : <script>剥离并裸露源码(红框)；onerror/onclick 内 ES6 标红提示真实旧版会截断
   mmd    : <script>/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行
 
-退出码: 0=生成成功  2=用法/读取错误
+退出码: 0=生成成功  1=致命审计失败（不写文件）  2=用法/读取错误
 """
 import sys
 import json
 import argparse
 import re
+import os
 import html as html_mod
+from html.parser import HTMLParser
+
+from validate import (classify_mmd_onclick,
+                      _split_findregex_literal as _split_regex_literal,
+                      _js_regex_structure_error, _compile_js_regex_for_preview,
+                      _replace_js_regex, _custom_marker_occurrences,
+                      _mmd_regex_top_level_errors, _mmd_regex_schema_errors,
+                      _js_regex_oracle_available)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -53,19 +62,39 @@ def _text_field(obj, name):
     return v if isinstance(v, str) else ""
 
 
-def extract_fragments(obj):
-    """返回 [(scriptName, findRegex, replaceString), ...]，仅含含HTML的替换。"""
+def _mmd_top_level_error(obj, platform):
+    if platform not in ("oldmmd", "mmd"):
+        return None
+    errors = _mmd_regex_top_level_errors(obj)
+    return errors[0] if errors else None
+
+
+def find_structure_errors(obj, platform):
+    if platform not in ("oldmmd", "mmd"):
+        return []
+    return _mmd_regex_schema_errors(obj)
+
+
+def extract_fragments(obj, platform=None):
+    """返回可由预览器执行且含 HTML 的替换片段。"""
+    if _mmd_top_level_error(obj, platform):
+        return []
     frags = []
     for sc in _script_list(obj):
         if not isinstance(sc, dict):
             continue
         rs = sc.get("replaceString", "")
         name = sc.get("scriptName", sc.get("name", ""))
-        fr = sc.get("findRegex", "")
+        raw_fr = sc.get("findRegex", "")
+        fr = raw_fr if isinstance(raw_fr, str) else ""
         if not isinstance(rs, str):
             continue
-        if not isinstance(fr, str):
-            fr = ""
+        if platform in ("oldmmd", "mmd") and raw_fr not in ("", None):
+            if not isinstance(raw_fr, str) or _js_regex_structure_error(raw_fr):
+                continue
+            regex, _flags, reason = _compile_js_regex_for_preview(raw_fr)
+            if regex is None or reason:
+                continue
         # 含任意 HTML 标签的替换都渲染；跳过纯信标转换器（无标签的占位文本）
         if re.search(r"<[a-zA-Z][a-zA-Z0-9]*[\s/>]", rs):
             frags.append((name, fr, rs))
@@ -78,76 +107,70 @@ def detect_blank_bar_risk(rs):
     return bool(re.search(r">\s*\n\s*<", rs))
 
 
-HTML_TAGS = set("""a audio b big body br button code del details div em font form h1 h2 h3 h4 h5 h6
-head hr html i iframe img input ins label li link mark meta nav ol option p pre script section select small span
-strong style sub summary sup table tbody td textarea th thead title tr u ul video""".split())
-
-
 def _parse_regex_literal(fr):
-    """返回 (pattern, flags) 或 None；不支持的 JS flag 忽略。"""
-    if not (isinstance(fr, str) and fr.startswith("/")):
-        return None
-    end = fr.rfind("/")
-    if end <= 0:
-        return None
-    pattern = fr[1:end]
-    js_flags = fr[end + 1:]
-    flags = 0
-    if "i" in js_flags:
-        flags |= re.I
-    if "m" in js_flags:
-        flags |= re.M
-    if "s" in js_flags:
-        flags |= re.S
-    try:
-        return re.compile(pattern, flags)
-    except re.error:
-        return None
+    """兼容测试/调用：仅返回预览器可执行的 Python regex。"""
+    regex, _flags, reason = _compile_js_regex_for_preview(fr)
+    return None if reason else regex
 
 
-def _js_repl_to_python(repl):
-    """把 JS/MMD 替换里的 $1/$2 转成 Python re.sub 的 \\1/\\2。
-    （已弃用：影渲法引擎 replaceString 含正则字面量 \\d/\\s，被 re.sub 模板当转义会崩。
-    改用 _make_repl_func 函数式替换。保留此函数仅作兼容。）"""
-    return re.sub(r"\$(\d+)", r"\\\1", repl)
+def find_invalid_findregexes(obj, platform):
+    """返回真正的 MMD 结构/JS dialect 错误；不含预览器能力限制。"""
+    if platform not in ("oldmmd", "mmd"):
+        return []
+    invalid = []
+    for i, sc in enumerate(_script_list(obj)):
+        if not isinstance(sc, dict):
+            continue
+        fr = sc.get("findRegex", "")
+        if fr in ("", None):
+            continue
+        reason = "findRegex 必须是字符串" if not isinstance(fr, str) else _js_regex_structure_error(fr)
+        if reason:
+            name = sc.get("scriptName", sc.get("name", "#%d" % i))
+            invalid.append((str(name), str(fr), reason))
+    return invalid
 
 
-def _make_repl_func(rs):
-    """返回供 re.sub 用的替换函数，按 MMD 真实语义展开：
-      - `$1`/`$2` → 对应捕获组
-      - `\\\\` → 单个 `\\`（模板转义折叠：JSON 存的双反斜杠渲染成单）
-      - 其余字符原样输出
-    用函数式替换而非 re.sub 模板字符串，故 replaceString 里的单反斜杠序列
-    （如影渲法/雷达法引擎正则 \\d \\s）不会触发 're bad escape' 崩溃——
-    这正是之前预览脚本在影渲法引擎上崩的根因。"""
-    def repl(m):
-        out = []
-        i = 0
-        n = len(rs)
-        while i < n:
-            ch = rs[i]
-            if ch == "$" and i + 1 < n and rs[i + 1].isdigit():
-                j = i + 1
-                while j < n and rs[j].isdigit():
-                    j += 1
-                idx = int(rs[i + 1:j])
-                try:
-                    out.append(m.group(idx) or "")
-                except (IndexError, re.error):
-                    out.append(rs[i:j])
-                i = j
-            elif ch == "\\" and i + 1 < n and rs[i + 1] == "\\":
-                out.append("\\")          # \\ → \（模板转义折叠）
-                i += 2
-            else:
-                out.append(ch)
-                i += 1
-        return "".join(out)
-    return repl
+def find_unsupported_preview_regexes(obj, platform):
+    """返回 JS 结构合法、但 Python 预览后端无法可靠模拟的规则。"""
+    if platform not in ("oldmmd", "mmd"):
+        return []
+    unsupported = []
+    for i, sc in enumerate(_script_list(obj)):
+        if not isinstance(sc, dict):
+            continue
+        fr = sc.get("findRegex", "")
+        if not isinstance(fr, str) or not fr or _js_regex_structure_error(fr):
+            continue
+        regex, _flags, reason = _compile_js_regex_for_preview(fr)
+        if regex is None or reason:
+            name = sc.get("scriptName", sc.get("name", "#%d" % i))
+            unsupported.append((str(name), fr, reason or "未知限制"))
+    return unsupported
 
 
-def apply_regex_pipeline(obj):
-    """模拟 MMD：statusbar + beginning 经 regex_scripts 全量替换后的 HTML。"""
+def _findregex_audit_html(obj, platform):
+    rows = [
+        '<div class="frag-warn">ERROR 非法顶层结构：%s</div>' % html_mod.escape(message)
+        for message in find_structure_errors(obj, platform)
+    ]
+    rows.extend(
+        '<div class="frag-warn">ERROR 非法 findRegex：规则 %s（%s；%s）</div>'
+        % (html_mod.escape(name), html_mod.escape(fr), html_mod.escape(reason))
+        for name, fr, reason in find_invalid_findregexes(obj, platform)
+    )
+    rows.extend(
+        '<div class="frag-warn">WARN 预览器不支持此 JS 正则：规则 %s（%s；%s），已跳过预览替换</div>'
+        % (html_mod.escape(name), html_mod.escape(fr), html_mod.escape(reason))
+        for name, fr, reason in find_unsupported_preview_regexes(obj, platform)
+    )
+    return "".join(rows)
+
+
+def apply_regex_pipeline(obj, platform=None):
+    """模拟 JS 替换管线；MMD 系跳过结构错误和预览器不支持规则。"""
+    if _mmd_top_level_error(obj, platform):
+        return ""
     if isinstance(obj, list):
         return ""
     text = _text_field(obj, "statusbar") + _text_field(obj, "beginning")
@@ -158,39 +181,146 @@ def apply_regex_pipeline(obj):
         rs = sc.get("replaceString", "")
         if not isinstance(fr, str) or not isinstance(rs, str) or not fr:
             continue
-        regex = _parse_regex_literal(fr)
-        if regex is None:
+        if platform not in ("oldmmd", "mmd") and not fr.startswith("/"):
             text = text.replace(fr, rs)
-        else:
-            text = regex.sub(_make_repl_func(rs), text)
+            continue
+        if _js_regex_structure_error(fr):
+            if platform not in ("oldmmd", "mmd"):
+                text = text.replace(fr, rs)
+            continue
+        regex, js_flags, reason = _compile_js_regex_for_preview(fr)
+        if regex is None or reason:
+            continue
+        text = _replace_js_regex(text, regex, js_flags, rs)
     return text
 
 
-def find_dangling_markers(obj):
-    """找出 statusbar/beginning 中无对应 findRegex 消费的自定义 <标记>。
-
-    判据=该标记经完整正则管线后是否仍残留在渲染结果里。
-    （旧逻辑用裸标记 `<g3>` 去 rx.search 试探，对"整段匹配型" findRegex
-    如 /<g3>([\\s\\S]*?)<\\/g3>/ 会误判悬空——影渲法/雷达法常用整段匹配。
-    改为 post-pipeline 残留检测：被消费的标记不会出现在最终 HTML 里。）"""
-    if isinstance(obj, list):
+def find_dangling_markers(obj, platform=None):
+    """管线可完整模拟时，扫描每个自定义开始/结束标记 occurrence。"""
+    if isinstance(obj, list) or find_unsupported_preview_regexes(obj, platform):
         return []
-    hay = _text_field(obj, "statusbar") + _text_field(obj, "beginning")
-    rendered = apply_regex_pipeline(obj)
-    errors = []
-    seen = set()
-    for m in re.finditer(r"<([A-Za-z一-鿿][A-Za-z0-9_.\-一-鿿]*)>", hay):
-        marker = m.group(0)
-        name = m.group(1).lower()
-        if name in HTML_TAGS:
-            continue
-        if marker in seen:
-            continue
-        # 被某条 findRegex 消费的标记，跑完管线后不会残留；仍残留=真悬空
-        if marker in rendered:
-            errors.append(marker)
-            seen.add(marker)
-    return errors
+    rendered = apply_regex_pipeline(obj, platform)
+    return [marker for marker, _pos in _custom_marker_occurrences(rendered)]
+
+
+class _OnclickSanitizer(HTMLParser):
+    """重建 HTML，仅移除当前 MMD allowlist 外的真实 onclick 属性。"""
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=False)
+        self.parts = []
+        self.removed = []
+
+    @staticmethod
+    def _attrs(attrs):
+        out = []
+        for name, value in attrs:
+            if value is None:
+                out.append(" " + name)
+            else:
+                out.append(' %s="%s"' % (name, html_mod.escape(value, quote=True)))
+        return "".join(out)
+
+    def _start(self, tag, attrs, closed):
+        kept = []
+        removed_here = []
+        for name, value in attrs:
+            if name.lower() == "onclick":
+                allowed, reason = classify_mmd_onclick(value or "")
+                if not allowed:
+                    removed_here.append((value or "", reason))
+                    continue
+            kept.append((name, value))
+        if removed_here:
+            kept.append(("data-mmd-onclick-disabled", "1"))
+            self.removed.extend(removed_here)
+        self.parts.append("<%s%s%s" % (tag, self._attrs(kept), "/>" if closed else ">"))
+
+    def handle_starttag(self, tag, attrs):
+        self._start(tag, attrs, False)
+
+    def handle_startendtag(self, tag, attrs):
+        self._start(tag, attrs, True)
+
+    def handle_endtag(self, tag):
+        self.parts.append("</%s>" % tag)
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+    def handle_entityref(self, name):
+        self.parts.append("&%s;" % name)
+
+    def handle_charref(self, name):
+        self.parts.append("&#%s;" % name)
+
+    def handle_comment(self, data):
+        self.parts.append("<!--%s-->" % data)
+
+    def handle_decl(self, decl):
+        self.parts.append("<!%s>" % decl)
+
+    def handle_pi(self, data):
+        self.parts.append("<?%s>" % data)
+
+
+def sanitize_mmd_onclick(html):
+    parser = _OnclickSanitizer()
+    try:
+        parser.feed(html)
+        parser.close()
+    except (ValueError, TypeError):
+        return html, []
+    return "".join(parser.parts), parser.removed
+
+
+def _onclick_audit_html(content, platform, label="最终输出"):
+    if platform != "mmd" or not isinstance(content, str):
+        return ""
+    _cleaned, removed = sanitize_mmd_onclick(content)
+    return "".join(
+        '<div class="frag-warn">ERROR inline onclick 已禁用：%s（%s；%s）</div>'
+        % (html_mod.escape(label), html_mod.escape(body), html_mod.escape(reason))
+        for body, reason in removed
+    )
+
+
+def find_invalid_onclicks(obj, platform):
+    """只审计实际进入最终渲染文本的 inline onclick；未命中替换不误报。"""
+    if platform != "mmd":
+        return []
+    if isinstance(obj, list):
+        rendered = "".join(rs for _name, _fr, rs in extract_fragments(obj, platform))
+    else:
+        rendered = apply_regex_pipeline(obj, platform)
+    _cleaned, removed = sanitize_mmd_onclick(rendered)
+    return removed
+
+
+def fatal_preview_findings(obj, platform):
+    """所有致命审计均在调用者写文件前完成。"""
+    structure = find_structure_errors(obj, platform)
+    invalid_regex = find_invalid_findregexes(obj, platform)
+    invalid_onclick = find_invalid_onclicks(obj, platform) if not structure else []
+    dangling = []
+    if isinstance(obj, dict) and not structure:
+        dangling = find_dangling_markers(obj, platform)
+    return {
+        "structure": structure,
+        "findRegex": invalid_regex,
+        "onclick": invalid_onclick,
+        "dangling": dangling,
+    }
+
+
+def _default_output_path(input_path, kind, platform):
+    source = os.path.abspath(input_path)
+    source_dir = os.path.dirname(source)
+    if os.path.basename(os.path.normpath(source_dir)).casefold() == "output":
+        output_dir = os.path.join(os.path.dirname(source_dir), "工作")
+    else:
+        output_dir = source_dir
+    stem = os.path.splitext(os.path.basename(source))[0]
+    return os.path.join(output_dir, "%s-%s-%s.html" % (stem, kind, platform))
 
 
 def _html_to_srcdoc(content, platform):
@@ -405,11 +535,14 @@ def split_preview_panels(rendered):
 def assemble_preview(obj, platform, src_name):
     """三面板预览：第一句话整合 / 状态栏单独 / 悬浮组件。"""
     if isinstance(obj, list):
-        return assemble_html(extract_fragments(obj), platform, src_name)
-    rendered = apply_regex_pipeline(obj)
+        rendered = "".join(rs for _name, _fr, rs in extract_fragments(obj, platform))
+        return assemble_html(extract_fragments(obj, platform), platform, src_name,
+                             _findregex_audit_html(obj, platform) + _onclick_audit_html(rendered, platform))
+    rendered = apply_regex_pipeline(obj, platform)
     first, status, floating = split_preview_panels(rendered)
-    audit = "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
-                    for x in find_dangling_markers(obj))
+    audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(rendered, platform)
+    audit += "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
+                     for x in find_dangling_markers(obj, platform))
     body = "\n".join([
         _panel("第一句话剩余预览", first, platform, "beginning remainder"),
         _panel("状态栏单独预览", status, platform, "status"),
@@ -426,10 +559,14 @@ def assemble_preview(obj, platform, src_name):
 PANORAMA_CSS = """html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;font-family:system-ui,sans-serif;background:#fff;color:#222}
 .page{flex:1;display:flex;flex-direction:column;min-height:0;background:#fff}
+.topTabbar{flex:0 0 48px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;
+  border-bottom:1px solid #ddd;background:#fafafa;box-sizing:border-box;font-size:14px;font-weight:600}
+.topTabbar .pano-route-label{font-size:12px;font-weight:400;color:#666}
 .pano-chat{flex:1;overflow-y:auto;padding:14px 12px 88px;-webkit-overflow-scrolling:touch}
-.pano-chat .chat-body{display:flex;flex-direction:column}
+.pano-chat .chat-body{display:flex;flex-direction:column;min-height:100%}
 .item{display:flex;margin:10px 0}
-.item .content{max-width:82%;padding:10px 13px;border-radius:10px;line-height:1.55;word-break:break-word}
+.item .touch-scope{display:flex;width:100%}
+.item .content{max-width:82%;padding:10px 13px;border-radius:8px;line-height:1.55;word-break:break-word;box-sizing:border-box}
 .content.left{background:#f0f0f3;color:#222;margin-right:auto}
 .content.right{background:#3a76f0;color:#fff;margin-left:auto}
 .pano-input-bar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:flex-end;
@@ -454,6 +591,10 @@ body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;display:f
 .frag{flex:1;margin:12px;display:flex;flex-direction:column;border:1px dashed #30363d;border-radius:8px;overflow:hidden;min-height:0}
 .frag-label{background:#161b22;color:#8b949e;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d;flex:0 0 auto}
 .frag-warn{background:#3a2d00;color:#f0c674;font-size:11px;padding:6px 12px}
+.preview-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 12px;background:#161b22;border-bottom:1px solid #30363d;flex:0 0 auto}
+.preview-tools-label{color:#8b949e;font-size:11px;margin-right:2px}
+.preview-tool{border:1px solid #484f58;border-radius:4px;background:#21262d;color:#e6edf3;padding:4px 8px;font-size:11px;cursor:pointer}
+.preview-tool:hover{background:#30363d}
 %(marker_css)s
 .pano-frame{flex:1;width:100%%;border:0;display:block;background:#fff;min-height:480px}
 </style></head>
@@ -463,19 +604,54 @@ body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;display:f
 </body></html>"""
 
 
-# 全景发送脚手架：预览工具自带，非被测产物。走 img onerror 点火器（ES5），三平台都执行，
-# 且不被 apply_platform_limits 的 <script> 剥离器当成被测内容裸露。
+# 全景运行时测试脚手架：预览工具自带，非被测产物。它在被测主题执行前预设聊天路由，
+# 并暴露稳定接口给 GUI 黑盒测试追加 AI 内容、切换同文档 DOM 可见性/hash。
+# 这只模拟路由观察条件，不宣称卸载或重建真实页面运行时。
+PANORAMA_RUNTIME_SCAFFOLD = (
+    '<script data-pano-runtime-scaffold="1">'
+    "if(!/chat\\/chat/.test(location.hash)){location.hash='#/pages/chat/chat';}"
+    "(function(){"
+    "var D=document,W=window,seq=0;"
+    "function chat(){return D.querySelector('.chat-body');}"
+    "function add(side,text){var root=chat();if(!root)return null;"
+    "var it=D.createElement('div');it.className='item';it.setAttribute('data-preview-dynamic','1');"
+    "var touch=D.createElement('div');touch.className='touch-scope';"
+    "var ct=D.createElement('div');ct.className='content '+side;ct.textContent=text;"
+    "touch.appendChild(ct);it.appendChild(touch);root.appendChild(it);"
+    "var pane=D.querySelector('.chat');if(pane)pane.scrollTop=pane.scrollHeight;return ct;}"
+    "function syncRoute(hash){var active=/chat\\/chat/.test(hash);"
+    "var pane=D.querySelector('.chat'),input=D.querySelector('.chat-bottom'),label=D.querySelector('.pano-route-label');"
+    "if(pane){pane.hidden=!active;pane.setAttribute('aria-hidden',active?'false':'true');}"
+    "if(input){input.hidden=!active;input.setAttribute('aria-hidden',active?'false':'true');}"
+    "if(label)label.textContent=active?'chat/chat':'index/index';return active;}"
+    "function route(hash){syncRoute(hash);if(location.hash!==hash)location.hash=hash;return location.hash;}"
+    "W.__tavernPreview={"
+    "addAI:function(text){seq++;return add('left',text||('[Dynamic AI '+seq+'] “待修复“ / \"keep\"'));},"
+    "addUser:function(text){seq++;return add('right',text||('[Dynamic user '+seq+']'));},"
+    "leave:function(){return route('#/pages/index/index');},"
+    "returnToChat:function(){return route('#/pages/chat/chat');},"
+    "setRoute:route,getRoute:function(){return location.hash;}"
+    "};"
+    "})()"
+    '</script>'
+)
+
+
+# 发送脚手架走 img onerror，保持与 MMD 交互载体一致；它位于被测内容之外，不参与平台剥离。
 PANORAMA_SEND_SCAFFOLD = (
     '<img src="x" data-pano-scaffold="1" style="display:none" '
     "onerror=\"(function(){"
     "var ta=document.querySelector('.uni-textarea-textarea');"
     "var btn=document.querySelector('.pano-send');"
-    "var chat=document.querySelector('.pano-chat');"
+    "var chat=document.querySelector('.chat');"
     "if(!ta||!btn||!chat)return;"
     "var addMsg=function(side,text){"
+    "if(window.__tavernPreview){return side==='left'?window.__tavernPreview.addAI(text):window.__tavernPreview.addUser(text);}"
+    "var root=document.querySelector('.chat-body');if(!root)return;"
     "var it=document.createElement('div');it.className='item';"
+    "var touch=document.createElement('div');touch.className='touch-scope';"
     "var ct=document.createElement('div');ct.className='content '+side;"
-    "ct.textContent=text;it.appendChild(ct);chat.appendChild(it);"
+    "ct.textContent=text;touch.appendChild(ct);it.appendChild(touch);root.appendChild(it);"
     "chat.scrollTop=chat.scrollHeight;return ct;};"
     "var send=function(){var v=ta.value.replace(/^\\s+|\\s+$/g,'');if(!v)return;"
     "addMsg('right',v);ta.value='';"
@@ -493,18 +669,20 @@ def assemble_panorama(obj, platform, src_name):
     底部固定输入栏（滚动不受影响）+ 发送按钮；发送追加用户气泡 + 占位AI气泡。"""
     if isinstance(obj, list):
         # 本地酒馆正则数组（无 beginning）：把各 HTML 片段堆进聊天区一条气泡。
-        chat_inner = "".join("%s" % rs for _, _, rs in extract_fragments(obj))
+        chat_inner = "".join("%s" % rs for _, _, rs in extract_fragments(obj, platform))
     else:
-        chat_inner = apply_regex_pipeline(obj)
+        chat_inner = apply_regex_pipeline(obj, platform)
 
-    # 聊天页结构：套上真实 MMD 类名（.page/.chat/.chat-bg/.chat-body/.item/.content.left、
-    # .chat-bottom/.chat-input-scope），让全局美化 CSS（按 MMD 选择器写）能命中；pano-* 类只负责
-    # 布局与固定输入栏。否则美化的页面底色/气泡底色规则匹配不到，会露出白底（washed out）。
+    # 只对被测产物施加平台净化；测试脚手架随后拼入，避免被误当主题 script 剥离。
+    tested_content = apply_platform_limits(chat_inner, platform)
     page = (
+        '%s'
         '<div class="page">'
+        '<div class="topTabbar"><span>MMD Chat Preview</span><span class="pano-route-label">chat/chat</span></div>'
         '<div class="chat chat-bg pano-chat" id="pano-chat">'
         '<div class="chat-body">'
-        '<div class="item"><div class="touch-scope"><div class="content left">%s</div></div></div>'
+        '<div class="item" data-message-role="user"><div class="touch-scope"><div class="content right">用户示例消息</div></div></div>'
+        '<div class="item" data-message-role="ai"><div class="touch-scope"><div class="content left">%s</div></div></div>'
         '</div></div>'
         '<div class="chat-bottom chat-input-scope pano-input-bar">'
         '<textarea class="uni-textarea-textarea" rows="1" placeholder="输入消息（Enter 发送，Shift+Enter 换行）"></textarea>'
@@ -512,20 +690,27 @@ def assemble_panorama(obj, platform, src_name):
         '</div>'
         '</div>'
         '%s'
-    ) % (chat_inner, PANORAMA_SEND_SCAFFOLD)
+    ) % (PANORAMA_RUNTIME_SCAFFOLD, tested_content, PANORAMA_SEND_SCAFFOLD)
 
-    processed = apply_platform_limits(page, platform)
-    frame_doc = "<style>%s</style><style>%s</style>%s" % (MARKER_CSS, PANORAMA_CSS, processed)
+    frame_doc = "<style>%s</style><style>%s</style>%s" % (MARKER_CSS, PANORAMA_CSS, page)
     srcdoc = html_mod.escape(frame_doc, quote=True)
 
     n = _script_count(obj)
     banner = make_banner(platform, src_name, n).replace("预览平台", "全景预览 ｜ 平台")
-    audit = ""
+    audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(chat_inner, platform)
     if isinstance(obj, dict):
-        audit = "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
-                        for x in find_dangling_markers(obj))
+        audit += "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
+                         for x in find_dangling_markers(obj, platform))
     body = (
         '<div class="frag"><div class="frag-label">全景预览（所有组件组合 · 固定输入框 · 发送测试）</div>'
+        '<div class="preview-tools" data-preview-tools="1"><span class="preview-tools-label">预览测试工具</span>'
+        '<button class="preview-tool" type="button" title="追加动态 AI 内容" '
+        'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.addAI()">追加 AI</button>'
+        '<button class="preview-tool" type="button" title="模拟离开聊天页" '
+        'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.leave()">离开聊天页</button>'
+        '<button class="preview-tool" type="button" title="模拟返回聊天页" '
+        'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.returnToChat()">返回聊天页</button>'
+        '</div>'
         '<iframe class="pano-frame" srcdoc="%s" sandbox="allow-scripts allow-same-origin"></iframe>'
         '</div>%s' % (srcdoc, audit)
     )
@@ -533,7 +718,7 @@ def assemble_panorama(obj, platform, src_name):
                                      "body": body, "marker_css": MARKER_CSS}
 
 
-def assemble_html(frags, platform, src_name):
+def assemble_html(frags, platform, src_name, audit=""):
     """把所有HTML片段拼进一个预览页。每个片段包进独立 iframe srcdoc，
     隔离 CSS/ID 作用域，模拟 MMD 每条消息独立气泡（防跨片段污染）。"""
     body_parts = []
@@ -554,18 +739,20 @@ def assemble_html(frags, platform, src_name):
             'onload="this.style.height=this.contentWindow.document.body.scrollHeight+20+\'px\'">'
             '</iframe></div>'
             % (html_mod.escape(name), html_mod.escape(fr), warn_row, srcdoc))
-    body = "\n".join(body_parts)
+    body = "\n".join(body_parts) + audit
     banner = make_banner(platform, src_name, len(frags))
     return PAGE_TEMPLATE % {"platform": platform, "banner": banner,
                             "body": body, "marker_css": MARKER_CSS}
 
 
 def apply_platform_limits(rs, platform):
-    """按平台改写HTML片段以模拟渲染限制。"""
+    """按平台改写 HTML；当前 MMD 额外禁用 allowlist 外的真实 inline onclick。"""
     if platform == "st":
         return rs
 
     out = rs
+    if platform == "mmd":
+        out, _removed = sanitize_mmd_onclick(out)
 
     # 1. <script>...</script>：oldmmd 剥离并裸露源码；mmd 保留但标黄
     def script_repl(m):
@@ -607,6 +794,8 @@ MARKER_CSS = """.mmd-stripped{display:block;margin:8px;padding:10px;border:2px s
 .mmd-stripped::before{content:'⚠ 旧版MMD会剥离此标签，不执行（源码裸露）：';display:block;color:#f85149;margin-bottom:6px;font-weight:600}
 [data-mmd-es6]{outline:2px solid #d29922 !important;outline-offset:1px;position:relative}
 [data-mmd-es6]::after{content:'⚠ES6:'attr(data-mmd-es6);position:absolute;top:-8px;right:0;background:#d29922;color:#000;font-size:9px;padding:1px 4px;border-radius:3px;z-index:99}
+[data-mmd-onclick-disabled]{outline:2px solid #f85149 !important;outline-offset:1px}
+[data-mmd-onclick-disabled]::after{content:'onclick disabled';font-size:9px;background:#f85149;color:#fff;padding:1px 4px}
 .mmd-warn-badge{display:inline-block;background:#d29922;color:#000;font-size:10px;padding:1px 6px;border-radius:3px;margin:2px}"""
 
 
@@ -634,10 +823,12 @@ def _build_panels_html(obj, platform, src_name):
     """三面板诊断（MMD导入json）或逐片段iframe（本地酒馆数组）。返回 (html, 片段数)。"""
     if isinstance(obj, dict) and "regex_scripts" in obj and ("beginning" in obj or "statusbar" in obj):
         return assemble_preview(obj, platform, src_name), _script_count(obj)
-    frags = extract_fragments(obj)
+    frags = extract_fragments(obj, platform)
     if not frags:
         print("[WARN] 未找到含HTML的替换片段（可能是纯数据转换器）。")
-    return assemble_html(frags, platform, src_name), len(frags)
+    rendered = "".join(rs for _name, _fr, rs in frags)
+    return assemble_html(frags, platform, src_name,
+                         _findregex_audit_html(obj, platform) + _onclick_audit_html(rendered, platform)), len(frags)
 
 
 def main():
@@ -656,35 +847,51 @@ def main():
         print("提示: 先用 validate.py 确认 JSON 合法。")
         sys.exit(2)
 
-    import os
-    base = os.path.splitext(args.file)[0]
+    findings = fatal_preview_findings(obj, args.platform)
+    unsupported = find_unsupported_preview_regexes(obj, args.platform)
+    if args.platform in ("oldmmd", "mmd") and not _js_regex_oracle_available():
+        print("[WARN] 未找到可用 Node.js；findRegex 仅执行结构 fallback，未经过真实 JS RegExp oracle。")
+    for message in findings["structure"]:
+        print("[ERROR] 非法结构: %s" % message)
+    if findings["findRegex"]:
+        print("[ERROR] 非法 findRegex: %s" %
+              ", ".join("%s=%s (%s)" % x for x in findings["findRegex"]))
+    for body, reason in findings["onclick"]:
+        print("[ERROR] inline onclick 会被当前MMD净化: %s (%s)" % (body, reason))
+    if unsupported:
+        print("[WARN] 预览器不支持此 JS 正则: %s" %
+              ", ".join("%s=%s (%s)" % x for x in unsupported))
+    if findings["dangling"]:
+        print("[ERROR] 悬空标记: %s" % ", ".join(findings["dangling"]))
+    if any(findings.values()):
+        sys.exit(1)
 
-    def write(path, content):
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            f.write(content)
-        print("[OK] 预览已生成: %s" % path)
-
+    outputs = []
     if args.mode in ("panels", "both"):
         panels_html, frags_count = _build_panels_html(obj, args.platform, args.file)
         path = args.output if (args.output and args.mode == "panels") else \
-            "%s-preview-%s.html" % (base, args.platform)
-        write(path, panels_html)
-        print("片段数: %d  平台: %s  模式: 三面板诊断" % (frags_count, args.platform))
+            _default_output_path(args.file, "preview", args.platform)
+        outputs.append((path, panels_html, "片段数: %d  平台: %s  模式: 三面板诊断" %
+                        (frags_count, args.platform)))
 
     if args.mode in ("panorama", "both"):
         pano_html = assemble_panorama(obj, args.platform, args.file)
         path = args.output if (args.output and args.mode == "panorama") else \
-            "%s-panorama-%s.html" % (base, args.platform)
-        write(path, pano_html)
-        print("全景预览  平台: %s  （固定输入框+发送+占位AI气泡，所有组件组合显示）" % args.platform)
+            _default_output_path(args.file, "panorama", args.platform)
+        outputs.append((path, pano_html,
+                        "全景预览  平台: %s  （固定输入框+发送+占位AI气泡，所有组件组合显示）" %
+                        args.platform))
+
+    for path, content, summary in outputs:
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(content)
+        print("[OK] 预览已生成: %s" % path)
+        print(summary)
 
     if args.mode == "both":
         print("工作流：先看三面板审核单组件 → 再看全景二次审核组合效果（全景不默认关闭，留给你自查）。")
-
-    dangling = find_dangling_markers(obj) if isinstance(obj, dict) else []
-    if dangling:
-        print("[ERROR] 悬空标记: %s" % ", ".join(dangling))
-        sys.exit(1)
     print("请用浏览器或 Preview 工具打开查看渲染与交互。")
 
 

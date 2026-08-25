@@ -11,7 +11,7 @@ Shadow DOM 隔离动态渲染的可运行示例与生成器。方法原理见 `.
 | `build_demo.py` | **简单状态栏生成器**（bar/text/list 三类型）。`FIELDS` 是单一真相源，改字段只动这里 → 自动生成引擎/模型协议/测试数据并断言键名一致 |
 | `build_float.py` | **悬浮组件生成器**。可拖动悬浮球（点击展开菜单）+ 侧边栏抽屉，含跨组件交互（球菜单开侧边栏） |
 | `状态栏-影渲法.mmd.json` | 简单状态栏成品（MMD 导入 json，4 字段），直接导入即可看 |
-| `悬浮球侧边栏-影渲法.mmd.json` | 悬浮球+侧边栏成品，直接导入 |
+| `悬浮球侧边栏-影渲法.mmd.json` | 悬浮球+侧边栏成品；两种 marker 同时放在 `statusbar` 与测试 `beginning`，生成器用全局规则消费全部 occurrence，直接导入不会残留测试 marker |
 | `状态栏-模型侧协议.md` | 简单状态栏的模型侧协议（蓝灯条目正文：要求 AI 每轮输出 `<g3>` 数据块） |
 | `shadowcast_core.py` | **富 UI 共享引擎**（单一引擎源，雷达法移植）。12 种字段类型，`build_rpg.py`/`build_manor.py` 复用 |
 | `build_rpg.py` | **西幻RPG 富状态栏生成器**（只含 config，引擎复用 core） |
@@ -38,6 +38,7 @@ Shadow DOM 隔离动态渲染的可运行示例与生成器。方法原理见 `.
 python build_demo.py            # 改 FIELDS 后重新生成状态栏
 python build_float.py           # 改 MENU_ITEMS/DRAWER_ITEMS/COLORS 后重新生成悬浮组件
 python build_demo.py --check    # 只跑 guard 校验不写文件
+python build_float.py --check   # 悬浮组件同样支持只校验
 ```
 
 ### 改状态栏字段（build_demo.py 的 `FIELDS`）

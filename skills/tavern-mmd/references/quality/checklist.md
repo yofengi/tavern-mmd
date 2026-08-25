@@ -34,14 +34,15 @@
 - [ ] **（/mmd）ES6可用**：img载体下实测全支持，推荐ES6；引擎默认ES6版、ES5版兜底
 - [ ] 纯DOM API：无innerHTML字符串拼接、无style.cssText（两版都建议遵守，防实体化）
 - [ ] **（/oldmmd）onerror/onclick内代码单行无换行**
-- [ ] **（/mmd）onerror可多行可双引号**；onclick仅放行干净调用/引用表达式（`__fn()`/`eval(x.dataset.s)`），禁代码字面量与直接DOM赋值
-- [ ] onclick复杂逻辑走轻主板data-s（eval(dataset.s)）或 window.__fn（/mmd 已复测可用）
-- [ ] 无alert；无`<script>`（/oldmmd）；`<script>`（/mmd）仅用于定义window.__fn交互，**不做per-message状态栏自渲染**（引擎只能img onerror）
+- [ ] **（/mmd）onerror可多行可双引号**；inline onclick 使用已验证的干净形式 `window.__fn&&__fn()` 或 `eval(getElementById('FUNC').dataset.s)`，禁代码字符串字面量与直接DOM赋值
+- [ ] onclick复杂逻辑走轻主板 `data-s`（`eval(getElementById('FUNC').dataset.s)`）、全局 `window.__fn`，或在 `img onerror` 内动态绑定 handler（/mmd 已复测可用）
+- [ ] 无alert；无`<script>`（/oldmmd）；`<script>`（/mmd）**不做per-message自渲染/定位**（引擎只能img onerror），但可做 document-level 一次性 bootstrap 或定义全局 handler，重复入口必须复用既有实例
 
 ## 正则层（MMD）
 - [ ] 总条数≤130
-- [ ] 每条findRegex≤1000字符、replaceString≤20000字符（标注实测值）
-- [ ] 导入json：含pageDepth/statusbar/beginning/regex_scripts四字段，每条正则id=-1
+- [ ] 每条findRegex≤1000字符、replaceString<20000字符（标注实测值）；replaceString达到18000字符即预警并评估拆包
+- [ ] MMD 每条 `findRegex` 都是 `/pattern/flags` slash literal；固定标记也包斜杠，无裸 `<css>` / `<status>` 值
+- [ ] MMD 导入json：顶层恰好且仅有 `pageDepth/statusbar/beginning/regex_scripts` 四键；每条规则恰好且仅有 `id/scriptName/findRegex/replaceString` 四键，且 `id=-1`
 - [ ] **导入json通过 `python -m json.tool 文件 > /dev/null` 校验（拦截裸换行/未转义引号）**
 - [ ] **已跑 `scripts/validate.py 文件 --platform <mmd|oldmmd>` 且 0 错误**（当前MMD务必用 `--platform mmd`，否则误报ES6/script；悬空标记会报错，必须补正则或删标记；旧版用 oldmmd 最严格）
 - [ ] **文件无UTF-8 BOM**
@@ -65,10 +66,31 @@
 ## 样式层（MMD美化）
 - [ ] 装饰性伪元素 pointer-events:none
 - [ ] 交互元素 position:relative + z-index
-- [ ] 全局美化：所有规则body.z-enabled前缀 + !important + 自有类前缀
+- [ ] 已明确选择静态换肤或当前 MMD 运行时主题包；需要 day/night/native、玩家微调或设置时已读 theme-runtime.md
+- [ ] 静态换肤：所有规则body.z-enabled前缀 + !important + 自有类/ID/变量前缀；不声称停用等于 pristine restore
+- [ ] 运行时主题：公共选择器只一份，day/night 只切根属性与 token，没有复制两套长选择器
 - [ ] （风格库）已用 AskUserQuestion 问过视觉风格（基调组→风格或混搭），不是默认套用 #0d1117
-- [ ] （风格库）配色已按 style-system.md 第1节 token 映射填入，未改动渲染管线/正则/JS
-- [ ] （风格库）混搭或单点覆盖时跑过整体性检查（对比度≥4.5:1、明暗一致、圆角同档），覆盖项已记入 工作/美化决策.md
+- [ ] （风格库）先使用制作期规范 token，再映射到产物自有前缀运行时 token；旧三套方言只做局部 adapter
+- [ ] （风格库）light/dark 成对检查正文、次要文字、控件、焦点与图标对比度；正文≥4.5:1
+- [ ] （风格库）混搭或单点覆盖时跑过整体性检查，制作期覆盖已记入 工作/美化决策.md
+- [ ] 玩家运行时覆盖写入 day/night 各自 overrides，不回写 preset 或 style-db
+
+## 当前 MMD 运行时主题包（采用时附加）
+- [ ] owner/version 租约唯一；同 owner/version 重复 bootstrap 复用实例，不同 owner 不静默覆盖
+- [ ] head 中每类 style/link/meta 资源、设置面板、route supervisor、全局 API 均为单例
+- [ ] 全运行时只有一个可断开的 MutationObserver；插件可 unregister，stop/destroy 后无 observer、监听或计时器残留
+- [ ] 连续 bootstrap / 重复正则注入 / 同触发器多次执行后，租约、observer、面板和 head 资源计数仍各为1
+- [ ] day→night→native 连续切换三轮；根属性、token、面板状态和分主题玩家设置每轮同步
+- [ ] native restore 仅恢复本 owner 记录的 property delta；当前值被平台后写时不覆盖，且文案未宣称 pristine
+- [ ] destroy 后清除本 owner 的根属性、delta、面板、head资源、监听、observer、计时器、API与租约；重复 destroy 不抛错
+- [ ] route leave 执行 stop+restore，返回聊天页 reenter；SPA 整页替换根节点后可重建且资源仍单例
+- [ ] 动态新增多条 AI 消息后全局资源不增长；per-message 状态栏仍各自渲染，不复制 runtime
+- [ ] 设置按 day/night 分主题保存；“重置当前”只清当前 overrides，“全部重置”恢复默认且不改 preset
+- [ ] 非法存储已测：截断JSON、null、数组、未知/未来schema、恶意键、未知token、超长值、存储拒绝/配额异常均降级且不阻断当前页切换
+- [ ] 文本规范化是默认关闭的独立 opt-in；开启时明确不可逆边界，不混入 native restore 承诺
+- [ ] 移动端已测窄屏、safe-area、软键盘开关、横屏、最长标签、触控目标与滚动/关闭，不遮输入框或发送按钮
+- [ ] a11y已测 Tab/Shift+Tab/Enter/Space/Escape、focus-visible、可读名称、aria状态与 day/night 对比度
+- [ ] localStorage 当前 MMD 实机矩阵已逐项记录：刷新、离开返回、同角色不同聊天、不同角色卡、App重启、账号切换、存储禁用/清空/配额异常；未测项明确标“待验证”
 
 ## 整卡输出形态（做整张角色卡时）
 - [ ] 已用 AskUserQuestion 问过输出形态：内嵌正则 PNG / 内嵌正则 JSON / 分离式（卡+正则json+规则.md）

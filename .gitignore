@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+*-preview-*.html
+*-panorama-*.html

@@ -24,14 +24,15 @@
 
 | 用途 | findRegex | replaceString |
 |---|---|---|
-| 状态栏触发 | `<status>` | 容器+CSS模板（见statusbar.md） |
-| 链式注入 | `<!-- Z_CONTENT -->` | 主HTML+下一标记 |
-| 隐藏标签不渲染 | `<UpdateVariable>[\s\S]*?</UpdateVariable>` | 空（本地酒馆配promptOnly） |
-| 关键词包裹样式 | `（引用\|强调内容）` | `<span class="z-q">$1</span>` |
-| 全局美化激活 | 开场白固定标记或`<beautify>` | 激活器img+<style>全套 |
+| 状态栏触发 | `/<status>/` | 容器+CSS模板（见statusbar.md） |
+| 链式注入 | `/<!-- Z_CONTENT -->/` | 主HTML+下一标记 |
+| 隐藏标签不渲染 | `/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/gs` | 空（本地酒馆配promptOnly） |
+| 关键词包裹样式 | `/（引用\|强调内容）/g` | `<span class="z-q">$1</span>` |
+| 全局美化激活 | 开场白固定标记或`/<beautify>/` | 激活器img+<style>全套 |
 
 ## 转义注意
 
 - replaceString中的`"`在HTML属性内用`'`替代或实体化
-- findRegex是字符串形式正则：本地酒馆json中写`/pattern/flags`格式（如`/<status>/g`）；MMD手填按平台输入框要求（默认全局匹配）
+- `findRegex` 一律写成 `/pattern/flags` slash literal。本地酒馆 JSON 使用该格式；**当前 MMD 与 oldmmd 的四字段 JSON 导入及 UI 手填都强制该格式**，固定标记也必须写成 `/<status>/`，不得交付裸模式
+- slash literal 内若模式本身含 `/`，须转义为 `\/`；JSON 字符串层再按 JSON 规则转义反斜杠
 - `$1`-`$9`捕获组两平台均可用于replaceString

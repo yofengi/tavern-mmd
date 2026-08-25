@@ -1,6 +1,6 @@
 # tavern-mmd
 
-为 **MMD（魅魔岛 / sexyai.ai）** 和 **本地酒馆 SillyTavern** 创建角色卡、世界书、美化（状态栏 / 全局美化）的 Claude Code Skill。
+为 **MMD（魅魔岛 / sexyai.top）** 和 **本地酒馆 SillyTavern** 创建角色卡、世界书、美化（状态栏 / 全局美化）的 Claude Code Skill。
 
 skill 本体是自包含 Markdown 文档；另附纯 Python 标准库辅助脚本，用于审核、预览、世界书源文件管理和角色卡 PNG 导出。
 
@@ -23,9 +23,9 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 | 角色卡创作 | 标准流程（快问快答）与深度共创流程（开放讨论 + 方案收敛）两种模式 |
 | 世界书制作 | 索引源文件工作流（entry_id 稳定、uid/order build 重排）、蓝绿灯策略、token 预算、递归控制 |
 | 状态栏 | 首选混合态雷达法（特征嗅探 + 动态DOM + 双轨生命周期 + 七重防御）；KV V4.0 轻量备选 |
-| 全局美化 | MMD uni-app 界面类名速查（41 个选择器）+ CSS 变量主题架构 + 日夜切换 |
+| 全局美化 | 静态换肤 / 当前 MMD day-night-native 三态运行时主题包二档；运行时含 owner/version、路由重入、可恢复清污、玩家分主题覆盖与移动端设置面板协议 |
 | 项目管理 | 每个项目独立文件夹（main.md / plan.md / 资料 / 工作 / output），断点续作 |
-| 质量保障 | 写作规则（绝对零度 / 八股化扫描 / 具体性检查）+ 27 项交付前检查清单 |
+| 质量保障 | 写作规则（绝对零度 / 八股化扫描 / 具体性检查）+ 分层交付检查清单（含运行时主题矩阵） |
 
 ## 审核与预览脚本
 
@@ -162,7 +162,9 @@ skills/tavern-mmd/
     ├── beautify/                 # 美化方案
     │   ├── statusbar-radar.md    #   混合态雷达法状态栏（MMD首选：五级分类+防御体系）
     │   ├── statusbar.md          #   KV V4.0 状态栏（轻量备选：三段正则模板 + 数据继承）
-    │   ├── global-css.md         #   全局美化（uni-app 类名速查 + 主题变量）
+    │   ├── global-css.md         #   全局美化二档分流 + uni-app 类名速查
+    │   ├── theme-runtime.md      #   当前 MMD 三态运行时权威协议
+    │   ├── style-system.md       #   制作期 token、运行时前缀映射与覆盖
     │   └── regex-rules.md        #   正则设计原则与平台限额
     ├── output/                   # 产出格式权威参考
     │   ├── card-json.md          #   chara_card_v3 完整字段 + v2 差异（MMD 交付格式）
@@ -170,7 +172,10 @@ skills/tavern-mmd/
     │   └── regex-output.md       #   正则 json / MMD 手填清单模板
     └── quality/
         └── checklist.md          # 交付前检查清单（含雷达法专项）
-└── assets/radar-examples/        # 雷达法开源示例（西幻RPG状态栏、日夜主题集成案例）
+└── assets/
+    ├── global-beautify-examples/ # 当前 MMD runtime 优先；旧日间 selector reference
+    │   └── mmd-theme-runtime/    # day/night/native 运行时主题资产
+    └── radar-examples/           # 西幻 RPG 状态栏；旧日夜集成包仅 legacy 参考
 
 commands/                         # 8 个斜杠指令
 ```
@@ -185,14 +190,13 @@ commands/                         # 8 个斜杠指令
 | 状态栏 | 雷达法 / KV V4.0 | 首选混合态雷达法 | 同当前 MMD |
 | MVU/STScript | ✅ | ❌（保守） | ❌ |
 
-> 当前 MMD 已确认支持 `<script>` 与 ES6（实测全支持）；其余未确认能力按旧版保守处理并标"待验证"，详见 `references/platforms/mmd.md`。
+> 当前 MMD 已确认支持 `<script>` 与 ES6（实测全支持）；其余未确认能力按旧版保守处理并标"待验证"，详见 `skills/tavern-mmd/references/platforms/mmd.md`。
 
-## 致谢
+## 来源与致谢
 
-- 旧版 MMD 平台限制与架构模式整理自社区MMD开发规范与类名定义 和 KV-Robust V4.0 澄清状态栏规范
-- 混合态雷达法状态栏（特征嗅探 + 响应式动态 DOM，改五版）理论与开源示例 by **黑洞猫**
-- 创作质量体系（绝对零度原则、八股化检查等）提炼自 SillyTavern 社区角色卡创作实践
+- **社区快照边界**：旧版 MMD 开发规范、类名定义、KV-Robust V4.0 与 2026-06-21 日间美化均为用户提供的社区文档快照；除文内保留的既有署名外，作者、原 URL 与许可证未完整记录，仅作兼容研究参考，不宣称原创。雷达法材料保留既有“黑洞猫”署名，但原 URL 与许可证同样未记录。
+- **架构启发后的重写**：当前 MMD `theme-runtime.md` 的 day/night/native 生命周期、owner/version 租约、可恢复 property delta、存储 schema 和测试矩阵，以及 `assets/global-beautify-examples/mmd-theme-runtime/` 对应新资产，均是在既有材料提供架构启发后重新设计与实现，不复制旧运行时代码。其 MMD 实机验证状态只以资产 README / 测试记录为准，本 README 不替代实机证据。
 
 ## License
 
-MIT
+MIT 适用于仓库中可明确归属 tavern-mmd 的原创及架构启发后重写内容。用户提供的社区文档/资产快照未记录原许可证，仅作兼容研究参考，不因收录而被重新许可为 MIT。

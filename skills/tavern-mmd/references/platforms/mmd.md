@@ -1,13 +1,13 @@
 # 当前MMD平台技术规范（支持 `<script>`、ES6）
 
-> 本文档描述当前版本MMD（魅魔岛/sexyai.top）。以下为**实测结论**（逐语法/逐写法独立探针 + 真实多轮对话验证），非推断。
+> 本文档描述当前版本MMD（魅魔岛/sexyai.top）。各节分别标注实测、官方文档、保守处理或待验证；只有明确标为实测的条目才可视为探针/真实对话结论。
 > 旧版 MMD 已冻结、不再更新；当前 MMD 仍在迭代，本文档随实测更新。未实测的能力（MVU/STScript/酒馆助手等）仍按无处理（保守）。
 
 ## 与旧版的差异（全部已实测）
 
 | 项目 | 旧版 | 当前版 | 状态 |
 |---|---|---|---|
-| `<script>` 标签 | ❌ 被剥离 | ✅ 可执行，但**只能定义 `window.__fn` 供 onclick 调，做不了 per-message 自渲染** | 已实测 |
+| `<script>` 标签 | ❌ 被剥离 | ✅ 可执行；**per-message 自渲染/定位不可用**；document-level 一次性 bootstrap 与全局 handler 定义可用 | 已实测边界 |
 | ES6+ 语法 | ❌ ES5 only | ✅ 全支持（img onerror 载体下，7/7 探针全绿），**推荐 ES6** | 已实测 |
 | `onerror` 多行 / 双引号 | ❌ 单行 only、须单引号 | ✅ 可多行、可用双引号，代码可写干净 | 已实测 |
 | `onclick` 净化 | 放行极简单行赋值 | **收紧**：只放行"干净调用/引用表达式"，禁代码字面量与直接DOM赋值 | 已实测 |
@@ -67,33 +67,52 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 
 | 写法 | 实测 | 说明 |
 |---|---|---|
-| `onclick="window.__fn()"` | ✅ 放行 | 调用全局函数（官方推荐） |
+| `onclick="window.__fn&&__fn()"` | ✅ 放行 | 纯短路调用全局函数（官方推荐）；不需要参数时使用这个 canonical 形式 |
 | `onclick="eval(getElementById('FUNC').dataset.s)"` | ✅ 放行（E1） | 干净的调用表达式；eval 本体未被 CSP 拦，执行了 data-s 里的 DOM 操作 |
 | `el.onclick=function(){}`（img onerror 里 JS 赋值绑定） | ✅ 放行 | 净化器只扫 HTML 属性文本，扫不到 JS 赋的 handler |
 | `onclick="eval('...代码...')"`（代码字符串塞进属性） | ❌ 净化（E2） | 属性内出现代码字面量，命中净化规则 |
 | `onclick="this.x='y'"`（直接 DOM 赋值） | ❌ 不触发 | 赋值语句也算代码，被净化（旧版曾放行极简单行，当前版收紧） |
 
 **两条合法交互路径（当前 MMD 二选一，均已实测）**：
-1. **`window.__fn` 全局函数**（官方推荐）：在 `<script>` 或 `img onerror` 里定义 `window.__唯一名 = window.__唯一名 || function(){...}`，按钮写 `onclick="window.__唯一名 && __唯一名()"`。
-2. **轻主板 + 胖遥控器**（见 ../platforms/mmd-old.md §5.3，当前 MMD **已复测可用**）：复杂逻辑存进隐藏元素的 `data-s` 属性，`onclick="eval(getElementById('FUNC').dataset.s)"` 只做干净的 eval 调用——正因为踩中"属性内是干净调用、代码在 data-s 里"才放行。
+1. **`window.__fn` 全局函数**（官方推荐）：在 `<script>` 或 `img onerror` 里定义 `window.__fn = window.__fn || function(){...}`，无参数按钮使用已验证的 canonical 形式 `onclick="window.__fn&&__fn()"`。
+2. **轻主板 + 胖遥控器**（见 `mmd-old.md` §5.3，当前 MMD **已复测可用**）：复杂逻辑存进隐藏元素的 `data-s` 属性，`onclick="eval(getElementById('FUNC').dataset.s)"` 只做干净的 eval 调用——正因为踩中"属性内是干净调用、代码在 data-s 里"才放行。
 
 > 雷达引擎的选项按钮一直能点，用的就是路径 ③ `el.onclick=function(){}`（img onerror 里 JS 赋值绑定）——净化器扫不到 JS 赋的 handler。
 
 ---
 
-## 4. `<script>` 的能力边界（实测：做不了状态栏）
+## 4. `<script>` 的能力边界（per-message 不可用，document-level 可用）
 
-`<script>` 已解禁可执行，但**做不了 per-message 自渲染**，状态栏引擎仍只能用 `img onerror`。两个原因：
+`<script>` 已解禁可执行，但**做不了 per-message 自渲染/定位**，状态栏引擎仍只能用 `img onerror`。两个原因：
 
 1. **拿不到自身位置**：自渲染引擎依赖 `document.currentScript` 定位，在 MMD 执行模型里不可用；官方所有 script 示例都靠 `window.__fn` + `onclick` 调用，从不自定位。
 2. **同段 `<script>` 只加载一次**（官方原文）：状态栏每条消息都带同一份引擎 → 会被去重，不逐条执行 → 整块空白。
 
 **结论**：
 - per-message 动态渲染（状态栏引擎）**必须用 `<img onerror>`**——每元素每条触发、`this` 可靠自定位。
-- `<script>` 的正确用途：定义 `window.__唯一名` 全局函数，供 `onclick` 调用（选项填输入框、折叠、画廊切图等**交互**）。
-- "开放 script"对动态状态栏无帮助，主要价值是让点击类交互能正规写、降低新手门槛。
+- document-level 单例可以用一次性 `<script>` bootstrap，例如定义 `window.__唯一名` handler，或取得/复用一个全局主题 runtime；bootstrap 必须幂等，不能依赖同段 script 随每条消息重跑。
+- "开放 script"不解决 per-message 自渲染/定位问题，但可承载全局交互定义和文档级运行时初始化。
 
 > 实测反例：把雷达引擎从 img onerror 改成 `<script>` 载体后，状态栏整块空白。
+
+### 4b. 全局运行时与 per-message 脚本边界
+
+同段 `<script>` 只执行一次，对两类任务的含义相反：
+
+| 类型 | 正确边界 | 去重后的要求 |
+|---|---|---|
+| **全局主题运行时** | 文档级单例，负责 owner/version 租约、head CSS、主题面板、一个 observer 和路由生命周期 | 一次 bootstrap 正合适；重复触发只能调用既有实例 `reenter()`，不得再声明一份运行时 |
+| **per-message 状态栏 / 消息组件** | 每条消息各自定位、读取该条数据并渲染 | 不能依赖同段 `<script>` 重复执行，仍用 `img onerror`；全局资源不得随消息数增长 |
+
+当前 MMD 是动态路由页面。全局运行时不能只在首次执行时判断一次 `location`，必须安装**一个 route supervisor**：监听适用的 `hashchange`、`popstate`、`pageshow/pagehide` 等信号，进入聊天路由时 `reenter()`，离开时 `leave()`，整页替换聊天根节点时校正重建；只有 `destroy()` 才移除 supervisor。完整 `bootstrap/enter/leave/start/stop/destroy/reenter` 语义见 `../beautify/theme-runtime.md`。
+
+per-message 点火器若要唤醒主题，只能调用已存在的全局 API，例如 `window.__某前缀ThemeRuntime?.reenter()`，然后自毁；不得在每条 AI 消息内附带公共 CSS、MutationObserver、主题面板或 route supervisor。
+
+### 4c. localStorage 作用域：全局偏好候选，待实机矩阵
+
+历史记录曾写到状态栏跨气泡读取 localStorage 为 `NULL`，但该记录**未附完整日期、客户端/版本、frame 与路由环境，也未附可复现探针代码**，因此只能作为待复验线索，不能单独推导任何 runtime 语义。状态栏协议仍不应依赖 localStorage 做跨轮继承；依据是 per-message 数据应可由消息快照/历史 DOM 自足恢复，而不是把这条缺证探针当成平台定律。全局主题能否持久化同样须在当前 MMD iframe / WebView、路由、角色卡、账号与会话矩阵中重新验证。
+
+运行时主题可以把 localStorage 作为失败可降级的偏好候选，但在完成矩阵前必须标“待验证”：同页刷新、离开后返回、同角色不同聊天、不同角色卡、App 重启、账号切换、存储禁用 / 清空 / 配额异常。存储失败时，当前页面的 day/night/native 切换仍须工作；owner 租约和 DOM 恢复不得依赖 localStorage。schema、校验、迁移和矩阵见 `../beautify/theme-runtime.md`。
 
 ---
 
@@ -114,7 +133,7 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 **AI 回复里可用标签**：`div span p a img button style details summary table video input textarea` 等。
 **AI 回复里会被删**：`section header footer nav iframe canvas audio form`。开场白限制更少。
 
-> **自定义标签存活（2026-06-17 实测）**：未知自定义标签（如 `<z-live-widget>`）**不在删除名单、实测未被剥离**，白名单对未知标签实际放行。但 `customElements.define()` 须在 `<script>` 里跑、reload 不持久（见 §4），所以**不要依赖 Custom Elements 注册**；要用 Shadow DOM 隔离请走 §6b 的 `img onerror` + `attachShadow` 路线。
+> **自定义标签存活（2026-06-17 实测）**：未知自定义标签（如 `<z-live-widget>`）**不在删除名单、实测未被剥离**，白名单对未知标签实际放行。但 `customElements.define()` 须在 `<script>` 里跑，注册只属于当前 document，完整 reload 后需由 document-level bootstrap 重新注册（见 §4），所以**不要让 per-message 组件依赖 Custom Elements 注册**；要用 Shadow DOM 隔离请走 §6b 的 `img onerror` + `attachShadow` 路线。
 
 **内置文字变量**：
 - `{{user}}`（玩家昵称）/ `{{char}}`（角色名）：**仅开场白生效**，AI 回复里不替换。
@@ -131,7 +150,7 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 | 实测项 | 结果 | 意义 |
 |---|---|---|
 | `<z-live-widget>` 自定义标签 | ✅ 未被白名单剥离（chatIframe 内可见） | 白名单对未知标签实际放行 |
-| `img onerror` 里 `attachShadow({mode:'open'})` | ✅ 成功，shadow 内 `<style>`+DOM 正常渲染 | **不需要 `customElements.define`**（那要 script、reload 不持久），纯 onerror 即可拿 Shadow DOM |
+| `img onerror` 里 `attachShadow({mode:'open'})` | ✅ 成功，shadow 内 `<style>`+DOM 正常渲染 | **不需要 `customElements.define`**（注册属于当前 document，reload 后须 bootstrap 重建），纯 onerror 即可拿 Shadow DOM |
 | shadow 抗平台重绘 | ✅ 翻页/刷新后 host 与 shadowRoot 仍在；onerror 重新点火走"已有则复用刷新"分支 | 雷达法的防劫持自检/2.5秒重建探针**可省** |
 | 🔑 shadow 内 `*害羞*` 星号 | ✅ 原样保留，不被 markdown 吃 | **shadow 内 UI 对 markdown 完全免疫** |
 
@@ -141,7 +160,7 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 - **数据**：放 light DOM 隐藏 `<span style="display:none">`——实测其 textContent 经 markdown 后一字不差（含 `*`/`|`/`/`），可被后续消息全局扫描做跨轮恢复。**绝不把数据放 shadow 内**（shadow 跨气泡扫不到、且 reload 即失）。
 - **载体**：`img onerror`（唯一可靠 per-message 渲染载体，见 §4）。读同气泡 light 数据 + 扫历史 light span 折叠兜底。
 - **渲染**：`onerror` 里 `h.shadowRoot || h.attachShadow(...)`（已有则复用，幂等防重影）→ `createElement` 装配进 shadow root。
-- **协议**：模型每轮吐**全量快照**（实测 per-message 渲染无跨气泡状态，localStorage 跨气泡读为 NULL，增量+继承不可行）。
+- **协议**：模型每轮吐**全量快照**。per-message 状态继承不依赖存储；历史 `NULL` 记录缺完整环境与探针、仍待复验，不能用来推导全局主题或消息 runtime 的存储语义，见 §4c。
 
 **选型补充**：动态/自创 NPC/长线复杂数据 → Shadow DOM 方案（隔离最省心）或雷达法（成熟、示例多）；二者数据恢复地基相同（扫 light span），区别仅在 UI 是否进 shadow。固定字段仍走原生 `$field` / KV V4.0。详见 ../beautify/statusbar-radar.md 与记忆 [[mmd-statusbar-next-gen-design]]。
 
@@ -200,11 +219,11 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 ## 8. 正则系统
 
 - **总数 ≤ 130 条**（当前版，旧版 30 已同步提至 130）；findRegex ≤ 1000 字符；replaceString ≤ 20000 字符。
-- **findRegex 必须带 `/.../ ` 斜杠分隔符**（2026-06-17 实测铁律）：不带斜杠（如 `\[k=([^\]]+)\]`）时平台正则控制台**测试能过、实际聊天界面不替换**；写成 `/\[k=([^\]]+)\]/` 才生效。交付前务必确认每条 findRegex 带斜杠。
+- **findRegex 必须是 `/pattern/flags` slash literal**（2026-06-17 实测铁律）：四字段 JSON 导入与 UI 手填都不得使用裸模式。不带斜杠（如 `\[k=([^\]]+)\]`）时平台正则控制台**测试能过、实际聊天界面不替换**；写成 `/\[k=([^\]]+)\]/` 才生效。固定标记也必须写成 `/<标记>/`。
 - **正则跑在 markdown(vditor) 之前**：正则替换产出的 HTML 还要再过一遍 markdown 管线（`*x*` 会被吃成斜体）。靠正则直接吐可见文本会被 markdown 误伤；数据藏 `display:none` + UI 由 JS `createElement` 生成（或进 shadow）则绕开。
 - **聊天运行在 `chatIframe` 内**：浏览器控制台默认 TOP frame 查不到状态栏 DOM，须切执行上下文到 chatIframe；`document` 作用域、数据扫描同理。
 - 导入方式：json 批量导入（MMD 专用 4 字段格式 pageDepth/statusbar/beginning/regex_scripts）或平台 UI 逐条手填，见 ../output/regex-output.md。
-- random 标签三种用法、避坑：沿用 ../platforms/mmd-old.md §4.2-4.3（与平台无关）。
+- random 标签三种用法、避坑：沿用 `mmd-old.md` §4.2-4.3（与平台无关）。
 
 ---
 
@@ -212,19 +231,19 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 
 1. **状态栏/交互模块**：动态走雷达法（见 ../beautify/statusbar-radar.md，引擎载体 img onerror），固定字段走原生 `$field` / KV V4.0。引擎代码推荐 ES6。
 2. **交互（点击/折叠/切图）**：走 §3 两条合法路径（`window.__fn` 或轻主板 eval）。
-3. **全局美化**：见 ../beautify/global-css.md，激活器可用 `<script>` 或 img onerror。
+3. **全局美化**：先在 ../beautify/global-css.md 选择静态换肤或运行时主题包；需要 day/night/native、玩家微调或路由重入时再读 ../beautify/theme-runtime.md。全局运行时是文档级单例，不属于 per-message 渲染。
 4. **正则交付**：json 导入（4 字段）或手填、130 条限额，见 ../output/regex-output.md。
 
 ---
 
 ## 10. 沿用旧版的通用规则（与平台版本无关）
 
-以下条目旧版当前版**完全一致**，直接沿用 ../platforms/mmd-old.md：
+以下条目旧版当前版**完全一致**，直接沿用 `mmd-old.md`：
 
 - **§1 结构红线**：`<img onerror>` 必须在容器闭合 `</div>` 之前；最外层容器 `onclick="event.stopPropagation()"` 防冒泡。
 - **§4 正则系统**：random 标签三种用法、字符数避坑（总数上限改 130）。
 - **§5 核心架构**：§5.1 onerror 点火器、§5.2 纯CSS radio:checked 切换、§5.3 轻主板+胖遥控器（**当前版已复测可用**）、§5.4 appendChild 置顶、§5.5 时间戳唯一ID。
-- **MMD 换行空白条陷阱**：markdown 管线（vditor）把标签间换行补成空 `<p>`，浏览器预览查不出，详见 ../beautify/statusbar-radar.md 与 mmd-old.md §3 三级表。
+- **MMD 换行空白条陷阱**：markdown 管线（vditor）把标签间换行补成空 `<p>`，浏览器预览查不出，详见 `../beautify/statusbar-radar.md` 与 `mmd-old.md` §1“三级：交互限制”表。
 
 **当前版与旧版的唯一交互差异**：旧版曾放行极简单行 inline 赋值（`this.x='y'`），当前版收紧——inline 赋值也被净化，交互一律走 §3 的 `window.__fn` 或轻主板 eval。`<img onerror>` 内可用 ES6、可多行（旧版须 ES5 单行），但纯 DOM API 原则（避免 `innerHTML` 字符串拼接被实体化）仍建议遵守。
 
@@ -265,7 +284,7 @@ onerror 引擎类故障（不显示、代码暴露、面板空白）的错误**�
    catch(e){ return e.name+': '+e.message; }
    ```
    报 `SyntaxError` → 源码被污染/转义坏了；报 `TypeError` → 逻辑 bug。
-4. **对比"原始 replaceString" vs "渲染后 DOM 里的 onerror 属性"**：若两者长度/内容不同，说明被正则管线改过——重点看截断处、被替换成 `<img/<span` 的地方，倒推是哪条正则的标记/信标啃的（见 §10、数据信标 `[键=值]`）。这步是定位"交叉污染"的决定性手段：
+4. **对比"原始 replaceString" vs "渲染后 DOM 里的 onerror 属性"**：若两者长度/内容不同，说明被正则管线改过——重点看截断处、被替换成 `<img/<span` 的地方，倒推是哪条正则的标记/信标啃的（见 §11、数据信标 `[键=值]`）。这步是定位"交叉污染"的决定性手段：
    ```js
    var code=D.querySelector('img[data-xxx]').getAttribute('onerror');
    code.length    // 比原始 replaceString 短 = 被截断/啃断
