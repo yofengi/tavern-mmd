@@ -33,22 +33,31 @@
 ------------------------------------------------------------------
 必填：
   assetDir      str   基座源码目录（相对 config 文件所在目录），默认 "sbk"
-  beginning     str   开场白正文；若含模式 B 的状态块触发串需与 persona 约定一致
-  statusbar     str   功能栏字段。模式 A 必须包含 markers.hud（默认 "{{hud}}"）
+  beginning     str   开场白正文；若含状态块（供气泡面板渲染）需与 persona 约定一致
+  statusbar     str   功能栏字段。chrome/pinned 任一开启即必须包含 markers.hud（默认 "{{hud}}"）
 选填：
   personality   str   人设文本（导入页不读该字段，仅随 JSON 归档）
   chatVersion   int   必须 1（缺省即 1）
   pageDepth     int   固定 2（缺省即 2）
   theme         obj   主题 token。{dark:{...},light:{...}} 或扁平（两套同值）
                       语义名见 theme.js MAP；也可直给 --chat-* / --sbk-*
-  modes         obj   {hud:bool, snapshot:bool}。A 常驻 HUD / B 消息内快照
-  schema        obj   状态栏 schema，原样传给 SBK.ui.hud / SBK.ui.snapshot
+  modes         obj   {status:bool, chrome:bool, pinned:bool}，默认 true/true/false。
+                      🚨 2.0 语义（设计文档第二节）：三者【职责不同】，不是同一份数据的多个渲染器。
+                        status = 气泡内状态面板（唯一的状态数据渲染器，原 snapshot）
+                        chrome = 功能栏入口按钮组，【不渲染业务数据】
+                        pinned = 功能栏常驻精简条，只显示 pinnedFields 的 1..3 项
+                      1.0 的 {hud, snapshot} 是「两个渲染器渲染同一份 schema」，示例配置
+                      两个都开 → 实机截图里出现两个一模一样的状态面板。旧键仍被接受：
+                      snapshot→status；hud=true→pinned 并告警（形态不等价，见 normalize_config）
+  pinnedFields  list  精简条字段名，1..3 项。modes.pinned 开启时必填，且须是 schema.fields 里的 key
+  schema        obj   状态栏 schema，原样传给 SBK.ui.snapshot（经 SBK.boot 归一化）
   protocolTag   str   数据协议块标签名，默认 "状态"（对应 [状态]…[/状态]）
                       🚨 一律方括号（plan.md 已裁决第 9 条）：§5.4 的剥壳正则会把 <状态>
-                      这类中文尖括号标签整个删掉，模式 A 的 HUD 从气泡文本兜底读取时
-                      标记已经没了。方括号不是标签，全链路都活着。
+                      这类中文尖括号标签整个删掉。剥壳跑在正则管线【之后】，所以正则
+                      路径还看得见，但凡从气泡 textContent 读标记的路径（hydrate 的兜底
+                      解析、pinned、自写脚本）标记都已经没了。方括号不是标签，全链路都活着。
                       正则里方括号是元字符，必须写 /\[状态\]([\s\S]*?)\[\/状态\]/
-  hostId        str   HUD 宿主容器 id，默认 "sbk-hud"
+  hostId        str   功能栏宿主容器 id，默认 "sbk-hud"（chrome 与 pinned 共用）
   markers       obj   五个固定规则的触发串，键 css/core/ui/hud/boot
   sceneRules    list  场景规则；每项 {scriptName, findRegex, replaceString,
                       expectedMatches?(int,默认1), allowNonWhitelistTags?(bool)}
@@ -771,6 +780,9 @@ def boot_script(cfg, diag):
         "hostId": cfg["hostId"],
         "schema": cfg.get("schema") or {},
         "modes": cfg["modes"],
+        # 精简条字段名（modes.pinned 开启时 boot 才用它）。始终下发：值已归一化，
+        # 空数组也无害，且让实机 payload 形状稳定，便于对着 sbk.json 自查。
+        "pinnedFields": cfg.get("pinnedFields") or [],
         "protocolTag": cfg["protocolTag"],
         "theme": cfg.get("theme") or None,
     }
@@ -800,6 +812,128 @@ def _need_str(cfg, key, diag, default=None):
     return v
 
 
+# ------------------------------------------------------- modes（2.0 语义）
+# 设计文档第二节：三者【职责不同】，不是同一份 schema 的多个渲染器。
+#   status = 气泡内状态面板（唯一的状态数据渲染器，1.0 叫 snapshot）
+#   chrome = 功能栏入口按钮组，不渲染业务数据
+#   pinned = 功能栏常驻精简条，只显示 pinnedFields 的 1..PIN_MAX 项，默认关
+# 1.0 的 {hud, snapshot} 语义是「两个渲染器渲染同一份 schema」，示例配置两个都开
+# → 实机截图里同时出现两个一模一样的状态面板。这就是本次重构要修的真实缺陷。
+DEFAULT_MODES = {"status": True, "chrome": True, "pinned": False}
+PIN_MAX = 3          # 与 core.js 的 PIN_MAX 一致：精简条最多 3 项（形态强制区分的一部分）
+
+
+def _alias_modes(m, modes, diag):
+    """旧键归一化：snapshot→status，hud=true→pinned。老 config 不报错，但必须告警。
+
+    返回被别名【间接】开启的键集合。调用方据此把「pinned 开着却没配 pinnedFields」
+    从 error 降级为 warn —— 1.0 的老配置本来就不可能有 pinnedFields 这个字段，
+    对它报错等于「老 config 直接跑不过」，违反兼容要求。
+    """
+    aliased = set()
+    if "snapshot" in m and "status" not in m:
+        modes["status"] = bool(m["snapshot"])
+        diag.warn("modes", "modes.snapshot 是 1.0 的名字，已归一化为 modes.status"
+                           "（语义不变：气泡内状态面板）。请更新配置。")
+    if "hud" in m and "pinned" not in m:
+        if m["hud"]:
+            modes["pinned"] = True
+            aliased.add("pinned")
+            # 🚨 必须讲清楚这【不是】等价替换，否则做卡人以为面板还在，实机只看到一行条
+            diag.warn("modes", "modes.hud 在 2.0 已移除，已映射到 modes.pinned——"
+                               "🚨 但语义【变了】：旧 hud 是功能栏里的【完整面板】"
+                               "（分组/标签/进度条），新 pinned 是【单行精简条】，"
+                               "只显示 pinnedFields 指定的 1..%d 项，且必须显式配 pinnedFields。"
+                               "状态数据面板现在在【气泡内】（modes.status，默认开）。"
+                               "若你原本要的是完整面板，改开 modes.status 而不是 pinned。" % PIN_MAX)
+        else:
+            diag.warn("modes", "modes.hud 在 2.0 已移除；它本来就是 false，已忽略。"
+                               "新语义见 modes.status / chrome / pinned。")
+    return aliased
+
+
+def normalize_modes(cfg, diag):
+    """-> (modes, pinnedFields)。modes 三键齐全；pinnedFields 去空去重后截到 PIN_MAX。"""
+    modes = dict(DEFAULT_MODES)
+    aliased = set()
+    m = cfg.get("modes")
+    if m is None:
+        m = {}
+    if isinstance(m, dict):
+        aliased = _alias_modes(m, modes, diag)
+        for k in DEFAULT_MODES:
+            if k in m:
+                modes[k] = bool(m[k])
+        unknown = sorted(set(m) - set(DEFAULT_MODES) - {"hud", "snapshot"}
+                         - {k for k in m if k.startswith("_")})
+        if unknown:
+            diag.warn("modes", "无法识别的 modes 键 %s——已忽略。合法键：%s。"
+                      % (unknown, sorted(DEFAULT_MODES)))
+    else:
+        diag.err("config", "modes 必须是对象，如 "
+                           "{\"status\":true,\"chrome\":true,\"pinned\":false}。")
+
+    raw_pins = cfg.get("pinnedFields")
+    if isinstance(raw_pins, str):
+        raw_pins = [raw_pins]
+    pins = []
+    if raw_pins is None:
+        raw_pins = []
+    elif not isinstance(raw_pins, list):
+        diag.err("config", "pinnedFields 必须是数组（1..%d 个字段名）。" % PIN_MAX)
+        raw_pins = []
+    for v in raw_pins:
+        if not isinstance(v, str) or not v.strip():
+            diag.err("config", "pinnedFields 每项必须是非空字符串，当前 %r。" % (v,))
+            continue
+        s = v.strip()
+        if s not in pins:
+            pins.append(s)
+    if len(pins) > PIN_MAX:
+        diag.err("config", "pinnedFields 有 %d 项 > 上限 %d——精简条是【单行】形态，"
+                           "项数多了会挤爆功能栏，也就和气泡面板没区别了"
+                           "（设计文档第二节：形态必须与气泡面板不同）。已截取前 %d 项。"
+                           % (len(pins), PIN_MAX, PIN_MAX))
+        pins = pins[:PIN_MAX]
+
+    _check_pins(cfg, modes, pins, diag, aliased)
+    return modes, pins
+
+
+def _check_pins(cfg, modes, pins, diag, aliased=()):
+    """pinned 与 pinnedFields 的一致性，以及字段名是否真在 schema 里。"""
+    if modes["pinned"] and not pins:
+        # 少了这个校验，boot 只会 warn 一句然后整个模式静默不启动 —— 生成期就该拦住。
+        # 但若 pinned 是【旧 hud 别名间接开的】，报错就等于老 config 直接跑不过 → 降级为 warn。
+        msg = ("精简条不知道该显示什么，SBK.boot 会跳过整个模式，功能栏上什么都不会出现。"
+               "修法：加 \"pinnedFields\": [\"体力\"]（1..%d 项，取 schema.fields 里的 key）。"
+               % PIN_MAX)
+        if "pinned" in aliased:
+            diag.warn("config", "modes.pinned 由旧键 modes.hud 映射而来，但没有 pinnedFields——"
+                                + msg + "（本次不算错误：1.0 的配置里本就没有这个字段。"
+                                        "精简条这一轮不会渲染，气泡内状态面板不受影响。）")
+        else:
+            diag.err("config", "modes.pinned 已开，但 pinnedFields 为空——" + msg)
+    if pins and not modes["pinned"]:
+        diag.warn("config", "配了 pinnedFields %s 但 modes.pinned 是 false——"
+                            "精简条不会渲染，该字段被忽略。要么开 modes.pinned，要么删掉它。"
+                            % pins)
+    if not pins:
+        return
+    schema = cfg.get("schema")
+    fields = schema.get("fields") if isinstance(schema, dict) else None
+    if not isinstance(fields, list) or not fields:
+        return          # 没有 schema.fields 可比对（合法：靠模型输出顺序全渲染）→ 不猜
+    keys = [f.get("key") for f in fields
+            if isinstance(f, dict) and isinstance(f.get("key"), str)]
+    for p in pins:
+        if p not in keys:
+            diag.err("config", "pinnedFields 里的 %r 不在 schema.fields 的 key 里"
+                               "（现有：%s）——精简条按 key 从状态仓取值，取不到就整项不渲染，"
+                               "实机现象是那一项凭空消失。修法：改成已有 key，或在 schema.fields 里补上。"
+                     % (p, keys))
+
+
 def normalize_config(raw, config_path, diag):
     if not isinstance(raw, dict):
         raise BuildError("配置顶层必须是 JSON 对象。")
@@ -822,14 +956,7 @@ def normalize_config(raw, config_path, diag):
         if not isinstance(v, str) or not v.strip():
             diag.err("config", "markers.%s 必须是非空字符串。" % k)
 
-    modes = {"hud": True, "snapshot": False}
-    m = cfg.get("modes") or {}
-    if isinstance(m, dict):
-        for k in ("hud", "snapshot"):
-            if k in m:
-                modes[k] = bool(m[k])
-    else:
-        diag.err("config", "modes 必须是对象，如 {\"hud\":true,\"snapshot\":false}。")
+    modes, pins = normalize_modes(cfg, diag)
 
     base = Path(config_path).resolve().parent
     asset_dir = cfg.get("assetDir", "sbk")
@@ -855,6 +982,7 @@ def normalize_config(raw, config_path, diag):
         "assetDir": adir,
         "theme": cfg.get("theme") or {},
         "modes": modes,
+        "pinnedFields": pins,
         "schema": cfg.get("schema") or {},
         "protocolTag": cfg.get("protocolTag") or "状态",
         "hostId": cfg.get("hostId") or "sbk-hud",
@@ -902,6 +1030,189 @@ def _rule(rid, name, marker, body):
     }
 
 
+# ------------------------- 气泡面板接缝一致性（诊断分类名沿用 "双模一致性"，见下方 diag 调用）
+# 实机缺陷：功能栏正常，但气泡里 [状态]…[/状态] 原样暴露给用户。
+# 根因是气泡内状态面板需要【两样东西同时存在】，而生成器只读了其中一样：
+#   1) modes.status=true —— 让 boot 调 SBK.ui.snapshot.auto(schema) 去订阅 mount/done；
+#   2) 一条场景规则 —— 把 [状态]…[/状态] 换成带 hydrate 选择器类的外壳。
+# hud.js 的 hydrate() 靠 SBK.dom.all(root, '.sbk-snap--raw') 找待升级节点：
+# 少了那条外壳规则，hydrate() 永远找不到东西 → 气泡面板静默失效。
+# 两样都缺时反而无害（气泡面板干脆没开），所以必须做【双向】一致性校验。
+
+HYDRATE_CLASS_FALLBACK = "sbk-snap--raw"
+# hud.js 里 hydrate 的选择器写法：SBK.dom.all(root, '.sbk-snap--raw')
+_HYDRATE_SELECTOR_RE = re.compile(
+    r"""dom\.all\(\s*root\s*,\s*['"]\.([A-Za-z0-9_-]+)['"]""")
+
+
+def hydrate_class(asset_dir, diag=None):
+    """从 hud.js 的 hydrate() 里【读出】升级选择器的类名，不在生成器里写死一份副本。
+
+    真值只有一处：hud.js 的 `SBK.dom.all(root, '.sbk-snap--raw')`。若哪天 WP-2 改了
+    这个类名，生成器的校验会跟着改，不会漂移成「校验通过但实机仍不升级」。
+    读不到（文件缺失／写法变了）时回落到常量并告警——此时校验仍有价值，只是可能失准。
+    """
+    p = Path(asset_dir) / "hud.js"
+    if p.is_file():
+        m = _HYDRATE_SELECTOR_RE.search(p.read_text(encoding="utf-8"))
+        if m:
+            return m.group(1), True
+    if diag is not None:
+        diag.warn("双模一致性",
+                  "没能从 %s 的 hydrate() 里读出升级选择器（期望形如 "
+                  "SBK.dom.all(root, '.%s')）——本次按常量 %r 校验，"
+                  "若 hud.js 已改类名请同步 _HYDRATE_SELECTOR_RE。"
+                  % (p, HYDRATE_CLASS_FALLBACK, HYDRATE_CLASS_FALLBACK))
+    return HYDRATE_CLASS_FALLBACK, False
+
+
+_BACKREF_RE = re.compile(r"\$(?:[1-9]|&|<[^>]+>)")
+_CLASS_ATTR_RE = re.compile(r"""class\s*=\s*["']([^"']*)["']""")
+
+
+def _class_tokens(rs):
+    """取 replaceString 里所有 class 属性的类名 token 集合。
+
+    必须按 token 比而不是按子串比：`class="sbk-snap--raw"` 的子串里含 `sbk-snap`，
+    但 CSS 选择器 `.sbk-snap` 并不会命中它 —— 子串比会漏掉「缺基类」这种真缺陷。
+    """
+    toks = set()
+    for m in _CLASS_ATTR_RE.finditer(rs):
+        toks.update(m.group(1).split())
+    return toks
+
+
+def _shell_hint(cfg, cls):
+    """给出可直接粘贴的修复样板。方括号在正则里是元字符，必须转义（漏转义会变成字符类）。"""
+    tag = cfg["protocolTag"]
+    return ('sceneRules 里加一条：{"scriptName": "sbk-snap", "findRegex": '
+            '"/\\\\[%s\\\\]([\\\\s\\\\S]*?)\\\\[\\\\/%s\\\\]/", "replaceString": '
+            '"<div class=\\"sbk-snap sbk-card sbk-pre %s\\">$1</div>"}'
+            '（findRegex 写进 JSON 时反斜杠要再叠一层，如上）' % (tag, tag, cls))
+
+
+def _dual_mode_on(cfg, diag, cls, base, shells, base_only):
+    """modes.status=true：必须有一条产出 .<cls> 外壳的场景规则。"""
+    if not shells:
+        if base_only:
+            # A2：排版类对了、升级类漏了。最阴的一种——外观像「渲染成卡片了」，
+            # 但 hydrate() 的 SBK.dom.all(root,'.<cls>') 命中不到，结构化渲染永不接管。
+            for label, _ in base_only:
+                diag.err("双模一致性",
+                         "modes.status 已开，场景规则 %r 的产物带了 .%s 但【缺 .%s】——"
+                         "hud.js 的 hydrate() 正是靠 SBK.dom.all(root, '.%s') 找待升级节点，"
+                         "少这个类 JS 升级永不触发，气泡里只会留一段纯文本。"
+                         "修法：把 .%s 加进该规则根元素的 class（形如 "
+                         "class=\"%s sbk-card sbk-pre %s\"）。"
+                         % (label, base, cls, cls, cls, base, cls))
+        else:
+            # A1：两样只有一样。实机现象＝气泡里 [状态]…[/状态] 原样暴露给用户。
+            diag.err("双模一致性",
+                     "modes.status 已开，但 sceneRules 里没有任何一条产出 .%s 外壳的规则——"
+                     "boot 会调 SBK.ui.snapshot.auto()，可 hydrate() 靠 "
+                     "SBK.dom.all(root, '.%s') 找节点，永远找不到东西，状态面板静默失效："
+                     "实机现象是气泡里 [%s]…[/%s] 原样暴露给用户。"
+                     "修法：%s；或若本就不想要气泡内状态面板，把 modes.status 改成 false。"
+                     % (cls, cls, cfg["protocolTag"], cfg["protocolTag"],
+                        _shell_hint(cfg, cls)))
+        return
+
+    for label, sc in shells:
+        rs, fr = sc["replaceString"], sc.get("findRegex")
+        # A3：hydrate 读的是节点 textContent，壳里没有回填 → 拿到空串 → SBK.parse 解析不出
+        # 字段，走「原样留着」兜底分支，等于白渲染一次。
+        if not _BACKREF_RE.search(rs):
+            diag.warn("双模一致性",
+                      "场景规则 %r 产出了 .%s 外壳，但 replaceString 里没有 $1/$& 之类的回填——"
+                      "hydrate() 读的是该节点的 textContent，壳内为空则解析不出任何字段，"
+                      "会走「原样留着」的兜底分支。修法：壳内放 $1（且只放 $1，"
+                      "别再套 <span>状态</span> 之类装饰，多出来的文字会被当成块体首行）。"
+                      % (label, cls))
+        # A4：改了 protocolTag 却忘了改外壳规则的匹配式 —— 规则装上了但永不命中。
+        if isinstance(fr, str) and cfg["protocolTag"] not in fr:
+            diag.warn("双模一致性",
+                      "场景规则 %r 是 .%s 外壳，但它的 findRegex 里不含协议标签 %r——"
+                      "改过 protocolTag 后忘了同步匹配式的话，这条规则永不命中，"
+                      "气泡内状态面板（modes.status）一样不工作。"
+                      "修法：把匹配式改成 /\\[%s\\]([\\s\\S]*?)\\[\\/%s\\]/"
+                      "（方括号是正则元字符，必须转义）。"
+                      % (label, cls, cfg["protocolTag"],
+                         cfg["protocolTag"], cfg["protocolTag"]))
+
+
+def _dual_mode_off(cfg, diag, cls, shells):
+    """modes.status=false：不该有产出 .<cls> 外壳的规则（反向不一致）。"""
+    # B1：规则把协议块换成了外壳，但 boot 不会调 snapshot.auto() → 没人订阅 mount/done →
+    # hydrate() 一次都不跑，气泡里留一个永不升级的死壳（纯文本），且原始标记已被替换掉，
+    # pinned 精简条从气泡文本兜底读取时也拿不到 [状态] 标记了。
+    for label, _ in shells:
+        diag.err("双模一致性",
+                 "场景规则 %r 产出了 .%s 外壳，但 modes.status 是 false——"
+                 "boot 不会调 SBK.ui.snapshot.auto()，没人订阅 mount/done，hydrate() 一次都不跑，"
+                 "气泡里只会留一个永不升级的死壳。修法：把 modes.status 改成 true；"
+                 "或删掉这条规则。" % (label, cls))
+
+
+def _warn_no_data_outlet(cfg, diag):
+    """B2：status 与 pinned 都关 → 协议块没有任何渲染出口。
+
+    2.0 只看这两个：chrome 是入口按钮组，【不渲染业务数据】，开着也不构成出口。
+    这不是「配置错」而是「基座白装」，故只告警不报错——允许有人只要主题/样式与入口。
+    """
+    diag.warn("双模一致性",
+              "modes.status 与 modes.pinned 双关——协议块 [%s]…[/%s] 没有任何渲染出口，"
+              "状态数据整体不显示（基座只剩样式、主题与功能栏入口）。"
+              "注意 modes.chrome 不算出口：它只放入口按钮，不渲染业务数据。"
+              "若确实只想要样式请忽略；否则至少开 modes.status。"
+              % (cfg["protocolTag"], cfg["protocolTag"]))
+
+
+def check_dual_mode(cfg, diag, asset_dir=None):
+    """气泡面板接缝一致性：modes.status 与「外壳场景规则」必须【同时】在或【同时】不在。
+
+    函数名与诊断分类名沿用 1.0 的 dual_mode/「双模一致性」叫法（对外可见，不改）。
+
+    返回诊断用的中间量 {cls, base, shells, baseOnly}，方便测试与 --verbose 复核。
+    """
+    snap_on = bool(cfg["modes"].get("status"))
+    # B2 与选择器无关，只看两个数据出口开关，故先判。chrome 不算出口。
+    if not snap_on and not cfg["modes"].get("pinned"):
+        _warn_no_data_outlet(cfg, diag)
+    # 无可查对象时【不读 hud.js 也不告警】：status 关且没有任何场景规则 →
+    # 气泡内面板干脆没开启，不存在「只开了一半」的不一致。
+    scenes = [sc for sc in cfg["sceneRules"]
+              if isinstance(sc, dict) and isinstance(sc.get("replaceString"), str)]
+    if not snap_on and not scenes:
+        return {"cls": None, "base": None, "shells": [], "baseOnly": []}
+
+    cls, _ = hydrate_class(asset_dir if asset_dir is not None else cfg["assetDir"], diag)
+    # 基类由升级类名推导（sbk-snap--raw → sbk-snap），同样不写死：
+    # hud.js snapshot() 的根元素必须带基类，base.css 靠它重置 message-body 的
+    # opacity/.white-space（硬约束 11），少了它排版必烂。
+    base = cls.split("--")[0] if "--" in cls else "sbk-snap"
+    shells, base_only = [], []
+    for i, sc in enumerate(cfg["sceneRules"]):
+        if not isinstance(sc, dict):
+            continue
+        rs = sc.get("replaceString")
+        if not isinstance(rs, str):
+            continue
+        label = sc.get("scriptName") if isinstance(sc.get("scriptName"), str) \
+            else "sceneRules[%d]" % i
+        toks = _class_tokens(rs)
+        if cls in toks:
+            shells.append((label, sc))
+        elif base in toks:
+            base_only.append((label, sc))
+
+    if snap_on:
+        _dual_mode_on(cfg, diag, cls, base, shells, base_only)
+    else:
+        _dual_mode_off(cfg, diag, cls, shells)
+    return {"cls": cls, "base": base,
+            "shells": [n for n, _ in shells], "baseOnly": [n for n, _ in base_only]}
+
+
 def build(cfg, diag, strip=True):
     adir, mk = cfg["assetDir"], cfg["markers"]
     if not Path(adir).is_dir():
@@ -943,15 +1254,20 @@ def build(cfg, diag, strip=True):
         diag.warn("sbk-ui", "protocol.js/hud.js/ui.js 全部缺失——本条规则已省略（%s）。"
                   % "/".join(missing))
 
-    # ---- 4. sbk-hud：宿主容器 HTML（模式 A）----
-    if cfg["modes"]["hud"]:
+    # ---- 4. sbk-hud：功能栏宿主容器 HTML（chrome 与 pinned 共用一个宿主）----
+    # 2.0：不再由已废除的 modes.hud 决定。chrome（入口按钮组）与 pinned（精简条）
+    # 都挂在这个容器里，任一开启就必须产出它；两个都关则整条省略。
+    need_host = cfg["modes"]["chrome"] or cfg["modes"]["pinned"]
+    if need_host:
         rules.append(_rule(rid, "sbk-hud", mk["hud"], hud_host_html(cfg["hostId"])))
         rid -= 1
         # §5.6 功能栏静态：h_() 只在装载时跑一次，且其正则输入是 statusbar 字段自身。
-        # 触发串不在 statusbar 里 → 宿主容器永远不出现 → HUD 整个模式失效。
+        # 触发串不在 statusbar 里 → 宿主容器永远不出现 → chrome/pinned 全部失效。
         if mk["hud"] not in cfg["statusbar"]:
-            diag.err("sbk-hud", "模式 A 已启用，但 statusbar 字段里找不到触发串 %r——"
-                     "功能栏正则的输入是 statusbar 自身（§5.6），宿主容器永远不会出现。" % mk["hud"])
+            on = [k for k in ("chrome", "pinned") if cfg["modes"][k]]
+            diag.err("sbk-hud", "modes.%s 已启用，但 statusbar 字段里找不到触发串 %r——"
+                     "功能栏正则的输入是 statusbar 自身（§5.6），宿主容器永远不会出现，"
+                     "功能栏入口与精简条都不会渲染。" % ("/".join(on), mk["hud"]))
 
     # ---- 5. sbk-boot：启动调用，排最后确保内核已定义 ----
     rules.append(_rule(rid, "sbk-boot", mk["boot"], "<script>\n%s\n</script>" % boot_script(cfg, diag)))
@@ -976,6 +1292,12 @@ def build(cfg, diag, strip=True):
             diag.err(label, "scriptName 以 __ 开头——worker 会整条丢弃（§5.6）。")
         rules.append({"id": rid, "scriptName": name, "findRegex": fr, "replaceString": rs})
         rid -= 1
+
+    # ---- 7. 气泡面板接缝：modes.status 与外壳场景规则必须同时在/同时不在 ----
+    # 放在场景规则装配之后：需要看全 cfg["sceneRules"] 才能判断外壳规则是否存在。
+    # 结果只经 diag 上报，不塞进 assets_report——那个 dict 被 render_report 当
+    # {规则名: [资源条目]} 遍历，塞异形值会让报告渲染崩。
+    check_dual_mode(cfg, diag, adir)
 
     return rules, assets_report, layouts
 

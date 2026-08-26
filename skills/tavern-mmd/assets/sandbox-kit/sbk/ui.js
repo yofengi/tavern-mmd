@@ -75,7 +75,14 @@
        ⚠ .sbk-stg 的消费者在 ui-stage.js：CSS 与 injectCss 都留在本文件统一注入，
          这样全局只有一个 <style id="sbk-ui-css">，两个文件不会抢同一个 style id 互相覆盖。 */
     '.sbk-stg{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;' +
-      'background:var(--chat-bg);color:var(--chat-text);overflow:hidden}'
+      'background:var(--chat-bg);color:var(--chat-text);overflow:hidden}',
+    /* 功能栏 chrome 入口条（SBK.ui.chrome）。只放入口按钮，【不渲染业务数据】（2.0 §2.1）。
+       flex-wrap 而非横向滚动：功能栏是 root 的 flex item，横滚容器在窄屏会吃掉纵向手势。
+       按钮本体复用 base.css 的 .sbk-btn（已有 hover/active 两态与 flex-shrink:0），此处不重复定义。 */
+    '.sbk-chr{display:flex;flex-wrap:wrap;align-items:center;gap:calc(12 * var(--rpx));' +
+      'padding:calc(8 * var(--rpx)) 0}',
+    // 触控目标下限 44px（盘点 C.5）。rpx 在窄屏偏小，故用 max() 兜住。字号继承 .sbk-host，不另设
+    '.sbk-chr .sbk-btn{min-height:max(44px,calc(72 * var(--rpx)))}'
   ].join('');
 
   function injectCss() {
@@ -473,6 +480,110 @@
     return api;
   }
 
+  /* ---------- SBK.ui.chrome ----------
+     功能栏 chrome 层：入口按钮组 + 主题设置抽屉。
+     🚨 角色分工（2.0 §2 / 盘点 A.3，1.0 在此处犯的是【方法错误】）：功能栏放 chrome
+        （主题设置入口、侧边栏入口、常驻小徽标），业务状态面板在【气泡内】。
+        1.0 把状态数据面板塞进功能栏槽位 → 实机截图里页面同时出现两个一模一样的面板。
+        故本层【绝不渲染任何业务数据】，只出按钮。
+     §5.6 功能栏是静态的（h_() 只在装载时跑一次，且其正则输入是 statusbar 字段自身）→
+        入口只需渲染一次，不必跟随消息刷新；真要动的内容靠 JS 改 DOM。
+     §2.2 已裁定「JS 往功能栏 appendChild 留不住」是旧 MMD 行为被误带过来的，
+        事实卡 §5.6 正确（无重渲染路径），实机验证整页重载后 JS 插入的节点仍在
+        → 设置面板可以挂功能栏，不必占用舞台。
+
+     签名：chrome(opts) —— 与 core.js boot() 的【实际调用点】对齐（它调 SBK.ui.chrome({hostId:…})）。
+     同时容错 chrome(hostEl, opts) 形态（设计稿写法）：首参是元素就当宿主用。
+     opts = {
+       hostId?:'sbk-hud'   功能栏宿主 id（与 core 的 pinned 宿主 hostId+'-pin' 是兄弟节点，互不擦除）
+       settings?:false     是否出「设置」入口（默认出）
+       label?:'设置'       该入口文案
+       title?:'阅读设置'   抽屉标题
+       width?:string       抽屉宽度
+       entries?:[{label,onSelect,accent?}]  作者自定义入口（侧边栏/档案/音效开关等）
+       preset?:string      首次启动的默认风格包名
+     }
+     返回 api = { el, toggle, panel } —— 开合转发到 SBK.theme.prefs（抽屉归主题层所有） */
+  var chromeApi = null;      // 模块级单例：重复调用直接返回，不重复挂载、不重复订阅
+
+  function chrome(a, b) {
+    var pre = a && a.nodeType === 1 ? a : null;      // 首参是元素 → 当宿主；否则当 opts
+    var o = (pre ? b : a) || {};
+    if (chromeApi) { SBK.warn('ui.chrome: already mounted, returning existing'); return chromeApi; }
+
+    var hid = String(o.hostId || 'sbk-hud');
+    var gid = hid + '-chr';                          // 自己的子容器 id，只清它、不动兄弟节点
+    var grp = null, built = false;
+
+    /* 设置抽屉【不在本层实现】：它的载体是 panel({mode:'drawer'})，而内容与开合语义属主题层，
+       故整块归 theme.js 的 prefs.panel/toggle（它在调用时才取 SBK.ui.panel，规避装载顺序）。
+       本层只负责「功能栏上有个按钮，点了调它」——这正是 chrome 的职责边界（2.0 §2.1）。
+       缺主题层时告警并留下按钮（点了只告警），不抛异常炸整卡。 */
+    function prefs() {
+      var t = SBK.theme;
+      if (t && t.prefs && typeof t.prefs.toggle === 'function') return t.prefs;
+      SBK.warn('ui.chrome: theme prefs layer not loaded, settings entry is inert');
+      return null;
+    }
+
+    function build() {
+      if (built) return true;
+      // 硬约束 17：宿主只能在事件回调内取（作者脚本早于 DOM 执行）→ 本函数只被 defer 调用
+      var host = pre || SBK.dom.mountHost(hid);
+      if (!host) { SBK.warn('ui.chrome: no mount point yet'); return false; }
+      injectCss();
+      /* 幂等：宿主里已有自己的条就复用并清空重建，不 append 第二条。
+         🚨 只清 #<gid> 自己的子节点，【绝不】清整个宿主 —— core 的 pinned 精简条是
+            同一个功能栏槽位里的兄弟节点，清宿主会把它一起擦掉（core.js 已就此留注释）。 */
+      grp = childById(host, gid);
+      if (grp) { while (grp.firstChild) grp.removeChild(grp.firstChild); }
+      else { grp = h('div', { id: gid, 'class': 'sbk-chr' }); host.appendChild(grp); }
+
+      /* 偏好读档 + 合成 + 落地，在【首个入口按钮出现之前】就做完 ——
+         玩家上次存的字号/配色必须开局即生效，而不是等他打开一次面板才应用。
+         store.load 自带 try/catch（§4.4a 瘦预览下 save.get 同步抛 SdkError）。 */
+      var t = SBK.theme;
+      // 整个 o 直接传下去：theme.start 只读它的 title/width，多余键它不看
+      if (t && typeof t.start === 'function') {
+        try { t.start(o.preset, o); } catch (e) { SBK.warn('ui.chrome: theme.start threw', e && e.message); }
+      }
+
+      var list = [];
+      if (o.settings !== false) list.push({ label: o.label || '\u8bbe\u7f6e', onSelect: function () { var p = prefs(); if (p) p.toggle(); } });
+      if (o.entries && o.entries.length) list = list.concat(o.entries);
+      // forEach 天然一项一个闭包，不必再套 IIFE（本文件 armStop 已是同一写法）
+      list.forEach(function (it) {
+        // §5.5 交互必须挂 HTML 壳：SVG 内 on* 一律被删（实测 <circle onclick> STRIPPED）
+        grp.appendChild(h('button', {
+          'class': 'sbk-btn' + (it.accent ? ' sbk-btn--accent' : ''),
+          onclick: function (ev) {
+            stop(ev);
+            if (typeof it.onSelect === 'function') { try { it.onSelect(chromeApi); } catch (er) { SBK.warn('chrome entry threw'); } }
+          }
+        }, String(it.label === undefined ? '' : it.label)));
+      });
+      armStop(grp);                 // 拦 pointerdown/click/contextmenu，避免顺手触发平台长按菜单
+      built = true;
+      return true;
+    }
+
+    // 开合一律转给主题层，chrome 自己不持有抽屉引用（单一归属，避免两处状态不同步）
+    chromeApi = {
+      el: function () { return grp; },
+      panel: function () { var p = prefs(); return p ? p.panel() : null; },
+      toggle: function () { var p = prefs(); if (p) p.toggle(); return chromeApi; }
+    };
+
+    // 硬约束 17：顶层调用时 DOM 还不存在 → defer 排到首个 mount/done（ready 最后到且无补发）
+    defer(build);
+    /* 平台切会话可能把功能栏槽位内容清掉 → mount 时校验，掉了才补挂。
+       单例保证这里只订阅一次（重复 chrome() 已在函数入口返回）。 */
+    SBK.on('mount', function () {
+      if (built && grp && !grp.parentNode) { built = false; build(); }
+    });
+    return chromeApi;
+  }
+
   /* ---------- 私有工具箱：给 ui-stage.js 复用 ----------
      下划线前缀 = 内部约定，不属对外 API，上层业务不要依赖。
      为什么共享而不是两边各留一份：
@@ -498,5 +609,6 @@
      stage 已拆到 ui-stage.js，由那边自己往 SBK.ui 上追加。 */
   SBK.ui = SBK.ui || {};
   SBK.ui.panel = panel;
-  SBK.log('ui ready (panel)');
+  SBK.ui.chrome = chrome;      // core.js boot() 在 modes.chrome 为真（默认真）时调它
+  SBK.log('ui ready (panel, chrome)');
 })(typeof window !== 'undefined' ? window : globalThis);

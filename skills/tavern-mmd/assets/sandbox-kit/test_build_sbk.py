@@ -655,11 +655,21 @@ class TestBuildEndToEnd(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    # 2.0：modes.status 默认 true，一致性守卫要求【同时】有一条产出 .sbk-snap--raw 外壳的
+    # 场景规则，否则报错（少了它 hydrate() 永不触发，气泡里 [状态] 原样暴露给用户）。
+    # 故最小配置必须自带外壳规则 + 开场白里含协议块（否则外壳规则匹配不到任何东西会另告警）。
+    SHELL_RULE = {
+        "scriptName": "sbk-snap",
+        "findRegex": r"/\[状态\]([\s\S]*?)\[\/状态\]/",
+        "replaceString": '<div class="sbk-snap sbk-card sbk-pre sbk-snap--raw">$1</div>',
+    }
+
     def _write_cfg(self, **over):
         cfg = {
             "assetDir": "sbk",
-            "beginning": "开场白 {{sbk-css}}{{sbk-core}}{{sbk-boot}}",
+            "beginning": "开场白 {{sbk-css}}{{sbk-core}}{{sbk-boot}} [状态]体力: 1/2[/状态]",
             "statusbar": "{{hud}}",
+            "sceneRules": [dict(self.SHELL_RULE)],
         }
         cfg.update(over)
         p = self.tmp / "c.json"
@@ -731,10 +741,20 @@ class TestBuildEndToEnd(unittest.TestCase):
         _, _, _, d = B.build_document(cfg)
         self.assertTrue(any("statusbar" in e and "sbk-hud" in e for e in d.errors))
 
-    def test_hud_mode_off_omits_rule(self):
-        cfg = self._write_cfg(modes={"hud": False}, statusbar="无")
+    def test_toolbar_host_omitted_when_chrome_and_pinned_off(self):
+        """2.0：功能栏宿主由 chrome/pinned 决定（已废除的 modes.hud 不再参与）。
+
+        两者都关才省略 sbk-hud——只关一个仍要产出容器，另一个要用它。
+        """
+        cfg = self._write_cfg(modes={"chrome": False, "pinned": False}, statusbar="无")
         doc, _, _, d = B.build_document(cfg)
         self.assertNotIn("sbk-hud", [r["scriptName"] for r in doc["regex_scripts"]])
+        self.assertEqual(d.errors, [])
+
+    def test_chrome_alone_still_emits_toolbar_host(self):
+        cfg = self._write_cfg(modes={"chrome": True, "pinned": False})
+        doc, _, _, d = B.build_document(cfg)
+        self.assertIn("sbk-hud", [r["scriptName"] for r in doc["regex_scripts"]])
         self.assertEqual(d.errors, [])
 
     def test_strip_comments_shrinks_output(self):
@@ -760,10 +780,11 @@ class TestBuildEndToEnd(unittest.TestCase):
         self.assertTrue(any("statusbar" in e and "200" in e for e in d.errors))
 
     def test_scene_rule_passes_through(self):
+        # 外壳必须带 .sbk-snap--raw：只带基类 .sbk-snap 会被一致性守卫按 A2 判错
         cfg = self._write_cfg(sceneRules=[{
             "scriptName": "snap",
             "findRegex": r"/\[状态\]([\s\S]*?)\[\/状态\]/",
-            "replaceString": '<div class="sbk-snap">$1</div>',
+            "replaceString": '<div class="sbk-snap sbk-snap--raw">$1</div>',
         }], beginning="开场 {{sbk-css}}{{sbk-core}}{{sbk-boot}} [状态]体力: 1/2[/状态]")
         doc, _, _, d = B.build_document(cfg)
         self.assertIn("snap", [r["scriptName"] for r in doc["regex_scripts"]])
@@ -1057,11 +1078,12 @@ class TestExampleConfig(unittest.TestCase):
                          "装载顺序被打乱：%s" % seen)
 
     def _cfg_for_boot(self):
-        """boot_script 需要的最小归一化配置。"""
+        """boot_script 需要的最小归一化配置（2.0 三键 modes）。"""
         return {
             "hostId": "sbk-hud",
             "schema": {"fields": [{"key": "体力", "type": "bar"}]},
-            "modes": {"hud": True, "snapshot": True},
+            "modes": {"status": True, "chrome": True, "pinned": False},
+            "pinnedFields": [],
             "protocolTag": "状态",
             "theme": {"dark": {"accent": "#c8a15a"}},
         }
@@ -1120,6 +1142,13 @@ class TestExampleConfig(unittest.TestCase):
         self.assertIsNotNone(block, "没能在 hud.js 里定位 TYPES 表")
         real = set(re.findall(r"^\s{4}(\w+):\s*function", block.group(1), re.M))
         self.assertTrue(real, "TYPES 表解析为空")
+        # 版面项（section）【故意不在 TYPES 表里】：它没有 key、不渲染值，由 tree() 的
+        # 分组游标处理（hud.js 的 `d.type === 'section'` / `f.type === 'section'`）。
+        # 所以「支持的 type」= TYPES 表 ∪ 版面项。两者都从源码取，不在测试里写死会漂移的副本。
+        layout = set(re.findall(r"\.type === '(\w+)'", body))
+        self.assertIn("section", layout,
+                      "没能从 hud.js 解析出版面项 section；若它已改名，请同步本断言的推导方式")
+        real |= layout
         for f in schema["fields"]:
             t = f.get("type")
             if t is None:
@@ -1155,6 +1184,391 @@ class TestExampleConfig(unittest.TestCase):
         self.assertEqual(B.CORE_ASSETS, ("core.js", "theme.js"))
         # ui-stage.js 必须排在 ui.js 之后（WP-3 拆分产物，依赖 ui.js 先挂 SBK.ui）
         self.assertLess(B.UI_ASSETS.index("ui.js"), B.UI_ASSETS.index("ui-stage.js"))
+
+
+class TestModes20(unittest.TestCase):
+    """2.0 modes 语义：status/chrome/pinned 三者职责不同（基座2.0设计.md 第二节）。
+
+    1.0 的 {hud, snapshot} 是「两个渲染器渲染同一份 schema」，示例配置两个都开
+    → 实机截图里同时出现两个一模一样的状态面板。这些测试守的就是那个缺陷不复发。
+    """
+
+    def _norm(self, **cfg):
+        d = B.Diag()
+        modes, pins = B.normalize_modes(cfg, d)
+        return modes, pins, d
+
+    # ---- 默认值 ----
+    def test_three_modes_defaults(self):
+        modes, pins, d = self._norm()
+        self.assertEqual(modes, {"status": True, "chrome": True, "pinned": False})
+        self.assertEqual(pins, [])
+        self.assertEqual(d.errors, [])
+
+    def test_defaults_never_render_same_data_twice(self):
+        """🚨 核心回归：默认配置下只有【一个】状态数据出口。
+
+        status 在气泡内、chrome 不渲染业务数据、pinned 默认关 → 不可能重复。
+        """
+        modes, _, _ = self._norm()
+        outlets = [k for k in ("status", "pinned") if modes[k]]
+        self.assertEqual(outlets, ["status"], "状态数据出口必须恰好一个，且是气泡内的 status")
+        self.assertTrue(modes["chrome"], "chrome 默认开，但它只放入口按钮，不算数据出口")
+
+    def test_explicit_values_override_defaults(self):
+        modes, _, d = self._norm(modes={"status": False, "chrome": False, "pinned": True},
+                                 pinnedFields=["体力"])
+        self.assertEqual(modes, {"status": False, "chrome": False, "pinned": True})
+        self.assertEqual(d.errors, [])
+
+    def test_non_dict_modes_is_error(self):
+        _, _, d = self._norm(modes=["status"])
+        self.assertTrue(any("modes 必须是对象" in e for e in d.errors))
+
+    def test_unknown_mode_key_warns(self):
+        _, _, d = self._norm(modes={"sidebar": True})
+        self.assertTrue(any("无法识别的 modes 键" in w and "sidebar" in w for w in d.warns))
+
+    # ---- pinnedFields 校验 ----
+    def test_pinned_on_without_fields_is_error(self):
+        """pinned 开但没配字段 → boot 会静默跳过整个模式，生成期就该拦住。"""
+        _, pins, d = self._norm(modes={"pinned": True})
+        self.assertEqual(pins, [])
+        self.assertTrue(any("modes.pinned 已开" in e and "pinnedFields 为空" in e
+                            for e in d.errors))
+
+    def test_pinned_with_status_both_on_still_requires_fields(self):
+        """status 与 pinned 同时开是合法的（形态不同），但 pinnedFields 仍必填。"""
+        modes, _, d = self._norm(modes={"status": True, "pinned": True})
+        self.assertTrue(modes["status"] and modes["pinned"])
+        self.assertTrue(any("pinnedFields 为空" in e for e in d.errors))
+
+    def test_pinned_over_three_fields_is_error(self):
+        _, pins, d = self._norm(modes={"pinned": True},
+                                pinnedFields=["体力", "灵力", "银钱", "好感"])
+        self.assertEqual(len(pins), B.PIN_MAX)
+        self.assertEqual(pins, ["体力", "灵力", "银钱"])
+        self.assertTrue(any("pinnedFields 有 4 项" in e for e in d.errors))
+
+    def test_pinned_fields_dedup_and_trim(self):
+        _, pins, _ = self._norm(modes={"pinned": True},
+                                pinnedFields=[" 体力 ", "体力", "灵力"])
+        self.assertEqual(pins, ["体力", "灵力"])
+
+    def test_pinned_field_not_in_schema_is_error(self):
+        _, _, d = self._norm(modes={"pinned": True}, pinnedFields=["不存在"],
+                             schema={"fields": [{"key": "体力"}, {"key": "灵力"}]})
+        self.assertTrue(any("不在 schema.fields 的 key 里" in e and "不存在" in e
+                            for e in d.errors))
+
+    def test_pinned_field_in_schema_is_clean(self):
+        _, _, d = self._norm(modes={"pinned": True}, pinnedFields=["体力"],
+                             schema={"fields": [{"key": "体力"}, {"key": "灵力"}]})
+        self.assertEqual(d.errors, [])
+
+    def test_no_schema_fields_skips_key_check(self):
+        """没有 schema.fields 是合法的（靠模型输出顺序全渲染）→ 不猜、不误报。"""
+        _, _, d = self._norm(modes={"pinned": True}, pinnedFields=["体力"])
+        self.assertEqual(d.errors, [])
+
+    def test_fields_without_pinned_warns(self):
+        _, _, d = self._norm(pinnedFields=["体力"])
+        self.assertTrue(any("modes.pinned 是 false" in w for w in d.warns))
+
+    def test_bad_pinned_fields_type_is_error(self):
+        _, _, d = self._norm(modes={"pinned": True}, pinnedFields="体力,灵力")
+        # 字符串按单项容错，不报类型错
+        self.assertEqual(d.errors, [])
+        _, _, d2 = self._norm(modes={"pinned": True}, pinnedFields={"a": 1})
+        self.assertTrue(any("pinnedFields 必须是数组" in e for e in d2.errors))
+
+    def test_empty_string_field_is_error(self):
+        _, pins, d = self._norm(modes={"pinned": True}, pinnedFields=["体力", "  "])
+        self.assertEqual(pins, ["体力"])
+        self.assertTrue(any("非空字符串" in e for e in d.errors))
+
+    # ---- 旧键别名归一化 ----
+    def test_legacy_snapshot_maps_to_status_with_warning(self):
+        modes, _, d = self._norm(modes={"snapshot": False})
+        self.assertFalse(modes["status"])
+        self.assertTrue(any("modes.snapshot 是 1.0 的名字" in w for w in d.warns))
+
+    def test_legacy_hud_true_maps_to_pinned_and_warns_semantics_changed(self):
+        """🚨 hud→pinned 不是等价替换，告警必须说清形态变了。"""
+        modes, _, d = self._norm(modes={"hud": True}, pinnedFields=["体力"])
+        self.assertTrue(modes["pinned"])
+        hit = [w for w in d.warns if "modes.hud 在 2.0 已移除" in w]
+        self.assertTrue(hit, "hud=true 必须告警")
+        self.assertIn("语义【变了】", hit[0])
+        self.assertIn("单行精简条", hit[0])
+
+    def test_legacy_hud_without_fields_degrades_to_warning(self):
+        """🚨 老 config 不该直接报错：1.0 的配置里本就没有 pinnedFields 这个字段。
+
+        别名间接开的 pinned + 无字段 → warn；显式 pinned:true + 无字段 → err。
+        """
+        _, _, d = self._norm(modes={"hud": True})
+        self.assertEqual(d.errors, [], "旧 hud 别名不该让老配置构建失败")
+        self.assertTrue(any("由旧键 modes.hud 映射而来" in w for w in d.warns))
+
+    def test_explicit_pinned_without_fields_still_errors(self):
+        """反面：显式写 pinned:true 却不配字段，是真配置错，必须报错。"""
+        _, _, d = self._norm(modes={"pinned": True})
+        self.assertTrue(any("modes.pinned 已开" in e for e in d.errors))
+        self.assertEqual([w for w in d.warns if "由旧键" in w], [])
+
+    def test_legacy_hud_false_warns_but_keeps_default(self):
+        modes, _, d = self._norm(modes={"hud": False})
+        self.assertFalse(modes["pinned"])
+        self.assertTrue(any("它本来就是 false" in w for w in d.warns))
+
+    def test_legacy_pair_normalizes_to_single_outlet(self):
+        """1.0 那份「两个都开」的老配置：归一化后 status 开、pinned 开（显式告警过），
+        但两者形态不同，不再是同一份面板渲染两遍。"""
+        modes, _, d = self._norm(modes={"hud": True, "snapshot": True},
+                                 pinnedFields=["体力"])
+        self.assertTrue(modes["status"])
+        self.assertTrue(modes["pinned"])
+        self.assertEqual(len([w for w in d.warns if "modes.hud" in w]), 1)
+        self.assertEqual(d.errors, [])
+
+    def test_new_key_wins_over_legacy_alias(self):
+        modes, _, d = self._norm(modes={"snapshot": True, "status": False})
+        self.assertFalse(modes["status"], "显式新键优先于旧别名")
+        self.assertEqual([w for w in d.warns if "1.0 的名字" in w], [])
+
+
+class TestDualModeGuard(unittest.TestCase):
+    """一致性守卫：modes.status 与「产出 .sbk-snap--raw 外壳的场景规则」必须同时在/同时不在。
+
+    判定用的类名【从 hud.js 的 hydrate() 实际读出】，不写死——将来 WP-A 改类名，
+    守卫会跟着改，不会漂移成「校验通过但实机不升级」。
+    """
+
+    ADIR = Path(__file__).resolve().parent / "sbk"
+    SHELL = '<div class="sbk-snap sbk-card sbk-pre sbk-snap--raw">$1</div>'
+    FR = r"/\[状态\]([\s\S]*?)\[\/状态\]/"
+
+    def _cfg(self, status=True, pinned=False, scenes=()):
+        return {"modes": {"status": status, "chrome": True, "pinned": pinned},
+                "protocolTag": "状态", "assetDir": self.ADIR, "sceneRules": list(scenes)}
+
+    def _run(self, cfg):
+        d = B.Diag()
+        info = B.check_dual_mode(cfg, d, self.ADIR)
+        return info, d
+
+    def _rule(self, rs, name="sbk-snap", fr=None):
+        return {"scriptName": name, "findRegex": fr or self.FR, "replaceString": rs}
+
+    # ---- 选择器来源 ----
+    def test_hydrate_class_is_read_from_hud_js(self):
+        """守卫的类名真值只有一处：hud.js 的 SBK.dom.all(root, '.sbk-snap--raw')。"""
+        if not (self.ADIR / "hud.js").is_file():
+            self.skipTest("sbk/hud.js 不存在")
+        cls, found = B.hydrate_class(self.ADIR)
+        self.assertTrue(found, "没能从 hud.js 读出升级选择器——守卫会退化成写死常量")
+        self.assertEqual(cls, "sbk-snap--raw")
+        # 确认它真的来自源码而非常量兜底
+        src = (self.ADIR / "hud.js").read_text(encoding="utf-8")
+        self.assertIn("dom.all(root, '.%s')" % cls, src)
+
+    def test_missing_hud_js_falls_back_and_warns(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            d = B.Diag()
+            cls, found = B.hydrate_class(tmp, d)
+            self.assertEqual(cls, B.HYDRATE_CLASS_FALLBACK)
+            self.assertFalse(found)
+            self.assertTrue(any("没能从" in w for w in d.warns))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 正例 ----
+    def test_status_on_with_shell_is_clean(self):
+        _, d = self._run(self._cfg(scenes=[self._rule(self.SHELL)]))
+        self.assertEqual(d.errors, [])
+        self.assertEqual(d.warns, [])
+
+    def test_status_off_without_scenes_is_clean(self):
+        """两样都不在 = 一致。此时连 hud.js 都不读。"""
+        info, d = self._run(self._cfg(status=False, pinned=True))
+        self.assertEqual(d.errors, [])
+        self.assertIsNone(info["cls"])
+
+    # ---- 反例 A：status 开但外壳缺失/不全 ----
+    def test_status_on_without_shell_is_error(self):
+        info, d = self._run(self._cfg(scenes=[]))
+        self.assertTrue(any("modes.status 已开" in e and "没有任何一条产出" in e
+                            for e in d.errors))
+        # 文案必须给出可直接粘贴的修法
+        self.assertTrue(any("sbk-snap--raw" in e and "$1" in e for e in d.errors))
+        self.assertEqual(info["shells"], [])
+
+    def test_shell_with_base_class_only_is_error(self):
+        """最阴的一种：外观像渲染成卡片了，但 hydrate 命中不到，结构化渲染永不接管。"""
+        info, d = self._run(self._cfg(
+            scenes=[self._rule('<div class="sbk-snap sbk-pre">$1</div>')]))
+        self.assertTrue(any("缺 .sbk-snap--raw" in e for e in d.errors))
+        self.assertEqual(info["baseOnly"], ["sbk-snap"])
+
+    def test_shell_without_backref_warns(self):
+        info, d = self._run(self._cfg(
+            scenes=[self._rule('<div class="sbk-snap sbk-snap--raw">状态</div>')]))
+        self.assertEqual(d.errors, [])
+        self.assertTrue(any("没有 $1/$& 之类的回填" in w for w in d.warns))
+        self.assertEqual(info["shells"], ["sbk-snap"])
+
+    def test_shell_regex_missing_protocol_tag_warns(self):
+        _, d = self._run(self._cfg(scenes=[
+            self._rule(self.SHELL, fr=r"/\[STATUS\]([\s\S]*?)\[\/STATUS\]/")]))
+        self.assertTrue(any("不含协议标签" in w for w in d.warns))
+
+    # ---- 反例 B：status 关但外壳还在 ----
+    def test_shell_present_while_status_off_is_error(self):
+        _, d = self._run(self._cfg(status=False, pinned=True,
+                                   scenes=[self._rule(self.SHELL)]))
+        self.assertTrue(any("modes.status 是 false" in e and "死壳" in e
+                            for e in d.errors))
+
+    # ---- 反例 B2：没有任何数据出口 ----
+    def test_no_data_outlet_warns_and_chrome_does_not_count(self):
+        """chrome 开着也不算数据出口——它只放入口按钮，不渲染业务数据。"""
+        _, d = self._run(self._cfg(status=False, pinned=False))
+        hit = [w for w in d.warns if "没有任何渲染出口" in w]
+        self.assertTrue(hit)
+        self.assertIn("modes.chrome 不算出口", hit[0])
+
+    def test_pinned_alone_is_an_outlet_so_no_warning(self):
+        _, d = self._run(self._cfg(status=False, pinned=True))
+        self.assertEqual([w for w in d.warns if "没有任何渲染出口" in w], [])
+
+    def test_class_matching_is_token_based(self):
+        """按 token 比而非子串比：`sbk-snap--raw` 的子串含 `sbk-snap`，
+        但选择器 .sbk-snap 并不命中它 → 子串比会漏掉「缺基类」这种真缺陷。"""
+        _, d = self._run(self._cfg(
+            scenes=[self._rule('<div class="sbk-snap--raw">$1</div>')]))
+        self.assertEqual(d.errors, [], "只带升级类是合法的（基类缺失由 base.css 层面另论）")
+
+
+class TestBootPayload(unittest.TestCase):
+    """boot 载荷形状：生成器投喂什么，core.js 的 boot 就得认什么。"""
+
+    def _payload(self, **over):
+        cfg = {
+            "hostId": "sbk-hud",
+            "schema": {"fields": [{"key": "体力", "type": "bar"}]},
+            "modes": {"status": True, "chrome": True, "pinned": False},
+            "pinnedFields": [],
+            "protocolTag": "状态",
+            "theme": None,
+        }
+        cfg.update(over)
+        js = B.boot_script(cfg, B.Diag())
+        m = re.search(r"S\.boot\((\{.*\})\);\}\)\(", js, re.S)
+        self.assertIsNotNone(m, "没能从 boot 脚本里抠出载荷 JSON：%s" % js)
+        return json.loads(m.group(1)), js
+
+    def test_payload_keys_are_exactly_the_contract(self):
+        p, _ = self._payload()
+        self.assertEqual(set(p.keys()),
+                         {"hostId", "schema", "modes", "pinnedFields",
+                          "protocolTag", "theme"})
+
+    def test_payload_carries_three_modes(self):
+        p, _ = self._payload()
+        self.assertEqual(set(p["modes"].keys()), {"status", "chrome", "pinned"})
+        self.assertNotIn("hud", p["modes"], "1.0 的 hud 键不该再出现在载荷里")
+        self.assertNotIn("snapshot", p["modes"])
+
+    def test_pinned_fields_always_present_even_when_empty(self):
+        """载荷形状稳定，便于对着 sbk.json 自查。"""
+        p, _ = self._payload()
+        self.assertEqual(p["pinnedFields"], [])
+        p2, _ = self._payload(modes={"status": True, "chrome": True, "pinned": True},
+                              pinnedFields=["体力", "灵力"])
+        self.assertEqual(p2["pinnedFields"], ["体力", "灵力"])
+
+    def test_boot_is_the_only_entry_called(self):
+        _, js = self._payload()
+        called = set(re.findall(r"\bS\.(\w+)\s*\(", js))
+        self.assertEqual(called, {"boot"}, "boot 规则只许调 SBK.boot（裁决 10）")
+
+    def test_core_js_exports_every_key_the_payload_uses(self):
+        """🚨 层间接缝：core.js 的 boot 必须真的读载荷里的每个键。
+
+        守的是「生成器投喂了但内核不读」这类静默失效——1.0 的 modes.hud 就是这么
+        变成死键的（改名后生成器还在发，boot 已经不认了）。
+        """
+        core = Path(__file__).resolve().parent / "sbk" / "core.js"
+        if not core.is_file():
+            self.skipTest("sbk/core.js 不存在")
+        src = core.read_text(encoding="utf-8")
+        p, _ = self._payload()
+        for k in p:
+            self.assertRegex(src, r"\bo\.%s\b" % re.escape(k),
+                             "core.js 的 boot 没读载荷键 %r——生成器白发，功能静默不启动" % k)
+
+    def test_core_js_no_longer_reads_retired_mode_keys(self):
+        """反向守卫：core.js 不该再有 modes.hud / modes.snapshot 的读取分支。
+
+        必须先剥注释【与字符串字面量】再查：别名兼容层的告警文案里本就含
+        "modes.hud is gone in 2.0" 这类字样，按裸文本查会误报。
+        """
+        core = Path(__file__).resolve().parent / "sbk" / "core.js"
+        if not core.is_file():
+            self.skipTest("sbk/core.js 不存在")
+        code = B.strip_js_comments(core.read_text(encoding="utf-8"))
+        code = re.sub(r"'(?:[^'\\\n]|\\.)*'", "''", code)      # 单引号串（core.js 全用单引号）
+        code = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', code)
+        # 只禁【modes 对象上】的点取值。SBK.ui.snapshot 是合法的——气泡内渲染器在
+        # hud.js 里仍叫 snapshot，被 status 模式调用；那是层名，不是 modes 键。
+        for bad in (r"\bmd\.hud\b", r"\bmodes\.hud\b",
+                    r"\bmd\.snapshot\b", r"\bmodes\.snapshot\b"):
+            self.assertNotRegex(code, bad, "core.js 仍在读已废除的 modes 键：%s" % bad)
+        self.assertRegex(code, r"\bmd\.status\b", "boot 必须读 modes.status")
+        self.assertRegex(code, r"\bmd\.chrome\b", "boot 必须读 modes.chrome")
+        self.assertRegex(code, r"\bmd\.pinned\b", "boot 必须读 modes.pinned")
+
+    def test_pinned_host_is_separate_from_chrome_host(self):
+        """🚨 精简条重绘会清空自己宿主的全部子节点。
+
+        若与 chrome 共用 #sbk-hud，第一次 state 变化就把入口按钮全擦掉 →
+        boot 必须给 pinned 派生一个独立宿主 id。
+        """
+        core = Path(__file__).resolve().parent / "sbk" / "core.js"
+        if not core.is_file():
+            self.skipTest("sbk/core.js 不存在")
+        code = B.strip_js_comments(core.read_text(encoding="utf-8"))
+        # 按行抓：实参是 (o.hostId || 'sbk-hud') + '-pin'，含括号，不能用 [^)]* 收尾
+        m = re.search(r"pinned\(pins,(.*)$", code, re.M)
+        self.assertIsNotNone(m, "没能定位 boot 里的 pinned(...) 调用")
+        self.assertIn("-pin", m.group(1),
+                      "pinned 的宿主 id 必须与 chrome 区分（期望形如 hostId + '-pin'），"
+                      "当前实参：%s" % m.group(1).strip())
+
+    def test_pin_max_matches_core_js(self):
+        """PIN_MAX 在生成器与 core.js 各有一份 → 漂移了会「校验放行 3 项、运行时截成 2 项」。"""
+        core = Path(__file__).resolve().parent / "sbk" / "core.js"
+        if not core.is_file():
+            self.skipTest("sbk/core.js 不存在")
+        m = re.search(r"var PIN_MAX = (\d+)", core.read_text(encoding="utf-8"))
+        self.assertIsNotNone(m, "没能在 core.js 里定位 PIN_MAX")
+        self.assertEqual(int(m.group(1)), B.PIN_MAX,
+                         "build_sbk.PIN_MAX 与 core.js 的 PIN_MAX 不一致")
+
+    def test_core_js_defaults_match_generator_defaults(self):
+        """两侧默认值也必须一致：生成器不发 modes 时，boot 自己的默认得是同一套。"""
+        core = Path(__file__).resolve().parent / "sbk" / "core.js"
+        if not core.is_file():
+            self.skipTest("sbk/core.js 不存在")
+        m = re.search(r"var MODES = \{([^}]*)\}", core.read_text(encoding="utf-8"))
+        self.assertIsNotNone(m, "没能在 core.js 里定位 MODES 默认表")
+        got = dict(re.findall(r"(\w+):\s*(true|false)", m.group(1)))
+        self.assertEqual({k: v == "true" for k, v in got.items()}, B.DEFAULT_MODES,
+                         "core.js MODES 与 build_sbk.DEFAULT_MODES 不一致")
+        # 兼容层本身必须还在（旧配置不能直接报错）
+        self.assertIn("'hud'", core.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

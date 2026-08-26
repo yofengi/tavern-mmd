@@ -23,6 +23,49 @@
   --sbk-on-accent: #fff;
   /* 浮层阴影。平台 14 个令牌无阴影项，自备统一口径供 ui.js 复用，作者可整体调。 */
   --sbk-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+
+  /* ---- 语义色令牌（2.0 §3.3 / 盘点 C.6）----
+     🚨 §7.1 平台每套只有 14 个 --chat-*，里面【没有】血量/灵力/体力/经验的对应物
+     （盘点 C.6 已确认），所以只能基座自备。1.0 五条 bar 全用 --chat-accent 一个金色，
+     实机截图里体力/灵力/银钱视觉上无区别 —— 这是 2.0 要修的头号视觉问题。
+     ⚠ 这里与下方 light 块是【全文件唯一允许出现裸色值的地方】：令牌定义处本身。
+       其余规则一律 var()，否则平台切深浅色时颜色不跟随（纪律见文件头）。
+     基线值 = §9 实测深色主题（该节明说「可直接作基座默认」），特异度 (0,1,0)；
+     浅色由下方 [data-theme="light"] (0,2,0) 覆盖。
+     ⚠ 不给 dark 单独开块是有意的：基线已是深色，再写一份等于两处维护同一组值。
+     🚨 必须有基线而不能只写两个主题块：若 data-theme 缺失（未确证的第三态/握手未完成），
+        --sbk-hp 等会【未定义】，则 var(--sbk-tone,…) 里的回退【不会生效】——
+        自定义属性替换失败是「计算值时无效」，整条声明变 unset 而非取回退值。 */
+  --sbk-hp: #ff4d4f;    /* 血量/生命：纯红（hue≈359），危险语义的通用共识色 */
+  --sbk-mp: #4dabf7;    /* 灵力/法力：亮蓝（hue≈206），与红绿都拉开，暗底上不发灰 */
+  --sbk-sp: #51cf66;    /* 体力/精力：亮绿（hue≈132），与蓝相距 74°，小色块也可辨 */
+  --sbk-xp: #ffc94d;    /* 经验/成长：琥珀金（hue≈43），对位旧资产暗金 #d4af37，为暗底提亮 */
+  /* 明度递进用的中性提亮层（盘点 C.1 三层底色）。平台只给了 bg/surface 两档，
+     第三档必须自己造。用半透明中性色叠在 --chat-surface 上，而不是写死第三个 hex：
+     这样作者换 surface 时层次自动跟着走。 */
+  --sbk-lift: rgba(255, 255, 255, .05);
+  /* 进度条同色发光的模糊半径（盘点 C.3）。旧资产 5px；本文件基准是 bar 高
+     calc(10 * var(--rpx))（对位旧 8px），故 px→rpx 约 1:2，5px ≈ 10rpx。 */
+  --sbk-glow: calc(10 * var(--rpx));
+}
+
+/* 🚨 硬约束 10 / §7.1：换肤必须写 [data-chat="root"][data-theme="…"]。
+   data-theme 与 data-chat=root 在【同一个 div】上 → 特异度 (0,2,0)，高于平台自己的
+   [data-theme=dark] (0,1,0)，因此平台切主题时不会把我们覆盖回去，也【不需要 !important】。
+   选择器形状与 theme.js 的 sel() 逐字一致：两者是同一套机制，作者用
+   SBK.theme.apply({hp:'…'}) 覆写时命中的是同一个令牌。 */
+[data-chat="root"][data-theme="light"] {
+  /* 浅色底（白/近白）上必须【压暗加饱和】：深色那套的亮色在白底上对比不足会发飘。
+     取值都在非文本 3:1 对比线以上（bar 填充属非文本图形，不受 4.5:1 约束）。 */
+  --sbk-hp: #e03131;    /* 深红，白底仍读作「危险」 */
+  --sbk-mp: #1971c2;    /* 深蓝 */
+  --sbk-sp: #2f9e44;    /* 深绿，避免亮绿在白底上糊成黄绿 */
+  --sbk-xp: #b8860b;    /* 暗金，浅色下比琥珀更接近旧资产的 #d4af37 观感 */
+  /* 提亮层在浅色下要反向：白底上叠白等于没有层次，改叠极淡的黑。 */
+  --sbk-lift: rgba(0, 0, 0, .04);
+  /* 🚨 浅色下发光【必须关掉】：亮色光晕打在白底上不像发光，像脏边/失焦。
+     置 0 即可让 box-shadow 整体消失，不必再写一条覆盖规则。 */
+  --sbk-glow: 0;
 }
 
 /* 🚨 §7.3 / 硬约束 13：平台给 header 与 composer 都写了 flex-shrink:0，
@@ -103,10 +146,95 @@
 }
 .sbk-bar__fill {
   height: 100%;
-  background: var(--chat-accent);
+  /* 语义色的【唯一消费点】。--sbk-tone 由祖先或自身的 tone 类设置（见下方 tone 映射）；
+     没有 tone 就回退 --chat-accent，与 1.0 完全一致 → 老卡视觉不变，新卡才分色。
+     ⚠ 回退写在 var() 第二参而不是靠多条规则覆盖：CSS 里「继承来的变量」无法用选择器
+       判断有无，var(x, fallback) 是唯一干净的默认值手法。 */
+  background: var(--sbk-tone, var(--chat-accent));
   border-radius: inherit;
   transition: width .25s ease;
+  /* 盘点 C.3 进度条发光：填充色与光晕【同色】，极低成本换来「数值在发光」的游戏感。
+     浅色主题把 --sbk-glow 置 0，这条 box-shadow 自动消失，无需额外覆盖规则。
+     ⚠ 光晕会被 .sbk-bar 的 overflow:hidden 裁掉外溢部分，这是想要的：
+       只在槽内侧透出一圈亮边，不糊到相邻行。 */
+  box-shadow: 0 0 var(--sbk-glow) var(--sbk-tone, var(--chat-accent));
 }
+
+/* ---- tone 映射（2.0 §3.3「按字段 key 或 schema 的 tone 字段选色」）----
+   实现方式：CSS 变量继承 + 修饰类，【不用 data-* 属性】——
+   §5.5 作者自写 data-* 会被净化器全删，属性选择器在快照模式下必然失效。
+   两种用法都只是给 --sbk-tone 赋值，落到同一个消费点：
+     ① .sbk-tone--hp 挂在任意祖先（整行/整个分组卡）→ 内部所有 bar 与竖条一起变色；
+        产出方是 hud.js 的 section 分组卡（schema 写 {type:'section',tone:'hp'}）。
+     ② .sbk-bar--hp 挂在槽本身 → 只染这一条。产出方是 hud.js 的 bar 控件（按 key 推断或显式 tone）。
+   作者/WP-C 若要新增语义色，加一对同形规则即可，不必改消费点。
+
+   🚨 组级 vs 字段级的优先级（字段级必须能覆盖组级）——真正的机制【不是特异度】：
+      两组选择器落在【不同元素】上（组级在分组卡祖先、字段级在 bar 槽自身），
+      而 --sbk-tone 是自定义属性，靠【继承】传到 .sbk-bar__fill。
+      CSS 层叠里「元素自身的声明」永远强于「从祖先继承来的值」，与特异度、源码顺序都无关。
+      → 故 .sbk-tone--hp 分组内的 .sbk-bar--mp 必然显示 mp，这是层叠规则的硬保证。
+   ⚠ 但两类规则【原先写在同一条声明里】（.sbk-tone--hp, .sbk-bar--hp {…}），
+      万一将来同一个元素同时挂上两个类（自定义控件很容易这么写），就【没有胜负可言】。
+      故此处拆成两组并把字段级放在【后面】：同元素相撞时靠源码顺序也让字段级赢。
+      即「不同元素靠继承、同元素靠源码顺序」，两条路都指向字段级优先。 */
+.sbk-tone--hp { --sbk-tone: var(--sbk-hp); }
+.sbk-tone--mp { --sbk-tone: var(--sbk-mp); }
+.sbk-tone--sp { --sbk-tone: var(--sbk-sp); }
+.sbk-tone--xp { --sbk-tone: var(--sbk-xp); }
+/* 字段级：必须排在组级【之后】，见上方优先级说明 */
+.sbk-bar--hp { --sbk-tone: var(--sbk-hp); }
+.sbk-bar--mp { --sbk-tone: var(--sbk-mp); }
+.sbk-bar--sp { --sbk-tone: var(--sbk-sp); }
+.sbk-bar--xp { --sbk-tone: var(--sbk-xp); }
+
+/* ---- 版面层（2.0 §3.1 / 盘点 C.1 三层明度递进）----
+   WP-A 的结构是 .sbk-snap.sbk-card（面板） > .sbk-card.sbk-sect（分组卡） > chip/bar（内容）。
+   🚨 问题：.sbk-sect 也带 .sbk-card，两层拿到【同一个】--chat-surface → 边框虽在，明度没差，
+      分组读不出来。而 §9 实测深色下 --chat-bg 与两个气泡背景【同色】(#17181a)，
+      所以也不能靠「外层用 bg 内层用 surface」造差。
+   解法：第二层在 surface 上叠一层中性 --sbk-lift。用 linear-gradient 而非 background-color，
+   是因为要「叠加」而不是「替换」—— 单值 background-color 无法在保留 surface 的同时加透明层。
+   第三层（chip/tooltip）走 --chat-more-item-bg（§9 实测 #2c2e32，比 surface #1e1f24 更亮），
+   平台自带的第三档亮度，白拿不用可惜。→ 三档明度全部由令牌推导，作者换 surface 时自动跟随。 */
+.sbk-sect {
+  background: linear-gradient(var(--sbk-lift), var(--sbk-lift)), var(--chat-surface);
+  /* 分组卡内距比面板收一档：嵌套卡等距会显得松散、且浪费窄屏横向空间 */
+  padding: var(--sbk-gap);
+  gap: var(--sbk-gap);
+}
+/* 组标题：主题色小字（盘点 B.1）+ 同色下边框，形成「边框/标题同色」的视觉闭环（C.2）。
+   overflow:hidden 建立 BFC —— turn 类型的角标按 C.8 走 float:right，
+   不撑出 BFC 的话浮动元素会脱出标题行。 */
+.sbk-sect__t {
+  color: var(--chat-accent);
+  font-weight: 600;
+  padding-bottom: calc(6 * var(--rpx));
+  border-bottom: 1px solid var(--chat-border);
+  overflow: hidden;
+}
+/* 面板总标题：比组标题再重一档（组标题是 accent 小字，这里是正文色大字），
+   避免两级标题同重量导致层级不清。 */
+.sbk-title {
+  color: var(--chat-text);
+  font-weight: 600;
+  font-size: var(--sbk-fs);
+  text-align: center;
+}
+
+/* level：上行「名 + 经验」下行 XP 条，两行是一个控件 → 行距必须比字段间距紧，
+   否则视觉上会散成两个独立字段（盘点 B.6）。 */
+.sbk-level { gap: calc(4 * var(--rpx)); }
+/* XP 条比资源条略薄：经验是成长线（五类低频冗余），不该抢血量类高频变量的视觉权重。
+   🚨 必须收窄到 .sbk-level 语境，不能写成裸 .sbk-bar--xp ——
+      否则这个类会同时干两件事（赋 --sbk-tone + 压高度），颜色与尺寸被耦合。
+      hud.js 现在按 key 推断 tone，任何 key 含「经验/修为/熟练/成长」的【普通 bar 字段】
+      都会拿到 .sbk-bar--xp，若高度规则不收窄就会连带变薄 —— 那不是设计意图，
+      只有 level 的 XP 条才该细（盘点 B.6：level 是「名 + 进度」的成长线控件）。
+      → 裸 .sbk-bar--xp 只负责颜色；细条只在 level 内生效。
+   选择器用后代而非直接子代：hud.js 的 level 控件把 XP 条放在 .sbk-level 下一层，
+   但结构若将来再嵌一层包裹，后代选择器仍成立。 */
+.sbk-level .sbk-bar--xp { height: calc(8 * var(--rpx)); }
 
 /* 标签 chip */
 .sbk-chip {
@@ -118,6 +246,45 @@
   color: var(--chat-shortcut-text);
   font-size: var(--sbk-fs-sm);
   white-space: nowrap;
+}
+/* stat chip：`键:值` 紧凑网格的单元（盘点 B.7 / C.4）。
+   左侧竖条是整套旧设计里【辨识度最高的细节】—— 让扁平 chip 有方向感与主题归属。
+   ⚠ 旧资产是 3px 实色；本文件纪律是尺寸走 rpx，故 calc(6 * var(--rpx))（px→rpx 约 1:2，
+     与 bar 高 8px→10rpx 同一换算口径）。
+   竖条走 --sbk-tone 回退 accent → 挂 .sbk-tone--hp 时竖条与该组进度条自动同色。
+   圆角必须显式压回方角系：.sbk-chip 是 999rpx 胶囊，胶囊上挂左竖条会被圆角切成月牙。 */
+.sbk-stat {
+  border-left: calc(6 * var(--rpx)) solid var(--sbk-tone, var(--chat-accent));
+  border-radius: calc(4 * var(--rpx));
+  gap: calc(4 * var(--rpx));
+  padding: calc(4 * var(--rpx)) calc(8 * var(--rpx));
+}
+/* crumb chip：路径段（盘点 B.3 / C.4）。与 stat 刻意做成两种 chip 变体 ——
+   属性有竖条+实底，路径段是【空心描边】，一眼分得清「这是属性」还是「这是位置」。 */
+.sbk-crumb {
+  background: transparent;
+  border: 1px solid var(--chat-border);
+  border-radius: calc(4 * var(--rpx));
+  color: var(--chat-text-muted);
+  padding: calc(2 * var(--rpx)) calc(8 * var(--rpx));
+}
+/* 面包屑分隔箭头 › ：主题色，弱化尺寸。flex-shrink:0 防窄屏被压成半个字符；
+   本身不换行，换行只发生在 chip 之间（父级 .sbk-row--wrap 负责）。 */
+.sbk-arrow {
+  color: var(--chat-accent);
+  font-size: var(--sbk-fs-sm);
+  flex-shrink: 0;
+}
+/* kvlist 行：竖排「槽位：名」，全资产信息密度最高的控件（盘点 B.8）。
+   align-items:baseline 让长名折行后仍与槽位标签的首行对齐（center 会把标签推到行块中间）。
+   槽位列定宽 → 多行天然对齐成两列表格，这是密度感的来源（对位旧资产 lbl min-width:60px）。 */
+.sbk-kv {
+  align-items: baseline;
+  gap: calc(8 * var(--rpx));
+}
+.sbk-kv > .sbk-label {
+  min-width: calc(96 * var(--rpx));
+  flex-shrink: 0;
 }
 
 /* 按钮。§5.5 交互靠 inline on* 或 JS 绑定，必须挂 HTML 壳（SVG 内 on* 被删） */
@@ -132,8 +299,88 @@
   cursor: pointer;
   flex-shrink: 0;
 }
+/* 盘点 C.8：按钮要有两态反馈。hover 在触屏上不触发，但沙盒也跑在桌面预览/分享页，
+   所以两态都给 —— hover 只提亮边框（不动背景，避免与 accent 变体打架），active 才回落。 */
+.sbk-btn:hover { border-color: var(--chat-accent); }
 .sbk-btn:active { opacity: .75; }
 .sbk-btn--accent { background: var(--chat-accent); border-color: var(--chat-accent); color: var(--sbk-on-accent); }
+
+/* ---- tap toggle tooltip（2.0 §3.4 / 盘点 C.5、E.4）----
+   把「成因/说明」这第三层信息折进第二层，是旧资产信息密度远高于 1.0 的关键。
+   🚨 旧实现用纯 CSS :hover 显隐 —— 沙盒是移动端 webview，**hover 在触屏上不成立**，
+      故改点击 toggle，开合由 hud.js 的 ttFn/TT_JS 写【内联 style.display】完成。
+   🚨🚨 因此本节【绝不能用 display 做隐藏】：内联 style 特异度高于任何选择器，
+      我写 display:none 会与 JS 的内联值打架 —— 要么点了没反应（若我加 !important 压过内联），
+      要么规则形同虚设。初始隐藏 100% 由 JS 的内联 display:none 负责，
+      这里只定义「显示出来时长什么样」：定位、底色、边框、阴影、圆角、内距、宽度、折行。
+      同理不写 visibility/opacity 隐藏：那会让 JS 的 display 切换看起来失效（切了仍不可见）。 */
+.sbk-tt {
+  position: relative;      /* 浮层的定位锚点 */
+  display: inline-block;
+}
+/* 触发词：虚线下划线 + help 光标，明示「这里还有内容」（盘点 C.5）。
+   触屏无 cursor，虚线下划线才是移动端唯一的可发现性线索，两者都留。 */
+.sbk-tt__hit {
+  border-bottom: 1px dashed var(--chat-text-muted);
+  cursor: help;
+}
+.sbk-tt__box {
+  position: absolute;
+  bottom: 100%;            /* 向上弹，避开手指与下方内容 */
+  left: 0;
+  /* width:max-content + max-width：气泡按内容宽度收，但有上限不会横穿屏幕（C.5 要点） */
+  width: max-content;
+  max-width: calc(420 * var(--rpx));
+  white-space: pre-wrap;   /* 保留说明里的换行。⚠ 不能依赖 message-body 的 pre-line：
+                              上方 .sbk-snap * 已把它重置成 normal */
+  padding: calc(8 * var(--rpx)) calc(12 * var(--rpx));
+  border-radius: calc(8 * var(--rpx));
+  /* 第三层明度：与 chip 同档（§9 实测 --chat-more-item-bg #2c2e32 亮于 surface），
+     accent 描边把它与底下的分组卡切开 —— 浮层必须「浮」得出来。 */
+  background: var(--chat-more-item-bg);
+  border: 1px solid var(--chat-accent);
+  color: var(--chat-shortcut-text);
+  font-size: var(--sbk-fs-sm);
+  box-shadow: var(--sbk-shadow);
+  font-weight: 400;        /* 触发词可能在加粗上下文里，说明文字不继承粗体 */
+  /* 🚨 §7.2 实测平台 chrome 全 z=auto pos=static，作者用 1000–1999 会盖住 chrome；
+     3500–7999 是唯一安全带 → 直接复用 --sbk-z-pop(3600)，不自己另取值。 */
+  z-index: var(--sbk-z-pop, 3600);
+  /* 防气泡自己挡住再次点击（C.5 要点）。⚠ 这不是隐藏手段，不影响 JS 的 display 切换。 */
+  pointer-events: none;
+  text-align: left;
+}
+/* 🚨 §7.3 已知限制：[data-chat="message-body"] 的 opacity:.9 会建立层叠上下文把浮层
+   囚禁在气泡内。上方 :has(.sbk-snap) 已把它重置为 1 解除囚禁，但气泡本身若有
+   overflow 裁剪，浮层仍可能被切 → 故 bottom:100% 向【上】弹且 max-width 有上限，
+   即使被裁也只丢边缘。（盘点 F.1 列为待实测项，WP-E 截图验收。） */
+
+/* ---- 功能栏精简条（2.0 §2.1 pinned）----
+   🚨 §2.1 硬要求：pinned 与气泡内面板【必须视觉不同】，否则又变成 1.0 的「两个一样的面板」。
+   区分手段：单行、无卡片底、无进度条、只有 键/值 文字对 —— 形态上根本不像面板。
+   （core.js 的 pinned() 产出 .sbk-pin*，但 base.css 是唯一样式表，故视觉在此定义。） */
+.sbk-pin {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;        /* 窄屏横滚而不换行：功能栏无 flex-shrink:0 的保护，换行会把它压扁 */
+  gap: var(--sbk-gap);
+  padding: calc(6 * var(--rpx)) var(--sbk-pad);
+  font-size: var(--sbk-fs-sm);
+  border-bottom: 1px solid var(--chat-border);   /* 与消息区切开，代替卡片边框 */
+}
+.sbk-pin-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: calc(4 * var(--rpx));
+  flex-shrink: 0;          /* 配合父级 nowrap：项目不被挤变形（C.8 tab 条同一手法） */
+  white-space: nowrap;
+}
+.sbk-pin-k { color: var(--chat-text-muted); }
+.sbk-pin-v {
+  color: var(--chat-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;   /* 等宽数字：数值跳动时不左右抖 */
+}
 
 .sbk-hide { display: none !important; }
 .sbk-sep { height: 1px; background: var(--chat-border); }
