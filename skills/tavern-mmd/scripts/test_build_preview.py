@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """build-preview.py 单元测试。运行: python -m unittest test_build_preview -v"""
 import unittest
+import html as html_mod
 import importlib
 import io
 import json
@@ -792,13 +793,79 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertIn(" data-theme=&quot;light&quot;", html)
         self.assertIn(" data-msg-id=&quot;pano-", html)
 
-    def test_panorama_defines_all_ten_chat_variables(self):
+    def test_panorama_defines_all_sandbox_design_tokens(self):
+        """防回归：14 个实测设计令牌必须全部注入产物。
+
+        引用实现里的 SANDBOX_DESIGN_TOKENS 而非另抄一份清单，避免测试与实现漂移。
+        曾漏注入后 5 个（手册也漏记），导致作者写 var(--chat-input-bg) 在预览里
+        解析不到、真机却正常 —— 会误导作者去修不存在的 bug。
+        """
         html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
-        for var in ("--chat-bg", "--chat-surface", "--chat-text", "--chat-text-muted",
-                    "--chat-border", "--chat-accent", "--chat-bubble-user-bg",
-                    "--chat-bubble-ai-bg", "--chat-bubble-text", "--chat-viewport-height"):
+        chrome = html_mod.unescape(html)
+        self.assertEqual(len(bp.SANDBOX_DESIGN_TOKENS), 14)
+        for var in bp.SANDBOX_DESIGN_TOKENS:
             with self.subTest(var=var):
-                self.assertIn(var, html)
+                self.assertIn("%s:" % var, chrome)
+
+    def test_panorama_injects_non_token_sandbox_vars(self):
+        """--chat-viewport-height 与 --rpx 都不属那 14 个令牌，但预览要模拟注入。
+
+        --chat-viewport-height 真机是 JS 内联 style；--rpx 是平台尺寸基准，
+        不注入则作者的 calc(24 * var(--rpx)) 会算空 → 预览尺寸全塌。
+        """
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn("--chat-viewport-height:", chrome)
+        self.assertIn("--rpx:calc(100vw / 750)", chrome)
+        self.assertNotIn("--chat-viewport-height", bp.SANDBOX_DESIGN_TOKENS)
+        self.assertNotIn("--rpx", bp.SANDBOX_DESIGN_TOKENS)
+
+    def test_dark_tokens_equal_measured_truth(self):
+        """防回退：深色 14 个令牌必须等于实测真值，不许改成"好看但失真"的值。
+
+        曾经这里是 --chat-bg:#16181d + 气泡 #1a7f5a/#22262c，预览因此显示出
+        "气泡有独立底色"这个平台不存在的配色 —— 作者照它定配色，上真机才发现
+        整块糊在背景里。这种谎发生在设计决策阶段，代价高于"气泡默认看不见"。
+        """
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        dark = chrome.split('[data-chat="root"][data-theme="dark"]{', 1)[1].split("}", 1)[0]
+        parsed = dict(kv.split(":", 1) for kv in
+                      (p.strip() for p in dark.replace("\n", "").split(";")) if kv)
+        self.assertEqual(parsed, bp.SANDBOX_DARK_TOKEN_VALUES)
+        # 实测：两个气泡背景与页面背景同色，预览不得再把它们画成分离的。
+        self.assertEqual(parsed["--chat-bg"], "#17181a")
+        self.assertEqual(parsed["--chat-bubble-user-bg"], parsed["--chat-bg"])
+        self.assertEqual(parsed["--chat-bubble-ai-bg"], parsed["--chat-bg"])
+        self.assertEqual(set(parsed), set(bp.SANDBOX_DESIGN_TOKENS))
+
+    def test_bubble_outline_is_preview_aid_not_a_color_claim(self):
+        """描边必须是独立标记承载 + 只用 --chat-border，且 NOTE 里说清真机没有。"""
+        html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
+        chrome = html_mod.unescape(html)
+        self.assertIn('data-preview-bubble-outline="1"', chrome)
+        self.assertIn("[data-preview-bubble-outline] [data-chat=\"message-body\"]"
+                      "{box-shadow:inset 0 0 0 1px var(--chat-border)}", chrome)
+        # 描边不得混进令牌定义块（那里只放平台真值）。
+        dark = chrome.split('[data-chat="root"][data-theme="dark"]{', 1)[1].split("}", 1)[0]
+        self.assertNotIn("box-shadow", dark)
+        # NOTE 必须告诉作者这是预览辅助、真机气泡与背景同色。
+        self.assertIn("预览辅助线", html)
+        self.assertIn("真机上没有", html)
+        # 预览器自注的标记不该被当成作者自写 data-* 报净化告警。
+        self.assertEqual(bp.find_sandbox_sanitized_attrs(
+            '<div data-preview-bubble-outline="1"></div>'), [])
+
+    def test_sandbox_tokens_defined_in_both_themes(self):
+        """两套主题各一份（实测：平台定义在 [data-theme=dark]/[data-theme=light]，无 :root）。
+
+        预览把浅色放基底规则、深色放 [data-theme="dark"] 覆盖规则，故深色块里
+        只需出现主题相关的差异令牌；此处断言深色覆盖块确实带上了漏记的 5 个。
+        """
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        dark = chrome.split('[data-chat="root"][data-theme="dark"]{', 1)[1].split("}", 1)[0]
+        for var in ("--chat-input-bg", "--chat-input-text", "--chat-shortcut-text",
+                    "--chat-more-item-bg", "--chat-share-pick-bg"):
+            with self.subTest(var=var):
+                self.assertIn("%s:" % var, dark)
 
     STATUSBAR_NODE = "&lt;div data-slot=&quot;statusbar&quot;"
 

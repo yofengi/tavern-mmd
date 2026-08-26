@@ -7,7 +7,11 @@
 > **适用范围只有当前 MMD（`/mmd`）。** 本协议是**为当前 MMD 的约束量身设计的**，不是通用主题框架：owner/version 租约、route supervisor、MutationObserver 哨兵、`html` / `body` 根节点属性、localStorage 偏好候选，这些机制存在的理由全部是「当前 MMD 没有官方主题接口、平台 class 名会变、动态路由会换掉聊天根节点」。
 >
 > - **本地 SillyTavern（`/st`）**：走其原生主题或自定义 CSS，不用本协议。
-> - **MMD沙盒模式（`/mmdsandbox`）：本协议不适用。** 那里平台自带主题接口 —— `[data-chat="root"]` 上有 `data-theme="light|dark"`、10 个 `--chat-*` 变量、以及 `theme:change` 事件；换肤只是在 `[data-chat="root"]` 上改变量，不需要租约与哨兵。而且本协议依赖的两样东西在沙盒模式是**被禁的**：`body{}` / `html{}` / `:root{}` 全局选择器（官方校验 WARN，须改写成 `[data-chat="root"]`），以及 `img onerror` 点火器（官方明令禁止）。沙盒模式的换肤做法见 `global-css.md`「沙盒模式换肤」与 `../platforms/mmd-sandbox.md` §6。
+> - **MMD沙盒模式（`/mmdsandbox`）：本协议不适用。** 那里平台自带主题接口 —— `[data-chat="root"]` 上有 `data-theme="light|dark"`、**14 个** `--chat-*` 变量（官方手册只记了 10 个，漏记 `--chat-share-pick-bg`、`--chat-input-bg`、`--chat-input-text`、`--chat-shortcut-text`、`--chat-more-item-bg`）、以及 `theme:change` 事件；换肤只是在 `[data-chat="root"]` 上改变量，不需要租约与哨兵。而且本协议依赖的两样东西在沙盒模式**不能用**：`body{}` / `html{}` / `:root{}` 全局选择器（官方校验 WARN，须改写成 `[data-chat="root"]`），以及 `img onerror` 点火器（官方明令禁止）。
+>
+>   ⚠️ 两者性质不同：`img onerror` 是**真·禁令**；全局选择器则是**文档约定 + 校验器 WARN** —— 实测 **CSS 选择器零过滤已确证**，`:root{}` / `html{}` / `body{}` 运行时**不会被拦**。真正让 `:root` 无效的是平台令牌**根本没有 `:root` 定义**（只写在 `[data-theme]` 上），覆盖不存在的定义自然没效果。别把它记成「写了就被拦」，会误判排查方向。
+>
+>   沙盒模式的换肤做法见 `global-css.md`「沙盒模式换肤」与 `../platforms/mmd-sandbox.md` §6。要成套的状态栏/美化地基，直接用现成基座 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`）—— 它的主题层已经把 14 个令牌、三态 dark/light/native、`theme:change` 跟随、页面背景 `!important` 这些都封好了，方法论见 `sandbox-kit.md`。
 >
 > 除非测试记录明确写明日期、版本和路径，本文件不宣称运行时资产已经通过 MMD 实机验证。
 

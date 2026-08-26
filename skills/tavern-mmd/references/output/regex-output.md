@@ -375,7 +375,7 @@ python <skill>/scripts/build-preview.py output/文件-regex.json --platform mmds
 - 世界书条目标题 20 字在沙盒模式是 **WARN**（当前 MMD 仍是 ERROR），理由见 `worldbook-json.md` 与 `../platforms/mmd-sandbox.md` §10.1。
 - 若误把 chara_card_v2 卡传进来审沙盒，会 WARN 提示沙盒真正的交付物是本节的导入 JSON。
 
-`build-preview.py --platform mmdsandbox` 复刻真实 DOM 契约（`[data-chat="root"]`、顶栏、`[data-slot="statusbar"]`、messages/list/message-frame/message/message-body、composer/input/send、author-stage）与 10 个 `--chat-*` 变量，并按平台的做法把未命中规则里的 `<style>` / `<script>` 抽出装上。预览带一条 NOTE 列明**没有**模拟的东西：SDK、「消息生成中」占位、净化白名单、Markdown 管线 —— 这四类只能回实机验。
+`build-preview.py --platform mmdsandbox` 复刻真实 DOM 契约（`[data-chat="root"]`、顶栏、`[data-slot="statusbar"]`、messages/list/message-frame/message/message-body、composer/input/send、author-stage）与 **14 个 `--chat-*` 设计令牌**（实测确证，官方手册只记 10 个），深浅两套各一份；另注入 `--rpx` 尺寸基准与 `--chat-viewport-height` 静态值，这两个不计入那 14 个（`--chat-viewport-height` 真机是 JS 内联 style）。并按平台的做法把未命中规则里的 `<style>` / `<script>` 抽出装上。预览带一条 NOTE 列明**没有**模拟的东西：SDK、「消息生成中」占位、净化白名单、Markdown 管线 —— 这四类只能回实机验。
 
 ## 第四节：MMD 手填清单（Markdown 交付物，备选）
 

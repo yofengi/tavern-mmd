@@ -1,0 +1,139 @@
+/* SBK base.css —— 基座重置与骨架。依据：基座事实卡.md §7
+   规则：全部配色走 var(--chat-*)，零硬编码颜色，否则平台深浅色切换失效。
+   §2 CSP：style-src 无 https:、font-src 交集后仅 'self' → 外部样式表与外部字体【封死】，
+   只能用系统字体栈。零 @import、零 url() 远程字体。 */
+
+/* 私有变量收在 [data-chat="root"] 而非 :root。
+   §5.5 CSS 选择器零过滤已确证（:root/html/body 均不被拦），写 :root 能跑；
+   但基座出于礼貌作用域化，避免污染沙盒内的平台 chrome。 */
+[data-chat="root"] {
+  --sbk-gap: calc(12 * var(--rpx));
+  --sbk-pad: calc(16 * var(--rpx));
+  --sbk-radius: calc(12 * var(--rpx));
+  --sbk-fs: calc(24 * var(--rpx));
+  --sbk-fs-sm: calc(20 * var(--rpx));
+/* §7.2 z-index：stage-content 2000 / stage-full 3000 / snackbar 等 8000+。
+     ⚠ 实测 header/statusbar/messages/composer/stage 全部 z=auto pos=static
+       → 「平台 chrome 8000–8999」不成立，作者浮层会盖住 chrome。
+     3500–7999 是唯一安全带（硬约束 12）。 */
+  --sbk-z-panel: 3500;
+  --sbk-z-pop: 3600;
+  /* 平台 14 个令牌里没有「accent 上的前景色」，只能自备。
+     可被 SBK.theme.apply({onAccent:'#000'}) 覆写，不是死值。 */
+  --sbk-on-accent: #fff;
+  /* 浮层阴影。平台 14 个令牌无阴影项，自备统一口径供 ui.js 复用，作者可整体调。 */
+  --sbk-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+}
+
+/* 🚨 §7.3 / 硬约束 13：平台给 header 与 composer 都写了 flex-shrink:0，
+   唯独 [data-slot="statusbar"] 没有 → 内容多时会被压扁。基座必须补。
+   ⚠ 实测证实：statusbar shrink=1，而 header/composer 均 shrink=0。别删这条。
+   statusbar 是 root 的 flex item，天然不随消息列表滚动，不需要自己写粘顶。 */
+[data-slot="statusbar"] {
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+/* 宿主容器。id 由 SBK.dom.mountHost 按固定约定生成（§3 currentScript 恒 null，无法自定位）。 */
+.sbk-host {
+  box-sizing: border-box;
+  /* 系统字体栈：CSP 封死外部字体（§2） */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: var(--sbk-fs, 14px);
+  line-height: 1.5;
+  color: var(--chat-text);
+}
+.sbk-host, .sbk-host * { box-sizing: border-box; }
+
+/* statusbar 槽位不存在时 mountHost 回落到 [data-slot="left"]（空 div、无样式、
+   祖先链无 opacity/transform/overflow 陷阱）→ 需要自己定位成浮层。 */
+.sbk-host--float {
+  position: absolute;
+  top: calc(100 * var(--rpx));
+  left: 0;
+  right: 0;
+  z-index: var(--sbk-z-panel, 3500);
+  padding: 0 var(--sbk-pad);
+  pointer-events: none;
+}
+.sbk-host--float > * { pointer-events: auto; }
+
+/* 🚨 §7.3 / 硬约束 11：[data-chat="message-body"] 带 white-space:pre-line 与 opacity:.9。
+   ⚠ 实测证实 op=0.9 ws=pre-line，两项都在。别删这两条重置。
+   pre-line 会把基座 HTML 里的换行与缩进当真实换行渲染 → 排版全烂；
+   opacity:.9 会建立层叠上下文，把基座浮层囚禁在气泡内，且整体发灰。
+   只在【含基座内容的气泡】上重置，不粗暴影响平台正文渲染：
+   :has() 把作用域收窄到确实有 .sbk-snap 的气泡（§5.5 选择器零过滤，且平台自己就在用 :has）。 */
+[data-chat="message-body"]:has(.sbk-snap) {
+  opacity: 1;
+}
+/* pre-line 只在基座自己的子树里翻回 normal，气泡内平台正文保持原样 */
+[data-chat="message-body"] .sbk-snap,
+[data-chat="message-body"] .sbk-snap * {
+  white-space: normal;
+}
+/* 基座内需要保留换行的地方显式声明，而不是依赖平台的 pre-line */
+.sbk-pre { white-space: pre-wrap; }
+
+/* ---- 骨架原语。类名统一 sbk- 前缀：平台内部类名会变不可依赖，我们自己的要稳定 ---- */
+.sbk-card {
+  background: var(--chat-surface);
+  border: 1px solid var(--chat-border);
+  border-radius: var(--sbk-radius);
+  padding: var(--sbk-pad);
+  color: var(--chat-text);
+}
+.sbk-row { display: flex; align-items: center; gap: var(--sbk-gap); }
+.sbk-row--wrap { flex-wrap: wrap; }
+.sbk-col { display: flex; flex-direction: column; gap: var(--sbk-gap); }
+.sbk-grow { flex: 1 1 auto; min-width: 0; }
+.sbk-label { color: var(--chat-text-muted); font-size: var(--sbk-fs-sm); }
+.sbk-val { color: var(--chat-text); font-variant-numeric: tabular-nums; }
+
+/* 进度条 */
+.sbk-bar {
+  position: relative;
+  overflow: hidden;
+  height: calc(10 * var(--rpx));
+  border-radius: calc(5 * var(--rpx));
+  background: var(--chat-border);
+  flex: 1 1 auto;
+  min-width: calc(60 * var(--rpx));
+}
+.sbk-bar__fill {
+  height: 100%;
+  background: var(--chat-accent);
+  border-radius: inherit;
+  transition: width .25s ease;
+}
+
+/* 标签 chip */
+.sbk-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(4 * var(--rpx)) calc(12 * var(--rpx));
+  border-radius: calc(999 * var(--rpx));
+  background: var(--chat-more-item-bg);
+  color: var(--chat-shortcut-text);
+  font-size: var(--sbk-fs-sm);
+  white-space: nowrap;
+}
+
+/* 按钮。§5.5 交互靠 inline on* 或 JS 绑定，必须挂 HTML 壳（SVG 内 on* 被删） */
+.sbk-btn {
+  appearance: none;
+  border: 1px solid var(--chat-border);
+  background: var(--chat-input-bg);
+  color: var(--chat-input-text);
+  border-radius: var(--sbk-radius);
+  padding: calc(8 * var(--rpx)) var(--sbk-pad);
+  font: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sbk-btn:active { opacity: .75; }
+.sbk-btn--accent { background: var(--chat-accent); border-color: var(--chat-accent); color: var(--sbk-on-accent); }
+
+.sbk-hide { display: none !important; }
+.sbk-sep { height: 1px; background: var(--chat-border); }

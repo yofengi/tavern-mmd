@@ -6,7 +6,7 @@
 >
 > - 主题状态写在 `html[data-zmr-mode="day|night"]` 上 —— 沙盒模式禁 `html{}` / `body{}` / `:root{}` 全局选择器（官方校验 WARN），根钩子是 `[data-chat="root"]`；且**作者自写 `data-*` 会被净化删掉**，`data-zmr-mode` 这类自定义属性在那里立不住。
 > - 激活与点火依赖 `img onerror` —— 沙盒模式**官方明令禁止** `img onerror` 点火器（teapot 系）。
-> - `MutationObserver` 清污哨兵 + route supervisor + owner/version 租约 —— 沙盒模式不需要：平台自带 `data-theme="light|dark"`、10 个 `--chat-*` 变量与 `theme:change` 事件，换肤只是在 `[data-chat="root"]` 上改变量。
+> - `MutationObserver` 清污哨兵 + route supervisor + owner/version 租约 —— 沙盒模式不需要：平台自带 `data-theme="light|dark"`、14 个 `--chat-*` 变量（实测确证，官方手册只记 10 个）与 `theme:change` 事件，换肤只是在 `[data-chat="root"]` 上改变量。
 > - 导入格式也不同：沙盒模式是**顶层恰好 6 键**的正则 JSON（含 `chatVersion: 1`），本资产的 4 字段 json 导进去不成立。
 >
 > 沙盒模式换肤请读 `../../../references/beautify/global-css.md`「沙盒模式换肤」与 `../../../references/platforms/mmd-sandbox.md` §6。

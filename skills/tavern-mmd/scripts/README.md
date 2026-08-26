@@ -110,7 +110,7 @@ python build-preview.py <文件> --platform mmd|mmdsandbox|st [--mode panels|pan
 平台渲染差异：
 - `st`：原样渲染，script/ES6 全执行
 - `mmd`：script/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行；inline onclick 按已实测的净化规则处理
-- `mmdsandbox`：复刻真实 DOM 契约 —— `[data-chat="root"]`、顶栏、`[data-slot="statusbar"]`、messages / list / message-frame / message / message-body、composer / input / send、author-stage，以及 10 个 `--chat-*` 变量。并按平台的做法把**未被匹配命中**规则里的 `<style>` / `<script>` 也抽出装上（沙盒模式装卡即抽出，不需要命中）
+- `mmdsandbox`：复刻真实 DOM 契约 —— `[data-chat="root"]`、顶栏、`[data-slot="statusbar"]`、messages / list / message-frame / message / message-body、composer / input / send、author-stage，以及 **14 个 `--chat-*` 设计令牌**（实测确证，官方手册只记 10 个；清单见脚本里的 `SANDBOX_DESIGN_TOKENS`），深浅两套各一份。另注入 `--rpx`（= `calc(100vw / 750)`，平台尺寸基准，作者写 `calc(24 * var(--rpx))` 才算得出来）与 `--chat-viewport-height` 静态值 —— 后两个**不属于**那 14 个令牌（`--chat-viewport-height` 在真机是 JS 写的内联 style）。并按平台的做法把**未被匹配命中**规则里的 `<style>` / `<script>` 也抽出装上（沙盒模式装卡即抽出，不需要命中）
 
 > **沙盒预览带一条 NOTE，列明没有模拟的四类**：SDK（`sdk.*` 全部能力与 12 事件）、「消息生成中」占位、净化白名单（作者自写 `data-*` 与被删标签不会真的被删）、Markdown 管线（4 空格缩进不会真的变代码块）。这四类只能回实机 + `?sdkDebug=1` 验。创卡页预览本身也是"瘦环境"：输入框/发送/存档一律 `NOT_SUPPORTED`，只有样式与舞台可用。
 

@@ -19,7 +19,9 @@ tavern-mmd 预览脚本 build-preview.py
                不施加当前MMD 的 onclick 净化；改为提示 svg 内 onclick 与自写 data-* 会被净化删除
                <style>/<script> 装卡即抽出，不论规则有没有匹配到都装上（官方首选写法
                「专开一条只放 script/style、匹配式谁都不引用」在预览里照样生效）
-               全景模式额外注入 [data-chat]/[data-slot] 钩子与 10 个 --chat-* 变量
+               全景模式额外注入 [data-chat]/[data-slot] 钩子与 14 个 --chat-* 设计令牌
+               （实测确证，官方手册只记 10 个；见 SANDBOX_DESIGN_TOKENS），另注入
+               --rpx 尺寸基准与 --chat-viewport-height 静态值（这两个不计入 14 个）
 
 退出码: 0=生成成功  1=致命审计失败（不写文件）  2=用法/读取错误
 """
@@ -434,7 +436,7 @@ _PLATFORM_DATA_ATTRS = ("data-chat", "data-slot", "data-theme", "data-composer",
 _PREVIEW_DATA_ATTRS = ("data-pano-scaffold", "data-pano-runtime-scaffold",
                        "data-preview-tools", "data-preview-dynamic",
                        "data-mmd-onclick-disabled", "data-message-role",
-                       "data-preview-hoisted")
+                       "data-preview-hoisted", "data-preview-bubble-outline")
 
 
 def find_sandbox_sanitized_attrs(content):
@@ -868,7 +870,11 @@ PANORAMA_SEND_SCAFFOLD = (
 # 沙盒模式聊天页骨架的稳定钩子（mmd-sandbox.md §5）。挂到全景已有节点上，作者写的
 # [data-chat="root"] 选择器与 var(--chat-accent) 在预览里就能真的解析到。
 _SANDBOX_HOOKS = {
-    "root": ' data-chat="root" data-theme="light" data-composer="open"',
+    # data-preview-bubble-outline 是预览专属辅助标记（真机无此属性、无那圈描边），
+    # 挂在 root 上让所有气泡（含脚手架动态追加的）都吃到，作者可随手在开发者工具里
+    # 删掉它看真实的"气泡与背景同色"效果。样式见 SANDBOX_CHROME_CSS 末尾。
+    "root": (' data-chat="root" data-theme="light" data-composer="open"'
+             ' data-preview-bubble-outline="1"'),
     "header": ' data-chat="header"',
     "header_title": ' data-chat="header-title"',
     "header_extra": '<span data-slot="header-extra"></span>',
@@ -894,18 +900,76 @@ def _panorama_hooks(platform):
     return dict(_SANDBOX_HOOKS)
 
 
-# 沙盒模式 10 个 --chat-* 变量的预览默认值（mmd-sandbox.md §6.1）。定义在
-# [data-chat="root"] 上，作者换肤改变量、用 var() 取色在预览里行为一致。
+# 沙盒模式设计令牌清单（实测确证共 14 个，mmd-sandbox.md §6.1）。
+# 依据：逆向沙盒样式表 sandbox-app.css + 真机探针实测。官方手册只记了前 9 个
+# + --chat-viewport-height（共 10 条），漏记了本清单最后 5 个 —— 作者在卡里写
+# var(--chat-input-bg) 等是**真机可用**的，预览必须一并注入，否则预览样式塌掉
+# 而真机正常，作者会去"修"一个不存在的 bug。改动这里前请先确认实测依据。
+SANDBOX_DESIGN_TOKENS = (
+    "--chat-bg", "--chat-surface", "--chat-text", "--chat-text-muted",
+    "--chat-border", "--chat-accent",
+    "--chat-bubble-user-bg", "--chat-bubble-ai-bg", "--chat-bubble-text",
+    # 以下 5 个为官方手册漏记项，实测两套主题均有定义。
+    "--chat-input-bg", "--chat-input-text", "--chat-shortcut-text",
+    "--chat-more-item-bg", "--chat-share-pick-bg",
+)
+
+# 沙盒模式 14 个设计令牌的预览默认值。定义在 [data-chat="root"] 上，作者换肤改变量、
+# 用 var() 取色在预览里行为一致。
+# 归属说明（实测）：平台真身把两套值分别定义在 [data-theme=dark] / [data-theme=light]
+# 上，**没有 :root 定义**。预览这里把浅色一套放在无 data-theme 的基底规则上、深色一套
+# 放在 [data-theme="dark"] 覆盖规则上，效果等价且省一份重复。
+#
+# 🚨 证据等级（别混淆，也别为了"好看"改回失真值）：
+#   深色 14 个全部是 `【实测】` 真值，一字不改。曾经这里放的是好看但失真的值
+#   （--chat-bg:#16181d、气泡 #1a7f5a/#22262c），让预览显示出"气泡有独立底色"
+#   这个平台并不存在的配色 —— 作者会照着它定状态栏配色，上真机才发现整块糊在
+#   背景里。这个谎发生在**设计决策阶段**，代价比"气泡默认看不见"高得多。
+#   实测两个气泡背景与页面背景**同色**（都是 #17181a），预览照此还原。
+#   浅色一套是 `【类推，未实测】`：探针只覆盖了深色，这里按既有浅色板与深色的
+#   对应关系类推，仅作可用占位，**不要当实测事实引用**。
+#   气泡默认无视觉分界的问题用预览专属描边解决（见下 data-preview-bubble-outline），
+#   不靠篡改令牌取值 —— 描边一眼是辅助线，改底色是冒充平台配色。
+# 🚨 --chat-viewport-height 不在那 14 个里：实测它是平台用 JS 写在 root 上的**内联
+# style**（随 visualViewport 变化），不是样式表变量。预览注入它只是合理的静态模拟，
+# 别把它当设计令牌统计。
+# --rpx = calc(100vw / 750) 同样不计入 14 个，但它是平台全部尺寸的基准，作者按文档
+# 会写 calc(24 * var(--rpx))，预览不注入就会算成 0 → 尺寸全塌。故一并注入。
 # 功能栏平台不给样式，这里只给最小可见占位，作者仍需自己写背景/高度/sticky。
+SANDBOX_DARK_TOKEN_VALUES = {
+    # 【实测】逆向 sandbox-app.css + 真机探针。测试锁定这份取值，防回退。
+    "--chat-bg": "#17181a", "--chat-surface": "#1e1f24", "--chat-text": "#fff",
+    "--chat-text-muted": "#c5c5c5", "--chat-border": "#333", "--chat-accent": "#ff6d97",
+    # 气泡三色 = 页面背景，实测无视觉分界。
+    "--chat-bubble-user-bg": "#17181a", "--chat-bubble-ai-bg": "#17181a",
+    "--chat-bubble-text": "#fff",
+    "--chat-input-bg": "#1e1f24", "--chat-input-text": "#fff",
+    "--chat-shortcut-text": "#fff",
+    "--chat-more-item-bg": "#2c2e32", "--chat-share-pick-bg": "#2c2e32",
+}
+
 SANDBOX_CHROME_CSS = """[data-chat="root"]{--chat-bg:#ffffff;--chat-surface:#f5f6f8;--chat-text:#1f2328;
   --chat-text-muted:#6b7280;--chat-border:#d8dbe0;--chat-accent:#1a7f5a;
-  --chat-bubble-user-bg:#1a7f5a;--chat-bubble-ai-bg:#f0f0f3;--chat-bubble-text:#1f2328;
-  --chat-viewport-height:100vh;background:var(--chat-bg);color:var(--chat-text)}
-[data-chat="root"][data-theme="dark"]{--chat-bg:#16181d;--chat-surface:#1f2329;--chat-text:#e6edf3;
-  --chat-text-muted:#9aa4b2;--chat-border:#30363d;--chat-bubble-ai-bg:#22262c;--chat-bubble-text:#e6edf3}
+  --chat-bubble-user-bg:#ffffff;--chat-bubble-ai-bg:#ffffff;--chat-bubble-text:#1f2328;
+  --chat-input-bg:#ffffff;--chat-input-text:#1f2328;--chat-shortcut-text:#1f2328;
+  --chat-more-item-bg:#f5f6f8;--chat-share-pick-bg:#f5f6f8;
+  --chat-viewport-height:100vh;--rpx:calc(100vw / 750);
+  background:var(--chat-bg);color:var(--chat-text)}
+[data-chat="root"][data-theme="dark"]{--chat-bg:#17181a;--chat-surface:#1e1f24;--chat-text:#fff;
+  --chat-text-muted:#c5c5c5;--chat-border:#333;--chat-accent:#ff6d97;
+  --chat-bubble-user-bg:#17181a;--chat-bubble-ai-bg:#17181a;--chat-bubble-text:#fff;
+  --chat-input-bg:#1e1f24;--chat-input-text:#fff;--chat-shortcut-text:#fff;
+  --chat-more-item-bg:#2c2e32;--chat-share-pick-bg:#2c2e32}
 [data-chat="messages"]{background:var(--chat-bg)}
 [data-chat="message"][data-from="ai"] [data-chat="message-body"]{background:var(--chat-bubble-ai-bg);color:var(--chat-bubble-text)}
 [data-chat="message"][data-from="user"] [data-chat="message-body"]{background:var(--chat-bubble-user-bg)}
+/* 预览专属辅助线，真机没有这条描边。实测气泡三色 = 页面背景（同为 #17181a），
+   气泡默认与背景无视觉分界；预览若不给任何提示，作者看不出气泡边界在哪。
+   这里用 var(--chat-border) 画一圈 inset 描边，只借用平台已有的边框令牌，
+   **不冒充任何平台底色** —— 一眼能看出是辅助线，而不是配色主张。
+   刻意挂在独立的 data-preview-bubble-outline 标记上，不混进令牌定义块，
+   便于作者用开发者工具直接关掉看真实效果。 */
+[data-preview-bubble-outline] [data-chat="message-body"]{box-shadow:inset 0 0 0 1px var(--chat-border)}
 [data-slot="statusbar"]{position:sticky;top:0;z-index:800}
 [data-chat="author-stage"]{position:fixed;inset:0;z-index:2000;background:var(--chat-bg)}
 [data-chat="author-stage"][hidden]{display:none}"""
@@ -977,8 +1041,16 @@ def assemble_panorama(obj, platform, src_name):
     banner = make_banner(platform, src_name, n).replace("预览平台", "全景预览 ｜ 平台")
     audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(chat_inner, platform)
     if sandbox:
-        audit += ('<div class="frag-warn">NOTE 已模拟：[data-chat]/[data-slot] 钩子结构与 10 个 '
-                  '--chat-* 变量默认值，作者的平台选择器与 var() 在此可解析。'
+        audit += ('<div class="frag-warn">NOTE 已模拟：[data-chat]/[data-slot] 钩子结构与 14 个 '
+                  '--chat-* 设计令牌默认值（深色一套为实测真值；官方手册只记 10 个），另注入 '
+                  '--rpx 尺寸基准与 --chat-viewport-height 静态值（后者真机是 JS 内联 style，'
+                  '不属那 14 个），作者的平台选择器与 var() 在此可解析。'
+                  '</div>'
+                  '<div class="frag-warn">NOTE 气泡那圈淡描边是<b>预览辅助线，真机上没有</b>：'
+                  '实测平台气泡三色与页面背景<b>同色</b>（深色都是 #17181a），气泡默认与背景'
+                  '无视觉分界。想要卡片感必须自己给底色（比如 var(--chat-surface)），'
+                  '别以为平台已经帮你把气泡分出来了。要看真实效果：删掉 root 上的 '
+                  'data-preview-bubble-outline 属性。'
                   '未模拟：官方 SDK（sdk.on/stage/save/message 等全部不存在）、'
                   '「消息生成中」占位、净化白名单、Markdown 管线、真实换肤与限频。'
                   'SDK 相关行为必须回真实聊天页验证。</div>')

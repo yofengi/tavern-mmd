@@ -52,13 +52,29 @@ SANDBOX_FORBIDDEN_TOP_LEVEL_KEYS = (
     "role", "presentation", "worldbook", "world_book", "lorebook", "lore_book",
     "entries", "characterBook", "character_book",
 )
-# 长度硬上限（mmd-sandbox.md §8）
+# 长度上限（mmd-sandbox.md §8 + 基座事实卡 §6）。
+#
+# 【双阈值设计，勿「修正」】沙盒应用源码里的草稿校验常量是逐字真值（事实卡 §6）：
+#   var Us={beginning:4e3,statusbar:200,imageUrl:2048,name:200,regex:4096,
+#           content:1e5,regexList:130};
+#   function Ws(e,t){...e.length>t?e.slice(0,t)...}   // 静默截断，不报错
+# 但该常量位于**创卡预览草稿校验路径**，聊天页吃服务端数据是否同限**未能确证**
+# （事实卡 §6 末尾的未确证标注）。而创卡页编辑器 UI 显示的计数器又更严
+# （name 20 / regex 1000 / content 20000）。
+# 于是分级：
+#   *_HARD = 源码真值 → 超出即 ERROR（宽，安全：确定会被平台静默截断）
+#   *_SOFT = 编辑器 UI 值 → 超出即 WARN（严，实用：提醒作者一进编辑器就被截断）
+# 唯一例外是 beginning：官方 validate.mjs 写 10240，**比真值 4000 松**，
+# 会放行超长开场白后被平台静默截断 → 直接改成 4000，单阈值 ERROR。
 SANDBOX_MAX_STATUSBAR = 200
-SANDBOX_MAX_BEGINNING = 10240
+SANDBOX_MAX_BEGINNING = 4000
 SANDBOX_MAX_PERSONALITY = 10000
 SANDBOX_MAX_SCRIPT_NAME = 20
+SANDBOX_MAX_SCRIPT_NAME_HARD = 200
 SANDBOX_MAX_FIND_REGEX = 1000
+SANDBOX_MAX_FIND_REGEX_HARD = 4096
 SANDBOX_MAX_REPLACE_STRING = 20000
+SANDBOX_MAX_REPLACE_STRING_HARD = 100000
 SANDBOX_MAX_RULES = 130
 
 # SDK 能力名（30 个）与事件名（12 个）。**镜像官方 contract.json 的 capabilities /
@@ -436,7 +452,14 @@ def check_sandbox_redlines(s, where):
 # 选择器前缘：串首、块结束、分号、空白，或 <style> 的 `>`。
 # 前缘限制是为了不误伤 [data-chat="message-body"]{...} 这类属性选择器。
 _SANDBOX_GLOBAL_CSS = (
-    (re.compile(r"(?:^|[\}\;\s>])\*\s*\{"), "*{}"),
+    # 裸 `*{}` 与后代/子组合子里的 `*` 必须分开：真正污染平台 chrome 的只有
+    # **选择器起始位置**的通用选择器。`.sbk-host *{}`、`.a > *{}` 已被祖先限定作用域，
+    # 是良好写法，不该报。原正则前缘含 `\s` 与 `>`，把 `.sbk-host ` 的那个空格
+    # 和 `.a > ` 的箭头都当成了前缘 → 误报。
+    # 现在前缘只认「选择器起始」：串首 / `}` 后（上一块结束）/ `;` 后 /
+    # `,` 后（逗号后另起一个裸选择器，`.a, *{}` 该报）/ `{` 后（@media 内首个选择器）/
+    # `<style>` 标签之后。注意 `>` 与空白**不**是前缘，那是组合子。
+    (re.compile(r"(?:^|[\},;{]|<style[^>]*>)\s*\*\s*\{"), "*{}"),
     (re.compile(r"(?:^|[\}\;\s>])html\s*\{", re.I), "html{}"),
     (re.compile(r"(?:^|[\}\;\s>])body\s*\{", re.I), "body{}"),
     (re.compile(r":root\s*\{", re.I), ":root{}"),
@@ -493,8 +516,14 @@ def check_sandbox_find_regex_content(fr, where):
     """匹配式的内容禁令（WARN）：别含 HTML 标签或独立保留字。"""
     if re.search(r"<[a-zA-Z/]", fr):
         warn("%s findRegex 含 HTML 标签——平台不建议，匹配式应是正文里的标记词。" % where)
+    # 单词边界比官方 validate.mjs 的 `(^|[^A-Za-z])w([^A-Za-z]|$)` 更窄：
+    # 边界排除了 `-` 与 `_`，所以连字符/下划线复合标识符里的保留字不再误报。
+    # 起因：基座装载标记名形如 `/{{sbk-css}}/`，`css` 前是 `-`、后是 `}`，
+    # 按官方算法算「独立保留字」被误 WARN。而 `sbk-css` 显然是一个整体标识符，
+    # 不是创卡页文案禁的那个裸保留字。规则本身保留（官方文档确有此禁令，
+    # 且线上真卡有用 `【css】` 当匹配式的，故仍只 WARN）。
     hit = [w for w in SANDBOX_RESERVED_IN_PATTERN
-           if re.search(r"(^|[^A-Za-z])%s([^A-Za-z]|$)" % w, fr, re.I)]
+           if re.search(r"(^|[^A-Za-z_-])%s([^A-Za-z_-]|$)" % w, fr, re.I)]
     if hit:
         warn("%s findRegex 含独立保留字 %s——创卡页文案禁用，建议换词。"
              % (where, "、".join(hit)))
@@ -1289,10 +1318,19 @@ def _validate_sandbox_rules(obj, scripts):
         if "scriptName" in sc:
             if not isinstance(name, str) or not name.strip():
                 err("%s scriptName 必须为非空字符串，当前为 %r。" % (label, name))
-            elif len(name) > SANDBOX_MAX_SCRIPT_NAME:
-                err("%s scriptName 共 %d 字，超过上限 %d 字。"
-                    % (label, len(name), SANDBOX_MAX_SCRIPT_NAME))
+            elif len(name) > SANDBOX_MAX_SCRIPT_NAME_HARD:
+                # 双阈值见文件头 SANDBOX_MAX_* 注释（基座事实卡 §6）：
+                # 200 是源码真值 name:200，超出必被 Ws() 静默截断 → ERROR。
+                err("%s scriptName 共 %d 字，超过平台硬上限 %d 字，会被静默截断。"
+                    % (label, len(name), SANDBOX_MAX_SCRIPT_NAME_HARD))
             else:
+                if len(name) > SANDBOX_MAX_SCRIPT_NAME:
+                    # 20 是创卡页编辑器 UI 的计数器上限：导入能绕过，但作者一进
+                    # 编辑器改这条就被截断 → 只 WARN，不拦。
+                    warn("%s scriptName 共 %d 字，超过编辑器上限 %d 字（导入能绕过，"
+                         "但作者一进创卡页编辑器就会被截断）。平台硬上限是 %d 字。"
+                         % (label, len(name), SANDBOX_MAX_SCRIPT_NAME,
+                            SANDBOX_MAX_SCRIPT_NAME_HARD))
                 if name in seen_names:
                     warn("%s scriptName 与第 %d 条重名——名称只给自己看，但重名难排查。"
                          % (label, seen_names[name]))
@@ -1303,20 +1341,35 @@ def _validate_sandbox_rules(obj, scripts):
         if "findRegex" in sc:
             if not isinstance(fr, str) or not fr.strip():
                 err("%s findRegex 必须为非空字符串，当前为 %r。" % (label, fr))
-            elif len(fr) > SANDBOX_MAX_FIND_REGEX:
-                err("%s findRegex 共 %d 字，超过上限 %d 字。"
-                    % (label, len(fr), SANDBOX_MAX_FIND_REGEX))
+            elif len(fr) > SANDBOX_MAX_FIND_REGEX_HARD:
+                # 双阈值见文件头 SANDBOX_MAX_* 注释（基座事实卡 §6）：
+                # 4096 是源码真值 regex:4096，超出必被 Ws() 静默截断成废匹配式 → ERROR。
+                err("%s findRegex 共 %d 字，超过平台硬上限 %d 字，会被静默截断。"
+                    % (label, len(fr), SANDBOX_MAX_FIND_REGEX_HARD))
             else:
+                if len(fr) > SANDBOX_MAX_FIND_REGEX:
+                    # 1000 是创卡页编辑器 UI 的计数器上限 → 只 WARN，不拦。
+                    warn("%s findRegex 共 %d 字，超过编辑器上限 %d 字（导入能绕过，"
+                         "但作者一进创卡页编辑器就会被截断）。平台硬上限是 %d 字。"
+                         % (label, len(fr), SANDBOX_MAX_FIND_REGEX,
+                            SANDBOX_MAX_FIND_REGEX_HARD))
                 _validate_sandbox_pattern(fr, label, i, seen_literals, soup_parts, sc)
 
         rs = sc.get("replaceString")
         if "replaceString" in sc:
             if not isinstance(rs, str):
                 err("%s replaceString 必须为 string，当前为 %s。" % (label, type(rs).__name__))
+            elif len(rs) > SANDBOX_MAX_REPLACE_STRING_HARD:
+                # 双阈值见文件头 SANDBOX_MAX_* 注释（基座事实卡 §6）：
+                # 100000 是源码真值 content:1e5，超出必被 Ws() 静默截断 → ERROR。
+                err("%s replaceString 共 %d 字，超过平台硬上限 %d 字，会被静默截断，请拆条。"
+                    % (label, len(rs), SANDBOX_MAX_REPLACE_STRING_HARD))
             elif len(rs) > SANDBOX_MAX_REPLACE_STRING:
-                err("%s replaceString 共 %d 字，超过上限 %d 字——"
-                    "20000 是编辑器上限（导入能绕过），但超了作者一进编辑器就被截断，请拆条。"
-                    % (label, len(rs), SANDBOX_MAX_REPLACE_STRING))
+                # 20000 是创卡页编辑器 UI 的计数器上限 → 只 WARN，不拦。
+                warn("%s replaceString 共 %d 字，超过编辑器上限 %d 字（导入能绕过），"
+                     "但超了作者一进编辑器就被截断，建议拆条。平台硬上限是 %d 字。"
+                     % (label, len(rs), SANDBOX_MAX_REPLACE_STRING,
+                        SANDBOX_MAX_REPLACE_STRING_HARD))
 
 
 def _validate_sandbox_pattern(fr, label, index, seen_literals, soup_parts, sc):

@@ -1,0 +1,87 @@
+{
+  "_comment": "SBK 生成器示例配置。JSON 不支持注释，故用 _comment / _* 键说明（生成器会丢弃所有 _ 开头的顶层键）。字段全表见 build_sbk.py 的模块 docstring 或 --help。",
+  "_build": "python build_sbk.py sbk.config.example.json --out dist/sbk.json --verbose",
+  "_verify": "python validate.py dist/sbk.json --type regex --platform mmdsandbox",
+
+  "chatVersion": 1,
+  "_chatVersion": "必须 1——沙盒模式（新聊天页）由它开启。",
+  "pageDepth": 2,
+  "_pageDepth": "固定 2。",
+
+  "assetDir": "sbk",
+  "_assetDir": "基座源码目录，相对本配置文件所在目录。base.css/core.js/theme.js 由 WP-1 提供；protocol.js/hud.js（WP-2）与 ui.js（WP-3）存在则合并、缺失则跳过并告警。",
+
+  "hostId": "sbk-hud",
+  "_hostId": "HUD 宿主容器 id。事实卡 §3：document.currentScript 恒为 null，脚本无法自定位，只能靠固定 id 约定。",
+
+  "protocolTag": "状态",
+  "_protocolTag": "数据协议块标签名，对应模型输出的 [状态]…[/状态]（plan.md 2.3）。🚨 一律用方括号（plan.md 已裁决第 9 条）：事实卡 §5.4 的剥壳正则 /<\\/?([\\u4e00-\\u9fa5a-zA-Z0-9_]+)(\\s+[^>]*)?>/g 会把 <状态> 这类中文尖括号标签【整个删掉】（文字保留、标签消失）。正则管线跑在剥壳之前，所以模式 B 的 sbk-snap 还能匹配到；但模式 A 的 HUD 从气泡文本兜底读取时标记已经没了，解析必然失败。方括号不是标签，全链路都活着。解析器兼容三族写法（方/尖/书名号），但文档与默认值一律方括号——别改回尖括号。不用平台的 $名字：数据源固定 $1 且须同时含 :: 与 ;;，表达力太弱（事实卡 §5.3）。",
+
+  "modes": {
+    "hud": true,
+    "snapshot": true
+  },
+  "_modes": "A 常驻 HUD（statusbar 槽位内宿主容器，JS 在 message:done 后重渲染）／B 消息内快照（正则一次性渲染，历史留痕）。两者可并存，共用同一份协议与渲染器（plan.md 2.2）。",
+
+  "_statusbar": "功能栏字段。模式 A 必须包含 markers.hud，否则宿主容器永远不出现——事实卡 §5.6：功能栏 h_() 只在装载时跑一次，且其正则输入是 statusbar 字段【自身】而非消息内容。上限 200 字符。",
+  "statusbar": "{{hud}}",
+
+  "_beginning": "开场白，上限 4000（事实卡 §6 运行时真值，创卡页 UI 同样显示 4000；skill 校验器写的 10240 是错的）。含状态块时须与 persona 的输出约定一致，且【必须用方括号】 [状态]…[/状态]（plan.md 已裁决第 9 条，尖括号会被剥壳正则删掉）。",
+  "beginning": "推开门,潮气裹着草药味涌上来。柜台后的女人抬眼看你,袖口沾着深色药渍。\n\n\"来买药,还是来卖命?\"\n\n[状态]\n体力: 84/100\n灵力: 30/60\n银钱: 12\n好感: 苏九=5\n标记: 初来乍到\n[/状态]",
+
+  "_theme": "主题 token。语义名见 theme.js 的 MAP，也可直给 --chat-* / --sbk-*。扁平写法 = 两套主题同值；写 {dark:{},light:{}} 分别覆盖。生成器编译成 [data-chat=\"root\"][data-theme=\"*\"] 选择器：特异度 (0,2,0) 高于平台的 (0,1,0)，深浅色切换不会覆盖回去，且不需要 !important（事实卡 §7.1 / 硬约束 10）。写 :root 完全无效——平台无 :root 定义。",
+  "theme": {
+    "dark": {
+      "accent": "#c8a15a",
+      "surface": "#22201c",
+      "onAccent": "#1a1712"
+    },
+    "light": {
+      "accent": "#8a6a2f",
+      "surface": "#f4efe4",
+      "onAccent": "#ffffff"
+    }
+  },
+
+  "_schema": "状态栏 schema，原样传给 SBK.ui.hud / SBK.ui.snapshot（经 SBK.boot 归一化）。权威键名是 fields（协议说明 §3 / hud.js 的 pick 只读 sc.fields）。🚨 别写成 rows：那是容错别名，SBK.boot 会归一化并告警，但直接调 SBK.ui.hud 时不会——hud 读不到 fields 就静默退化成「按模型输出顺序全渲染」，现象是 schema 像根本没生效，极难排查。其余可选键：title 小标题／hostId 宿主 id／persist 走 SBK.store 存档／extra 声明 fields 后是否把其余字段也渲染。",
+  "_schemaTypes": "🚨 合法 type 恰五种，别猜别的名字：bar 进度条（协议里 a/b 或 nn% 形态）／num 数值（可带 unit）／text 一行文本／tags 标签组（逗号分隔纯文本）／entities 多实体（名=数, 名=数，每实体一条名字+条+数值）。写了表外的名字（如 table）不会报错，hud.js 的 TYPES[type] || TYPES.text 会静默回落成 text，多实体表就渲染不出来了。",
+  "schema": {
+    "fields": [
+      { "key": "体力", "type": "bar", "label": "体力" },
+      { "key": "灵力", "type": "bar", "label": "灵力" },
+      { "key": "银钱", "type": "num", "label": "银钱" },
+      { "key": "好感", "type": "entities", "label": "好感" },
+      { "key": "标记", "type": "tags", "label": "标记" }
+    ]
+  },
+
+  "_markers": "五个固定规则的触发串。必须是正文里不会出现的字面标记。生成器会把它们转义并包成 /…/ slash 形态——硬约束 21：实机上裸字面量 {{probe}} 不生效，改 /{{probe}}/ 后立即生效。绝不能用 /(?!)/ 这类零宽写法当\"永不匹配\"：那会触发 worker 的 empty-match 判定撤销整条规则（事实卡 §5.2）。",
+  "markers": {
+    "css": "{{sbk-css}}",
+    "core": "{{sbk-core}}",
+    "ui": "{{sbk-ui}}",
+    "hud": "{{hud}}",
+    "boot": "{{sbk-boot}}"
+  },
+
+  "idBase": -1,
+  "_idBase": "规则 id 起始负数，依次 -1,-2,…。id 必须为负数。",
+
+  "splitThreshold": 18000,
+  "_splitThreshold": "脚本自动拆条阈值（plan.md 已裁决第 7 条）。sbk-core 与 sbk-ui 超过此值就按【文件边界】自动拆成 sbk-core-1/-2、sbk-ui-1/-2…，各自获得唯一的 slash 形态标记（/{{sbk-ui-1}}/ 这类）。18000 = 编辑器显示上限 20000 留 2000 安全余量（运行时真值 100000，见事实卡 §6）。regexList 上限 130 条，拆条成本可忽略。🚨 拆条严格保持装载顺序 protocol.js → hud.js → ui.js：它们都依赖 core.js 已定义，且 hud.js/ui.js 用合并挂载往 SBK.ui 上追加，顺序错了会出现未定义引用。regex_scripts 数组序即装载顺序（worker 按 regexSort 升序）。绝不切开单个文件——每个文件本身是完整 IIFE，切开必然语法错；单文件自身超阈值时允许独占一条并告警。",
+
+  "_sceneRules": "场景规则（第 6 条起）。expectedMatches 用于输出预算估算：预算 = max(262144, 输入长度×4)，按条规则累计【所有匹配】的输出，超限整条规则回滚（事实卡 §5.2）。allowNonWhitelistTags 可跳过标签白名单告警。注意 replaceString 里的 </script> 必须写成 <\\/script>（§6.10）。",
+  "sceneRules": [
+    {
+      "scriptName": "sbk-snap",
+      "findRegex": "/\\[状态\\]([\\s\\S]*?)\\[\\/状态\\]/",
+      "replaceString": "<div class=\"sbk-snap sbk-card sbk-pre sbk-snap--raw\">$1</div>",
+      "expectedMatches": 1,
+      "_note": "模式 B 消息内快照的兜底外壳。根元素【必须】带 .sbk-snap——否则 base.css 对 message-body 的 opacity:.9 与 white-space:pre-line 重置不生效（plan.md 已裁决第 4 条 / 硬约束 11）。🚨 还【必须】带 .sbk-snap--raw：hud.js 的 hydrate() 正是靠这个类找待升级节点（SBK.dom.all(root,'.sbk-snap--raw')），少了它 JS 升级永远不触发，气泡里只会留一段纯文本，而「真正的结构化渲染由 snapshot() 在 mount 回调内接管」这句就成了空话。🚨 壳内只放 $1，不要再套 <span class=\"sbk-label\">状态</span> 之类的装饰：hydrate 读的是节点 textContent，多出来的文字会被当成块体首行（「状态体力: 84/100」会被解析成键名「状态体力」）。.sbk-pre 保住解析失败时的换行观感——hydrate 的兜底分支也正是补这个类。",
+      "_regex": "🚨 方括号在正则里是元字符，【必须转义】：正确形态 /\\[状态\\]([\\s\\S]*?)\\[\\/状态\\]/，写进 JSON 再叠一层反斜杠。漏转义会变成字符类 [状态]（匹配「状」「态」任一字符），静默失效且极难排查。"
+    }
+  ],
+
+  "_personality": "人设文本。导入页不读该字段，须手工粘贴，此处仅随 JSON 归档。",
+  "personality": "你在扮演药铺老板苏九。\n\n输出约定：每次回复正文之后,追加一个状态块,格式固定（方括号,不要用尖括号）：\n[状态]\n体力: 当前/上限\n灵力: 当前/上限\n银钱: 整数\n好感: 名字=数值, 名字=数值\n标记: 标签, 标签\n[/状态]\n\n状态块内只写数据,不写描写。数值必须随剧情变化。"
+}

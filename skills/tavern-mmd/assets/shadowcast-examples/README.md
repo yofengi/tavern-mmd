@@ -6,7 +6,11 @@ Shadow DOM 隔离动态渲染的可运行示例与生成器。方法原理见 `.
 >
 > 🚨 **不能导入 MMD沙盒模式（`/mmdsandbox`）。** 本目录所有 `.mmd.json` 成品的点火载体都是 `img onerror`，而沙盒模式**官方明令禁止 `img onerror` 点火器与 teapot 系写法**；另外这些成品是 MMD 专用 **4 字段** json，沙盒模式要的是**顶层恰好 6 键**（含 `chatVersion: 1`、`personality`）的导入正则 JSON，格式本身也不兼容。硬导的结果是规则装上了但引擎一条都不点火，页面上看不出异常。
 >
-> 沙盒模式做状态栏/悬浮组件的正确形状：专开一条规则只放 `<script>`（匹配式填正文用不到的词）→ `sdk.on('message:mount')` 给气泡内按钮绑事件 → 长期面板挂 `sdk.stage`。规范见 `../../references/platforms/mmd-sandbox.md`。本目录的**模型侧协议文档**（`状态栏-模型侧协议.md`、`RPG协议.md`、`宅邸协议.md`）只约定模型输出什么数据块，**与渲染载体无关，可以在沙盒模式复用**。
+> 沙盒模式做状态栏/悬浮组件的正确形状：专开一条规则只放 `<script>`（匹配式填正文用不到的词）→ `sdk.on('message:mount')` 给气泡内按钮绑事件 → 长期面板挂 `sdk.stage`。规范见 `../../references/platforms/mmd-sandbox.md`。
+>
+> **但别自己从零写这套形状** —— 沙盒模式做状态栏/美化请直接用现成基座 `../sandbox-kit/`（改 config 跑 `build_sbk.py` 产出 6 键 JSON），方法论见 `../../references/beautify/sandbox-kit.md`。渲染载体那一层（脚本点火、事件时序、双模状态栏、浮层与舞台、主题令牌）基座已经做完了。
+>
+> 你从本目录**能搬过去的**是与载体无关的部分：**模型侧协议文档**（`状态栏-模型侧协议.md`、`RPG协议.md`、`宅邸协议.md`）只约定模型输出什么数据块，**与渲染载体无关，可以在沙盒模式复用** —— 把标记形态换成方括号 `[状态]`，字段表就能直接喂给基座的 schema。双轨代谢、全量快照、schema 驱动字段设计这些**设计思路**同样成立。
 
 > **2.0（引擎 VER=`sc2`，浏览器三路验证通过）**：① shadow→light DOM 降级链（attachShadow 不可用环境照常渲染，类名全程 `g3-` 前缀保证 light 路径零冲突）；② `adoptedStyleSheets` + 跨气泡缓存单 sheet；③ 事务式渲染（建好再挂载、异常回退纯净态 + 记 `window.g3LastError`）。来自吸收哨兵雷达法 sd3 卡的工程优点，细节见参考文档「2.0 强化」节。
 

@@ -711,6 +711,16 @@ class TestSandboxTopLevel(unittest.TestCase):
                 self.assertTrue(any(field in m and "超过上限 %d" % limit in m
                                     for m in v.ERRORS))
 
+    def test_beginning_limit_is_4000_not_10240(self):
+        """基座事实卡 §6：源码 beginning:4e3 + 创卡页 UI 显示 7/4000。
+        官方 validate.mjs 的 10240 偏松，会放行超长开场白后被 Ws() 静默截断。"""
+        self.assertEqual(v.SANDBOX_MAX_BEGINNING, 4000)
+        run_sandbox(beginning="x" * 4000)
+        self.assertFalse(any("beginning" in m and "超过上限" in m for m in v.ERRORS))
+        run_sandbox(beginning="x" * 4001)
+        self.assertTrue(any("beginning 共 4001 字" in m and "超过上限 4000" in m
+                            for m in v.ERRORS))
+
     def test_over_130_rules_is_error(self):
         rules = [sandbox_rule(id=-(i + 1), scriptName=str(i), findRegex="{{r%d}}" % i,
                               replaceString="<style>.a{}</style>")
@@ -749,12 +759,27 @@ class TestSandboxRules(unittest.TestCase):
         self.assertTrue(any("多余字段 disabled" in m for m in v.WARNS))
         self.assertEqual(v.ERRORS, [])
 
-    def test_script_name_blank_and_over_length(self):
+    def test_script_name_blank_is_error(self):
         run_sandbox(statusbar="{{kit}}", regex_scripts=[sandbox_rule(scriptName="   ")])
         self.assertTrue(any("scriptName 必须为非空字符串" in m for m in v.ERRORS))
+
+    def test_script_name_over_editor_limit_warns_but_does_not_error(self):
+        """基座事实卡 §6：20 是编辑器 UI 值（WARN），200 才是源码真值（ERROR）。"""
         run_sandbox(statusbar="{{kit}}",
-                    regex_scripts=[sandbox_rule(scriptName="名" * (v.SANDBOX_MAX_SCRIPT_NAME + 1))])
-        self.assertTrue(any("scriptName 共 %d 字" % (v.SANDBOX_MAX_SCRIPT_NAME + 1) in m
+                    regex_scripts=[sandbox_rule(scriptName="名" * 25)])
+        self.assertTrue(any("scriptName 共 25 字" in m and "编辑器上限" in m
+                            for m in v.WARNS))
+        self.assertFalse(any("scriptName 共" in m for m in v.ERRORS))
+
+    def test_script_name_at_hard_limit_does_not_error(self):
+        run_sandbox(statusbar="{{kit}}",
+                    regex_scripts=[sandbox_rule(scriptName="名" * 200)])
+        self.assertFalse(any("scriptName 共" in m for m in v.ERRORS))
+
+    def test_script_name_over_hard_limit_is_error(self):
+        run_sandbox(statusbar="{{kit}}",
+                    regex_scripts=[sandbox_rule(scriptName="名" * 201)])
+        self.assertTrue(any("scriptName 共 201 字" in m and "硬上限 200" in m
                             for m in v.ERRORS))
 
     def test_duplicate_script_name_is_warn(self):
@@ -765,20 +790,44 @@ class TestSandboxRules(unittest.TestCase):
         self.assertTrue(any("重名" in m for m in v.WARNS))
         self.assertEqual(v.ERRORS, [])
 
-    def test_find_regex_blank_and_over_length(self):
+    def test_find_regex_blank_is_error(self):
         run_sandbox(regex_scripts=[sandbox_rule(findRegex="  ")])
         self.assertTrue(any("findRegex 必须为非空字符串" in m for m in v.ERRORS))
-        long_fr = "x" * (v.SANDBOX_MAX_FIND_REGEX + 1)
-        run_sandbox(regex_scripts=[sandbox_rule(findRegex=long_fr)])
-        self.assertTrue(any("findRegex 共 %d 字" % len(long_fr) in m for m in v.ERRORS))
 
-    def test_replace_string_over_length(self):
-        limit = v.SANDBOX_MAX_REPLACE_STRING
-        run_sandbox(statusbar="{{kit}}", regex_scripts=[sandbox_rule(replaceString="x" * limit)])
-        self.assertFalse(any("replaceString 共" in m for m in v.ERRORS))
+    def test_find_regex_over_editor_limit_warns_but_does_not_error(self):
+        """基座事实卡 §6：1000 是编辑器 UI 值（WARN），4096 才是源码真值（ERROR）。"""
+        long_fr = "{{kit%s}}" % ("x" * 1200)
+        run_sandbox(statusbar=long_fr, regex_scripts=[sandbox_rule(findRegex=long_fr)])
+        self.assertTrue(any("findRegex 共" in m and "编辑器上限 1000" in m
+                            for m in v.WARNS))
+        self.assertFalse(any("findRegex 共" in m for m in v.ERRORS))
+
+    def test_find_regex_over_hard_limit_is_error(self):
+        long_fr = "x" * (v.SANDBOX_MAX_FIND_REGEX_HARD + 1)
+        run_sandbox(regex_scripts=[sandbox_rule(findRegex=long_fr)])
+        self.assertTrue(any("findRegex 共 4097 字" in m and "硬上限 4096" in m
+                            for m in v.ERRORS))
+
+    def test_replace_string_over_editor_limit_warns_but_does_not_error(self):
+        """基座事实卡 §6：20000 是编辑器 UI 值（WARN），100000 才是源码真值（ERROR）。"""
         run_sandbox(statusbar="{{kit}}",
-                    regex_scripts=[sandbox_rule(replaceString="x" * (limit + 1))])
-        self.assertTrue(any("replaceString 共 %d 字" % (limit + 1) in m for m in v.ERRORS))
+                    regex_scripts=[sandbox_rule(replaceString="x" * 20001)])
+        self.assertTrue(any("replaceString 共 20001 字" in m and "编辑器上限" in m
+                            for m in v.WARNS))
+        self.assertFalse(any("replaceString 共" in m for m in v.ERRORS))
+
+    def test_replace_string_at_editor_limit_is_clean(self):
+        run_sandbox(statusbar="{{kit}}",
+                    regex_scripts=[sandbox_rule(replaceString="x" * v.SANDBOX_MAX_REPLACE_STRING)])
+        self.assertFalse(any("replaceString 共" in m for m in v.ERRORS))
+        self.assertFalse(any("replaceString 共" in m for m in v.WARNS))
+
+    def test_replace_string_over_hard_limit_is_error(self):
+        run_sandbox(statusbar="{{kit}}",
+                    regex_scripts=[sandbox_rule(
+                        replaceString="x" * (v.SANDBOX_MAX_REPLACE_STRING_HARD + 1))])
+        self.assertTrue(any("replaceString 共 100001 字" in m and "硬上限 100000" in m
+                            for m in v.ERRORS))
 
 
 class TestSandboxPatternForm(unittest.TestCase):
@@ -850,6 +899,23 @@ class TestSandboxPatternForm(unittest.TestCase):
     def test_reserved_word_matches_whole_word_only(self):
         run_sandbox(statusbar="htmlish", regex_scripts=[sandbox_rule(findRegex="htmlish")])
         self.assertFalse(any("保留字" in m for m in v.WARNS))
+
+    def test_reserved_word_inside_compound_identifier_is_not_flagged(self):
+        """基座装载标记名 `/{{sbk-css}}/` 不该误报：`css` 只是复合标识符的一段。"""
+        for pattern in ("/{{sbk-css}}/", "{{sbk-css}}", "/{{my_css}}/",
+                        "/{{css-theme}}/", "/{{sbk-html}}/", "/{{page_body}}/"):
+            with self.subTest(pattern=pattern):
+                reset()
+                v.check_sandbox_find_regex_content(pattern, "测试")
+                self.assertFalse(any("保留字" in m for m in v.WARNS))
+
+    def test_bare_reserved_word_still_flagged(self):
+        """规则本身保留：官方文档确有此禁令，线上真卡的 `【css】` 仍须 WARN。"""
+        for pattern in ("【css】", "/css/", "{{css}}", "【html】", "正文 body 段"):
+            with self.subTest(pattern=pattern):
+                reset()
+                v.check_sandbox_find_regex_content(pattern, "测试")
+                self.assertTrue(any("保留字" in m for m in v.WARNS))
 
 
 class TestSandboxSdkNames(unittest.TestCase):
@@ -979,6 +1045,31 @@ class TestSandboxContentWarnings(unittest.TestCase):
         v.check_sandbox_content_warnings(
             '<style>[data-chat="root"] .hud{color:red}</style>', "测试")
         self.assertFalse(any("全局 CSS" in m for m in v.WARNS))
+
+    def test_scoped_descendant_universal_selector_is_not_flagged(self):
+        """`.sbk-host *{}` 已被祖先限定作用域，是良好写法，不该报（后代/子组合子）。"""
+        for css in ("<style>.sbk-host * { box-sizing:border-box }</style>",
+                    "<style>.sbk-host *{margin:0}</style>",
+                    "<style>.a > *{margin:0}</style>",
+                    "<style>.a >*{margin:0}</style>",
+                    '<style>[data-chat="root"] .hud *{padding:0}</style>',
+                    "<style>.a{color:red}\n.b *{margin:0}</style>"):
+            with self.subTest(css=css):
+                reset()
+                v.check_sandbox_content_warnings(css, "测试")
+                self.assertFalse(any("全局 CSS" in m for m in v.WARNS))
+
+    def test_bare_universal_selector_is_still_flagged(self):
+        """选择器起始位置的裸 `*` 仍须报：串首 / `}` 后 / `;` 后 / `,` 后 / `@media` 内。"""
+        for css in ("<style>*{margin:0}</style>",
+                    "<style>* { margin:0 }</style>",
+                    "<style>.a{color:red}*{margin:0}</style>",
+                    "<style>.a, *{margin:0}</style>",
+                    "<style>@media screen{*{margin:0}}</style>"):
+            with self.subTest(css=css):
+                reset()
+                v.check_sandbox_content_warnings(css, "测试")
+                self.assertTrue(any("全局 CSS" in m for m in v.WARNS))
 
     def test_markdown_code_block_indent_is_warn(self):
         reset()

@@ -82,7 +82,7 @@
 
 ## 样式层（MMD美化）
 
-> 下面「静态换肤 / 运行时主题 / 风格库」各项按当前 MMD 写。沙盒模式换肤只改 `[data-chat="root"]` 上的 10 个 `--chat-*` 变量，另见沙盒专节。
+> 下面「静态换肤 / 运行时主题 / 风格库」各项按当前 MMD 写。沙盒模式换肤只改 `[data-chat="root"]` 上的 14 个 `--chat-*` 变量（实测确证，官方手册只记 10 个），另见沙盒专节。
 
 - [ ] 装饰性伪元素 pointer-events:none
 - [ ] 交互元素 position:relative + z-index
@@ -147,8 +147,8 @@
 - [ ] 无 `iframe` / `link` / `meta` / `form` / `object` / `embed`（白名单外，会被删）
 - [ ] **无全局 CSS 选择器** `*{}` / `html{}` / `body{}` / `:root{}` → 一律改 `[data-chat="root"]`
 - [ ] **HTML 没有缩进 4 个空格**——替换内容过一遍 Markdown，4 空格缩进会被当代码块，把源码原样印在页面上
-- [ ] 作者 z-index 落在 **1000–1999**（越界不会被拦，只会挡住平台长按菜单/提示）
-- [ ] 换肤只改 `[data-chat="root"]` 上的 10 个 `--chat-*` 变量，**不写死 `#fff`**（深浅色切换才跟得上）；JS 涂色的订 `theme:change`
+- [ ] 作者 z-index 落在 **3500–7999**（实测安全带）。依据：实测平台 `header`/`statusbar`/`messages`/`composer`/`author-stage` 全是 `z-index:auto` + `position:static`，手册所谓「平台 chrome 占 8000–8999」**不成立**；样式表穷举的真实占用是 `10090` snackbar / `9000` alert / `8200` message-menu / `8100` composer-snack / `8000` share-loading / `3000` stage-full / `2000` stage-content / `40` sdk-debug。3500 起是为避开舞台的 2000/3000，7999 止是为避开平台 8000+ 那几层（越界不会被拦，只会挡住平台长按菜单/提示/弹窗）
+- [ ] 换肤只改 `[data-chat="root"]` 上的 14 个 `--chat-*` 变量（实测确证；官方手册只记 10 个，漏记 `--chat-input-bg`/`--chat-input-text`/`--chat-shortcut-text`/`--chat-more-item-bg`/`--chat-share-pick-bg`），**不写死 `#fff`**（深浅色切换才跟得上）；JS 涂色的订 `theme:change`
 - [ ] 功能栏样式（背景/高度/sticky）自己写全——平台不给 `[data-slot="statusbar"]` 任何样式；**不用 JS 往功能栏 appendChild**（平台整块重画会一起没）
 
 ### 审核与验证

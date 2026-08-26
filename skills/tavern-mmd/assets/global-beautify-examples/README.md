@@ -20,7 +20,11 @@
 
 Legacy 资产只适用于它标注的当前 MMD 历史版本，不适用于本地 SillyTavern，也不能称为当前“直接可用默认成品”。确需复现时先阅读资产首页风险说明，并重新做当前 MMD 实机验证。
 
-> 🚨 **本目录全部资产都不能用在 MMD沙盒模式（`/mmdsandbox`）。** 它们的地基是 `img onerror` 激活器 + `body` / `html` 全局选择器 + 自建主题 runtime，这三样在沙盒模式分别是：**官方明令禁止**（`img onerror` 点火器属 teapot 系）、**官方校验 WARN**（`*{}` / `html{}` / `body{}` / `:root{}` 须改写成 `[data-chat="root"]`）、**没有必要**（平台自带 `data-theme` + 10 个 `--chat-*` 变量 + `theme:change` 事件）。把这里的 json 直接导进沙盒卡的结果是「样式对一半、切换按钮全不响应」，而且页面上没有报错提示。沙盒模式换肤请读 `../../references/beautify/global-css.md`「沙盒模式换肤」与 `../../references/platforms/mmd-sandbox.md` §6。
+> 🚨 **本目录全部资产都不能用在 MMD沙盒模式（`/mmdsandbox`）。** 它们的地基是 `img onerror` 激活器 + `body` / `html` 全局选择器 + 自建主题 runtime，这三样在沙盒模式分别是：**官方明令禁止**（`img onerror` 点火器属 teapot 系）、**官方校验 WARN**（`*{}` / `html{}` / `body{}` / `:root{}` 须改写成 `[data-chat="root"]`）、**没有必要**（平台自带 `data-theme` + **14 个** `--chat-*` 变量 + `theme:change` 事件）。把这里的 json 直接导进沙盒卡的结果是「样式对一半、切换按钮全不响应」，而且页面上没有报错提示。沙盒模式换肤请读 `../../references/beautify/global-css.md`「沙盒模式换肤」与 `../../references/platforms/mmd-sandbox.md` §6。
+>
+> 补两句准确性：那 14 个令牌**官方手册只记了 10 个**，漏记 `--chat-share-pick-bg`、`--chat-input-bg`、`--chat-input-text`、`--chat-shortcut-text`、`--chat-more-item-bg`（逆向沙盒样式表实测，两套主题各 14 个，定义在 `[data-theme=dark]` / `[data-theme=light]`，**无 `:root` 定义**）；另有 `--rpx` = `calc(100vw / 750)` 是平台尺寸基准，不计入 14 个。另外全局选择器那条是**文档约定 + 校验器 WARN**，不是运行时拦截 —— 实测 CSS 选择器零过滤，`:root{}` / `body{}` 写下去**不会被拦**，只是覆盖不到平台令牌（它们没有 `:root` 定义）。仍按约定作用域化，但别当成「写了就失效」去排查。
+>
+> **要成套现成的沙盒美化地基，直接用 `../sandbox-kit/`**（改 config 跑 `build_sbk.py`），方法论见 `../../references/beautify/sandbox-kit.md` —— 主题层已经把 14 个令牌、三态 dark/light/native、`theme:change` 跟随、以及「换页面背景必须 `!important`」这个坑都封好了。本目录**可复用的**是视觉设计本身：配色方案、排版节奏、组件视觉语言，换成 `[data-chat]` 选择器与 `--chat-*` 变量即可。
 
 ## 选型
 
