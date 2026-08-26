@@ -7,9 +7,9 @@
   "pageDepth": 2,
   "_pageDepth": "固定 2。",
   "assetDir": "sbk",
-  "_assetDir": "基座源码目录，相对本配置文件所在目录。base.css/core.js/theme.js 由 WP-1 提供；protocol.js/hud.js（WP-2）与 ui.js（WP-3）存在则合并、缺失则跳过并告警。",
+  "_assetDir": "基座源码目录，相对配置文件。须包含 base.css 与 11 个完整经典脚本模块，固定顺序：core.js → core-store.js → core-boot.js → theme.js → theme-panel.js → protocol.js → hud.js → hud-render.js → ui.js → ui-panel.js → ui-stage.js。缺模块表示资产不完整。",
   "hostId": "sbk-hud",
-  "_hostId": "HUD 宿主容器 id。事实卡 §3：document.currentScript 恒为 null，脚本无法自定位，只能靠固定 id 约定。",
+  "_hostId": "功能栏宿主基名。首字符须为 ASCII 字母，其余只能字母/数字/_/-，总长最多 60；基座会派生 -chr/-pin，最终 DOM id 最多 64。事实卡 §3：document.currentScript 恒为 null，脚本无法自定位，只能靠固定 id 约定。",
   "protocolTag": "状态",
   "_protocolTag": "数据协议块标签名，对应模型输出的 [状态]…[/状态]（plan.md 2.3）。🚨 一律用方括号（plan.md 已裁决第 9 条）：事实卡 §5.4 的剥壳正则 /<\\/?([\\u4e00-\\u9fa5a-zA-Z0-9_]+)(\\s+[^>]*)?>/g 会把 <状态> 这类中文尖括号标签【整个删掉】（文字保留、标签消失）。正则管线跑在剥壳【之前】，所以场景规则的正则还看得见 <状态>、能把它换成 sbk-snap 外壳；但凡是从气泡 textContent 读标记的路径（hydrate 的兜底解析、功能栏精简条 pinned、做卡人自写脚本）拿到的都是剥壳后的裸行，标记已经没了，解析必然失败。方括号不是标签，全链路都活着。解析器兼容三族写法（方/尖/书名号），但文档与默认值一律方括号——别改回尖括号。不用平台的 $名字：数据源固定 $1 且须同时含 :: 与 ;;，表达力太弱（事实卡 §5.3）。",
   "modes": {
@@ -23,7 +23,7 @@
   "statusbar": "{{hud}}",
   "_beginning": "开场白，上限 4000（事实卡 §6 运行时真值，创卡页 UI 同样显示 4000；skill 校验器写的 10240 是错的）。含状态块时须与 persona 的输出约定一致，且【必须用方括号】 [状态]…[/状态]（plan.md 已裁决第 9 条，尖括号会被剥壳正则删掉）。",
   "beginning": "推开门，潮气裹着草药味涌上来。柜台后的女人抬眼看你。\n\n「来买药，还是来卖命？」\n\n[状态]\n体力: 84/100\n灵力: 30/60\n境界: 炼气三层|120/300\n银钱: 380\n装备: 头:斗笠|身:麻衣:防御+2|腰:药囊\n属性: 攻:12 防:8:破甲 敏:15\n位置: 内城-东市-药铺\n好感: 苏九=61, 阿澈=25\n标记: 初来乍到, 中毒\n[/状态]",
-  "_theme": "主题 token。语义名见 theme.js 的 MAP，也可直给 --chat-* / --sbk-*。扁平写法 = 两套主题同值；写 {dark:{},light:{}} 分别覆盖。生成器编译成 [data-chat=\"root\"][data-theme=\"*\"] 选择器：特异度 (0,2,0) 高于平台的 (0,1,0)，深浅色切换不会覆盖回去，且不需要 !important（事实卡 §7.1 / 硬约束 10）。写 :root 完全无效——平台无 :root 定义。",
+  "_theme": "【制作期项目覆写】＝作者基线。语义名见 theme.js 的 MAP，也可直给 --chat-* / --sbk-*。扁平写法 = 两套主题同值；写 {dark:{},light:{}} 分别覆盖。🚨 2.1 起它【不再被静态编译进 sbk-css】（这是 1.0 的双通道缺陷：静态覆写 + theme.js 动态 <style> 两个所有者，于是「关闭美化」只清得掉动态那条，关了还是没跟随平台）。现在 theme 经 boot 信封下发给 theme.js，作三层合成的【最底层】：author base → 选中的 preset → 玩家 per-mode overrides，最终只有 theme.js 的一个 <style> 写主题。选择器仍是 [data-chat=\"root\"][data-theme=\"*\"]：特异度 (0,2,0) 高于平台的 (0,1,0)，深浅色切换不会覆盖回去，且不需要 !important（事实卡 §7.1 / 硬约束 10）。写 :root 完全无效——平台无 :root 定义。本例保留 theme 正是为了演示「项目级基线覆写」：它会被下面 preset 选中的风格包盖住同名令牌，但 preset 没写的令牌仍由它生效。",
   "theme": {
     "dark": {
       "accent": "#c8a15a",
@@ -36,8 +36,16 @@
       "onAccent": "#ffffff"
     }
   },
-  "_schema": "状态栏 schema，原样传给 SBK.ui.hud / SBK.ui.snapshot（经 SBK.boot 归一化）。权威键名是 fields（协议说明 §3 / hud.js 的 pick 只读 sc.fields）。🚨 别写成 rows：那是容错别名，SBK.boot 会归一化并告警，但直接调 SBK.ui.hud 时不会——hud 读不到 fields 就静默退化成「按模型输出顺序全渲染」，现象是 schema 像根本没生效，极难排查。其余可选键：title 小标题／hostId 宿主 id／persist 走 SBK.store 存档／extra 声明 fields 后是否把其余字段也渲染。",
-  "_schemaTypes": "🚨 合法 type 恰十种（九个数据类型 + 一个版面项），别猜表外的名字：bar 进度条（a/b 或 nn% 形态）／num 数值（可带 unit）／text 一行文本／tags 标签组（逗号分隔）／entities 多实体（名=数, 名=数）／path 面包屑（连字符分段，如 内城-东市-药铺）／level 等级+经验（名|当前/上限，如 炼气三层|120/300）／stats 属性网格（键:值 逗号或空白分项，第三段进 tooltip）／kvlist 竖排键值（槽位:名|槽位:名，第三段进 tooltip）／section 版面分组（无 key，开一张分组卡，后续字段归入该组直到下一个 section）。写了表外的名字不会报错，hud.js 的 TYPES[type] || TYPES.text 会静默回落成 text。",
+  "_presets": "六维风格包。两种写法：① 路径数组（相对本配置所在目录的 JSON），② 内联映射 {\"包名\":{六维…}}。六维键【恰好】 palette/layout/ui/font/cohesion/decoration，多一个少一个都报错（写错的维会整维静默不生效，实机看不出少了什么）。每维必须【双侧完整】给 dark 与 light：平台强制两套主题都存在、玩家随时可能切，只给一侧时另一侧回落平台原生令牌，实机现象是「切到浅色整卡失效」（盘点 E.3）。生成器把它们编译成 theme.register 可消费的 {tokens, tune} 放进 boot 信封——tune 是结构化数字（fontSize/lineHeight/opacity），这样 prefs.get 能回读它们而不必去反解析任意 CSS。生成期校验：未知六维键/未知令牌名/危险值一律 ERROR；正文 text 对 bg 与 surface ≥4.5:1，accent 作前景与 border 作关键图形 ≥3:1（只对可解析 hex 做严格检查，不可解析【也报错】而不是假通过——静默放行的后果可能是实机白底白字）。🚨 只列本卡真要用的包，绝不把整个风格库搬进来：每个包都要进 boot 规则的 replaceString，全量搬运会顶到 §6 长度上限，而玩家一次只用得上一套。",
+  "presets": [
+    "presets/素雅阅读.json",
+    "presets/密集状态.json",
+    "presets/表现性科技.json"
+  ],
+  "_preset": "默认风格包名，必须是 presets 里已注册的名字（不然生成器报错：theme.js 只接受已注册包名，实机会静默退回「只有 author base」）。它只作【首次默认】：玩家在设置面板里挑过风格包之后，存档里的选择优先。",
+  "preset": "素雅阅读",
+  "_schema": "状态栏 schema 经 SBK.boot() 归一化后交给 SBK.ui.snapshot；权威键名是 fields，rows 仅为会告警的兼容别名。SBK.ui.hud 只保留自定义控件注册入口，不再渲染状态面板。可选键：title、extra。不要使用已删除的 schema.persist；业务持久化显式调用 SBK.store.save/load/merge。",
+  "_schemaTypes": "合法 type 共十三种：十二个数据控件 bar/num/text/tags/entities/path/level/stats/kvlist/time/summary/turn，加版面项 section。time/summary/turn 只在 schema 显式指定时使用，不自动推断；option/bag/enemy 不在本轮。未知 type 生成期 ERROR，运行时告警一次并按 text 降级。",
   "schema": {
     "fields": [
       {

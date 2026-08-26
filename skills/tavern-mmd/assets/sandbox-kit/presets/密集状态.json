@@ -1,0 +1,117 @@
+{
+  "name": "密集状态",
+  "_intent": "数值面板优先：紧节奏、四条语义色高辨识、小字号塞更多字段。适合养成/战斗/管理类卡。",
+  "_safety": "零外部资源（无 url()/@import/外部字体）。尺寸走平台 --rpx；字号走 CSS px。",
+  "palette": {
+    "_note": "中性偏冷底色让彩色数值跳出来。核心五键逐侧显式 hex。",
+    "dark": {
+      "bg": "#101216",
+      "surface": "#191c22",
+      "text": "#f0f2f5",
+      "muted": "#9aa3b0",
+      "_border": "对 bg 达 3:1（WCAG 1.4.11）。密集布局里边界线更是分隔的主力，压暗到 1.91:1 会让整张表糊成一片。",
+      "border": "#666f7d",
+      "accent": "#5aa9e6",
+      "onAccent": "#08121c",
+      "userBubble": "#1e232b",
+      "aiBubble": "#191c22",
+      "bubbleText": "#f0f2f5",
+      "inputBg": "#191c22",
+      "inputText": "#f0f2f5",
+      "shortcutText": "#f0f2f5",
+      "moreItemBg": "#242a33",
+      "sharePick": "#242a33"
+    },
+    "light": {
+      "bg": "#eef1f5",
+      "surface": "#ffffff",
+      "text": "#1b1f26",
+      "muted": "#525a66",
+      "border": "#7c8592",
+      "accent": "#1a5f96",
+      "onAccent": "#ffffff",
+      "userBubble": "#e2e7ee",
+      "aiBubble": "#ffffff",
+      "bubbleText": "#1b1f26",
+      "inputBg": "#ffffff",
+      "inputText": "#1b1f26",
+      "shortcutText": "#1b1f26",
+      "moreItemBg": "#e2e7ee",
+      "sharePick": "#e2e7ee"
+    }
+  },
+  "layout": {
+    "_note": "紧节奏：gap/pad 压到基座默认以下，radius 略收。密集面板靠间距而不是分割线区分层次。",
+    "dark": {
+      "gap": "calc(8 * var(--rpx))",
+      "pad": "calc(10 * var(--rpx))",
+      "radius": "calc(6 * var(--rpx))"
+    },
+    "light": {
+      "gap": "calc(8 * var(--rpx))",
+      "pad": "calc(10 * var(--rpx))",
+      "radius": "calc(6 * var(--rpx))"
+    }
+  },
+  "ui": {
+    "_note": "提亮层比基座更明显：密集布局里第三档底色是分组的主要手段（平台只给 bg/surface 两档）。",
+    "dark": {
+      "shadow": "0 2px 10px rgba(0, 0, 0, .4)",
+      "lift": "rgba(255, 255, 255, .07)",
+      "ball": "calc(80 * var(--rpx))",
+      "drw-w": "calc(600 * var(--rpx))"
+    },
+    "light": {
+      "shadow": "0 2px 10px rgba(0, 0, 0, .14)",
+      "lift": "rgba(0, 0, 0, .05)",
+      "ball": "calc(80 * var(--rpx))",
+      "drw-w": "calc(600 * var(--rpx))"
+    }
+  },
+  "font": {
+    "_note": "小字号 + 紧行距塞更多字段，但 13px 仍在 12..22 可读区间内，不靠越界换密度。",
+    "dark": {
+      "fontSize": 13,
+      "lineHeight": 1.35,
+      "fs-sm": "calc(18 * var(--rpx))"
+    },
+    "light": {
+      "fontSize": 13,
+      "lineHeight": 1.35,
+      "fs-sm": "calc(18 * var(--rpx))"
+    }
+  },
+  "cohesion": {
+    "dark": {
+      "contrast": "AA",
+      "density": "compact",
+      "motion": "normal",
+      "mood": "仪表盘 冷色",
+      "pairing": "养成 / 战斗 / 资源管理"
+    },
+    "light": {
+      "contrast": "AA",
+      "density": "compact",
+      "motion": "normal",
+      "mood": "仪表盘 冷色",
+      "pairing": "养成 / 战斗 / 资源管理"
+    }
+  },
+  "decoration": {
+    "_note": "四条语义色拉到最高辨识度：色相彼此相距 ≥60°，小色块也能一眼分清（1.0 五条 bar 同色是要修的头号视觉问题）。浅色侧 glow 置 0：光晕打白底像脏边。",
+    "dark": {
+      "glow": "calc(12 * var(--rpx))",
+      "hp": "#ff5566",
+      "mp": "#3fa9ff",
+      "sp": "#3fd66b",
+      "xp": "#ffcc33"
+    },
+    "light": {
+      "glow": "0",
+      "hp": "#c92a2a",
+      "mp": "#1565c0",
+      "sp": "#237a3a",
+      "xp": "#9a6a00"
+    }
+  }
+}

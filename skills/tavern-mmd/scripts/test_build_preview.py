@@ -557,14 +557,16 @@ class TestPanorama(unittest.TestCase):
         self.assertIn("body{color:red}", html)        # 全局美化样式
 
     def test_panorama_scaffold_not_marked_as_tested_script(self):
-        """测试脚手架在被测内容外，不应被当成被测产物加平台角标。"""
-        for platform in ("mmd", "mmdsandbox"):
+        """测试脚手架在被测内容外，不应被当成被测产物加平台角标。
+        沙盒改用 data-preview-sim 系脚手架（经典 <script>，无 img onerror）。"""
+        cases = (("mmd", "data-pano-runtime-scaffold"),
+                 ("mmdsandbox", "data-preview-sim"))
+        for platform, marker in cases:
             with self.subTest(platform=platform):
                 html = bp.assemble_panorama(self.FOUR, platform, "t.json")
-                self.assertIn("data-pano-scaffold", html)
-                self.assertIn("data-pano-runtime-scaffold", html)
-                runtime_idx = html.find("data-pano-runtime-scaffold")
-                around = html[max(0, runtime_idx - 240):runtime_idx]
+                self.assertIn(marker, html)
+                idx = html.find(marker)
+                around = html[max(0, idx - 240):idx]
                 self.assertNotIn("mmd-warn-badge", around)
 
     def test_panorama_local_array_degrades_gracefully(self):
@@ -612,10 +614,30 @@ class TestSandboxPipeline(unittest.TestCase):
         return {"chatVersion": 1, "pageDepth": 2, "statusbar": statusbar,
                 "beginning": beginning, "personality": "", "regex_scripts": scripts}
 
-    def test_bare_literal_marker_renders_and_is_not_flagged(self):
-        """D7 回归闸：纯字面量标记是官方首选写法，必须正常替换且不报非法。"""
+    def test_bare_literal_is_error_and_never_renders(self):
+        """🚨 实机推翻原 D7：裸字面量在真机上**不生效**（探针 {{probe}} 完全不触发，
+        改 /{{probe}}/ 立即生效）。预览必须判 ERROR 且**绝不替换**——否则作者在预览里
+        看到内容出现、上真机什么都没有，这是最坏的一种谎。"""
         obj = self.card("正文 {{hud}} 尾巴", [
             {"id": -1, "scriptName": "hud", "findRegex": "{{hud}}",
+             "replaceString": "<div id='must-not-render'>血量</div>"}])
+        invalid = bp.find_invalid_findregexes(obj, "mmdsandbox")
+        self.assertEqual(len(invalid), 1)
+        self.assertEqual(invalid[0][0], "hud")
+        self.assertIn("实机裸字面量未生效", invalid[0][2])
+        self.assertIn("worker 源码", invalid[0][2])
+        # 不替换：触发串原样留在正文里。
+        rendered = bp.apply_regex_pipeline(obj, "mmdsandbox")
+        self.assertIn("{{hud}}", rendered)
+        self.assertNotIn("must-not-render", rendered)
+        html = bp.assemble_preview(obj, "mmdsandbox", "t.json")
+        self.assertIn("ERROR 非法 findRegex", html)
+        self.assertTrue(bp.fatal_preview_findings(obj, "mmdsandbox")["findRegex"])
+
+    def test_slash_form_marker_renders_and_is_not_flagged(self):
+        """交付形态（slash）必须正常替换且不报非法。"""
+        obj = self.card("正文 {{hud}} 尾巴", [
+            {"id": -1, "scriptName": "hud", "findRegex": "/{{hud}}/",
              "replaceString": "<div class='my-hud'>血量</div>"}])
         rendered = bp.apply_regex_pipeline(obj, "mmdsandbox")
         self.assertIn("<div class='my-hud'>血量</div>", rendered)
@@ -626,11 +648,15 @@ class TestSandboxPipeline(unittest.TestCase):
         self.assertNotIn("ERROR 非法 findRegex", html)
         self.assertIn("my-hud", html)
 
-    def test_literal_metachars_are_escaped_and_replacement_is_global(self):
-        obj = self.card("axb a.b a.b", [
-            {"id": -1, "scriptName": "点", "findRegex": "a.b", "replaceString": "<b>X</b>"}])
-        # 元字符被转义：a.b 不匹配 axb；且字面量全文每处都换
-        self.assertEqual(bp.apply_regex_pipeline(obj, "mmdsandbox"), "axb <b>X</b> <b>X</b>")
+    def test_worker_literal_branch_stays_explainable(self):
+        """worker 源码确有 literal 分支，内部函数要能说明它；但它不是交付判据。"""
+        self.assertEqual(bp.classify_sandbox_pattern("{{hud}}")[:2], ("literal", "{{hud}}"))
+        self.assertEqual(bp.classify_sandbox_pattern("a.b")[:2], ("literal", "a.b"))
+        # 交付门禁与 worker 分类分开：前者对字面量判错，后者仍照实描述 worker。
+        self.assertIn("实机裸字面量未生效", bp.sandbox_pattern_delivery_error("{{hud}}"))
+        self.assertIsNone(bp.sandbox_pattern_delivery_error("/{{hud}}/"))
+        self.assertEqual(bp.sandbox_delivery_regex("/{{hud}}/"), "/{{hud}}/g")
+        self.assertIsNone(bp.sandbox_delivery_regex("{{hud}}"))
 
     def test_slash_form_without_g_is_still_global(self):
         obj = self.card("aa ba", [
@@ -662,9 +688,9 @@ class TestSandboxPipeline(unittest.TestCase):
         """§2.1：<style>/<script> 装卡即抽出，不论这条规则有没有匹配到都会装上。
         官方首选写法就是「专开一条只放 script/style、匹配式谁都不引用」。"""
         obj = self.card("正文", [
-            {"id": -1, "scriptName": "卡名-style", "findRegex": "{{卡名-style}}",
+            {"id": -1, "scriptName": "卡名-style", "findRegex": "/{{卡名-style}}/",
              "replaceString": "<style>.my-hud{color:red}</style>"},
-            {"id": -2, "scriptName": "卡名-kit", "findRegex": "{{卡名-kit}}",
+            {"id": -2, "scriptName": "卡名-kit", "findRegex": "/{{卡名-kit}}/",
              "replaceString": "<script>function tap(){}</script>"},
         ])
         assets = bp.collect_sandbox_assets(obj)
@@ -679,7 +705,7 @@ class TestSandboxPipeline(unittest.TestCase):
 
     def test_hoisted_assets_are_removed_from_visible_replacement(self):
         obj = self.card("{{hud}}", [
-            {"id": -1, "scriptName": "hud", "findRegex": "{{hud}}",
+            {"id": -1, "scriptName": "hud", "findRegex": "/{{hud}}/",
              "replaceString": "<style>.a{color:red}</style><div class='my-hud'>栏</div>"}])
         rendered = bp.apply_regex_pipeline(obj, "mmdsandbox")
         self.assertIn("<div class='my-hud'>栏</div>", rendered)
@@ -690,7 +716,7 @@ class TestSandboxPipeline(unittest.TestCase):
         """svg 及 path/circle/rect/line/text 在沙盒白名单内（§5.2），
         但通用 HTML_TAGS 不含它们 → 必须不被误判成悬空标记。"""
         obj = self.card("{{图}}", [
-            {"id": -1, "scriptName": "图", "findRegex": "{{图}}",
+            {"id": -1, "scriptName": "图", "findRegex": "/{{图}}/",
              "replaceString": "<svg viewBox='0 0 10 10'><circle r='4'></circle>"
                               "<path d='M0 0'></path></svg>"}])
         self.assertEqual(bp.find_dangling_markers(obj, "mmdsandbox"), [])
@@ -701,7 +727,8 @@ class TestSandboxPipeline(unittest.TestCase):
         self.assertIn("<missing>", bp.find_dangling_markers(obj, "mmdsandbox"))
 
     def test_mmd_still_rejects_bare_literal(self):
-        """不得削弱当前MMD：裸字面量在 /mmd 仍是结构错误。"""
+        """不得削弱当前MMD：裸字面量在 /mmd 仍是结构错误。
+        ⚠️ 这条的 findRegex 必须保持**裸字面量**——它测的就是 MMD 拒绝裸字面量。"""
         obj = {"pageDepth": 2, "statusbar": "", "beginning": "{{hud}}",
                "regex_scripts": [{"id": -1, "scriptName": "hud", "findRegex": "{{hud}}",
                                   "replaceString": "<div>x</div>"}]}
@@ -727,20 +754,56 @@ class TestSandboxRendering(unittest.TestCase):
                          bp.apply_platform_limits(source, "mmdsandbox"))
         obj = {"chatVersion": 1, "pageDepth": 2, "statusbar": "", "beginning": "{{hud}}",
                "personality": "", "regex_scripts": [
-                   {"id": -1, "scriptName": "hud", "findRegex": "{{hud}}",
+                   {"id": -1, "scriptName": "hud", "findRegex": "/{{hud}}/",
                     "replaceString": "<button onclick=\"tap()\">点</button>"}]}
         self.assertEqual(bp.find_invalid_onclicks(obj, "mmdsandbox"), [])
         self.assertEqual(bp.fatal_preview_findings(obj, "mmdsandbox")["onclick"], [])
 
-    def test_svg_onclick_and_author_data_attr_are_warned(self):
+    def test_svg_on_attr_and_author_data_attr_are_warned(self):
         content = ('<svg viewBox="0 0 10 10"><circle onclick="tap()" r="4"></circle></svg>'
                    '<div data-hp="80">血量</div>')
         kinds = [k for k, _ in bp.find_sandbox_sanitized_attrs(content)]
-        self.assertIn("svg-onclick", kinds)
+        # 实测 SVG 内**所有** on* 都被删（不只 onclick），故种类名为 svg-on-attr。
+        self.assertIn("svg-on-attr", kinds)
         self.assertIn("author-data-attr", kinds)
         rows = bp._onclick_audit_html(content, "mmdsandbox")
-        self.assertIn("svg 内的 onclick 会被沙盒净化删除", rows)
+        self.assertIn("svg 内的 on* 会被沙盒净化删除", rows)
         self.assertIn("作者自写 data-* 会被沙盒净化删除", rows)
+
+    def test_confirmed_sanitization_subset_is_audited(self):
+        """已确证净化子集：aria-*/role、SVG on*、禁用标签、SAFE_FOR_XML 危险属性值。"""
+        cases = {
+            "aria-or-role": '<div role="button" aria-label="x">a</div>',
+            "stripped-tag": '<iframe src="x"></iframe>',
+            "safe-for-xml": '<b onclick="if(a[0]>1){f()}">x</b>',
+            "svg-on-attr": '<svg><circle onmouseenter="f()"></circle></svg>',
+        }
+        for kind, html in cases.items():
+            with self.subTest(kind=kind):
+                kinds = [k for k, _ in bp.find_sandbox_sanitized_attrs(html)]
+                self.assertIn(kind, kinds)
+
+    def test_safe_for_xml_spaced_comparison_is_not_flagged(self):
+        """实测 title="a[0] > 1"（] 与 > 之间有空格）完整保留 → 不该报。"""
+        kinds = [k for k, _ in bp.find_sandbox_sanitized_attrs('<b title="a[0] > 1">x</b>')]
+        self.assertNotIn("safe-for-xml", kinds)
+
+    def test_output_budget_and_empty_match_rollback_are_errors(self):
+        card = {"chatVersion": 1, "pageDepth": 2, "statusbar": "", "beginning": "正文",
+                "personality": "", "regex_scripts": [
+                    {"id": -1, "scriptName": "超预算", "findRegex": "/正文/",
+                     "replaceString": "x" * (bp.SANDBOX_OUTPUT_BUDGET_FLOOR + 1)},
+                    {"id": -2, "scriptName": "空串匹配", "findRegex": "/a*/",
+                     "replaceString": "<b>x</b>"}]}
+        findings = bp.find_sandbox_budget_findings(card, "mmdsandbox")
+        kinds = {name: kind for name, kind, _ in findings}
+        self.assertEqual(kinds.get("超预算"), "replacement-alone")
+        self.assertEqual(kinds.get("空串匹配"), "empty-match")
+        rows = bp._sandbox_budget_audit_html(card, "mmdsandbox")
+        self.assertIn("整条回滚", rows)
+        # 预算公式锁定：max(262144, 输入长度×4)
+        self.assertEqual(bp.sandbox_output_budget(0), 262144)
+        self.assertEqual(bp.sandbox_output_budget(100000), 400000)
 
     def test_platform_data_attrs_are_not_warned(self):
         content = ('<div data-chat="root"><span data-slot="statusbar"></span>'
@@ -768,12 +831,13 @@ class TestSandboxRendering(unittest.TestCase):
 class TestSandboxPanoramaChrome(unittest.TestCase):
     """沙盒模式全景注入官方稳定钩子与 --chat-* 变量，作者选择器/变量在预览里可解析。"""
 
+    # 匹配式一律 slash 形态：实机裸字面量不生效（事实卡 §8.21），预览判 ERROR。
     CARD = {"chatVersion": 1, "pageDepth": 2, "statusbar": "{{hud}}",
             "beginning": "正文 {{panel}}", "personality": "",
             "regex_scripts": [
-                {"id": -1, "scriptName": "hud", "findRegex": "{{hud}}",
+                {"id": -1, "scriptName": "hud", "findRegex": "/{{hud}}/",
                  "replaceString": "<div class='my-hud'>功能栏</div>"},
-                {"id": -2, "scriptName": "panel", "findRegex": "{{panel}}",
+                {"id": -2, "scriptName": "panel", "findRegex": "/{{panel}}/",
                  "replaceString": "<div class='my-panel'>面板</div>"},
             ]}
 
@@ -884,10 +948,161 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         html = bp.assemble_panorama(card, "mmdsandbox", "t.json")
         self.assertNotIn(self.STATUSBAR_NODE, html)
 
+    def test_multiround_toolbar_carries_raw_and_rendered_state(self):
+        card = dict(self.CARD, regex_scripts=list(self.CARD["regex_scripts"]) + [{
+            "id": -9, "scriptName": "状态快照",
+            "findRegex": r"/\[状态\]([\s\S]*?)\[\/状态\]/",
+            "replaceString": '<div class="sbk-snap sbk-snap--raw">$1</div>'
+        }])
+        html = html_mod.unescape(bp.assemble_panorama(card, "mmdsandbox", "t.json"))
+        self.assertIn("AI 追答", html)
+        self.assertIn("[状态]", html, "事件 payload 必须保留原始模型正文")
+        self.assertIn("sbk-snap sbk-snap--raw", html, "动态气泡 DOM 必须使用同一离线规则管线")
+        self.assertIn("好感: 苏九=64", html, "第二轮夹具应有可观察的状态变化")
+
+    def test_panorama_diagnostics_are_collapsed_after_preview(self):
+        html = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn('<details class="pano-audit">', html)
+        self.assertNotIn('<details class="pano-audit" open', html,
+                         "诊断说明默认必须折叠，不能挡住实际预览")
+        self.assertIn("诊断与证据说明（默认折叠）", html)
+        self.assertLess(html.index('class="pano-frame"'), html.index('class="pano-audit"'),
+                        "实际预览必须排在诊断说明之前")
+        self.assertIn("NOT SIMULATED", html, "折叠只能改变布局，不能删除证据边界")
+
+    def test_sandbox_panorama_matches_real_iframe_permissions(self):
+        contract = bp.load_sandbox_contract()
+        permissions = contract["environment"]["hostIframeSandbox"]
+        self.assertEqual(
+            permissions["attribute"],
+            "allow-scripts allow-same-origin allow-forms allow-modals allow-downloads",
+        )
+        self.assertEqual(permissions["accuracy"], "exact")
+        html = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn('sandbox="%s"' % permissions["attribute"], html)
+        legacy = html_mod.unescape(bp.assemble_panorama(TestPanorama.FOUR, "mmd", "t.json"))
+        self.assertIn('sandbox="allow-scripts allow-same-origin"', legacy)
+        self.assertNotIn("allow-forms", legacy)
+
     def test_panorama_states_what_is_not_simulated(self):
+        """SDK 现在**有**本地仿真，但必须同时讲清哪些仍需真实站验证。"""
         html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
-        self.assertIn("未模拟", html)
-        self.assertIn("官方 SDK", html)
+        self.assertIn("NOT SIMULATED", html)
+        self.assertIn("真实站验证", html)
+        self.assertIn("真实多轮 AI", html)
+        self.assertIn("本地日常仿真，不是完整平台", html)
+        # probe-needed 绝不能显示成已精确模拟。
+        self.assertIn("probe-needed 一律<b>不代表已精确模拟</b>", html)
+        self.assertIn("Markdown", html)
+
+    def test_panorama_installs_sdk_simulator_before_author_assets(self):
+        """🚨 顺序即契约：实机上作者脚本执行时 window.sdk 已在位。"""
+        card = dict(self.CARD, regex_scripts=list(self.CARD["regex_scripts"]) + [
+            {"id": -3, "scriptName": "kit", "findRegex": "/{{kit}}/",
+             "replaceString": "<script>window.__author_ran=1;</script>"}])
+        html = bp.assemble_panorama(card, "mmdsandbox", "t.json")
+        sim_idx = html.find("data-preview-sim=&quot;1&quot;")
+        hoist_idx = html.find("data-preview-hoisted")
+        self.assertGreater(sim_idx, -1, "必须内联模拟器")
+        self.assertGreater(hoist_idx, -1, "必须有作者 hoisted 区块")
+        self.assertLess(sim_idx, hoist_idx, "模拟器必须在作者 hoisted assets 之前")
+        self.assertIn("__MMD_SANDBOX_SIM_CONFIG__", html)
+        self.assertIn("__MMD_SANDBOX_SIM__", html)
+
+    def test_sandbox_panorama_has_no_img_onerror_scaffold(self):
+        """沙盒 <script> 是一等公民，脚手架绝不能再用 img onerror（官方明令禁止）。"""
+        for profile in bp.SANDBOX_PROFILES:
+            with self.subTest(profile=profile):
+                html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json",
+                                            sandbox_profile=profile)
+                self.assertNotIn("onerror", html)
+        # MMD 旧分支保留 onerror 载体，不受影响。
+        self.assertIn("onerror", bp.assemble_panorama(TestPanorama.FOUR, "mmd", "t.json"))
+
+    def test_sandbox_profiles_are_reflected_in_output(self):
+        chat = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json", sandbox_profile="chat")
+        thin = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json",
+                                    sandbox_profile="thin-preview")
+        self.assertIn("profile=chat", chat)
+        self.assertIn("profile=thin-preview", thin)
+        self.assertIn('&quot;profile&quot;: &quot;thin-preview&quot;', thin)
+        # thin 下 cache 写操作没有实测依据 → 必须降级标 probe-needed。
+        # 定位到 probe-needed **能力桶那一行**（按 data 属性取），不要撞上 Markdown 告警。
+        bucket = thin.split('data-preview-bucket="probe-needed">', 1)[1]
+        bucket = bucket.split("</div>", 1)[0]
+        self.assertIn("cache.set", bucket)
+        self.assertIn("cache.remove", bucket)
+        # chat 下这两项是 conservative，probe-needed 桶整行都不该存在。
+        self.assertNotIn('data-preview-bucket="probe-needed"', chat)
+        self.assertIn("cache.set",
+                      chat.split('data-preview-bucket="conservative">', 1)[1]
+                          .split("</div>", 1)[0])
+        self.assertIn("probe-needed 2", thin)
+        self.assertIn("probe-needed 0", chat)
+        # 非法 profile 回落到 chat，不炸。
+        self.assertIn("profile=chat",
+                      bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json",
+                                           sandbox_profile="nonsense"))
+
+    def test_contract_pins_corrected_sdk_facts(self):
+        """契约必须钉住几处易回退的实测真值（都曾被写错过）。"""
+        c = bp.load_sandbox_contract()
+        # version 是字符串 '1'，不是数字 1。
+        self.assertEqual(c["sdk"]["version"], "1")
+        self.assertIsInstance(c["sdk"]["version"], str)
+        # 只有 4 个能力是异步 Promise，其余同步 void。
+        self.assertEqual(sorted(c["sdk"]["asyncCapabilities"]),
+                         ["message.edit", "message.send", "save.remove", "save.set"])
+        self.assertEqual(c["sdk"]["messageSendReturns"], "Promise<void>")
+        # 错误码拼写是 INVALID_ARGS。
+        self.assertIn("INVALID_ARGS", c["sdk"]["errorCodes"]["known"])
+        self.assertNotIn("INVALID_ARG", c["sdk"]["errorCodes"]["known"])
+        # message:unmount 无载荷，不许伪装 4 键。
+        self.assertEqual(c["eventPayloads"]["message:unmount"]["shape"], "undefined")
+        # ready 无 late replay。
+        self.assertEqual(c["events"]["lateReplay"]["notReplayed"], ["ready"])
+        self.assertEqual(sorted(c["events"]["lateReplay"]["replayed"]),
+                         ["message:done", "message:mount"])
+
+    def test_simulator_source_matches_contract_signatures(self):
+        """源码层对撞：模拟器不得把同步能力 Promise 化，version 必须是字符串。"""
+        src = bp.load_sandbox_sim_source()
+        self.assertIn("version: '1'", src)
+        self.assertNotIn("version: 1", src)
+        self.assertIn("INVALID_ARGS", src)
+        self.assertNotIn("INVALID_ARG'", src)
+        # 同步 void 能力走 syncOk/thinThrow，不走 resolved/thinReject。
+        self.assertIn("function syncOk", src)
+        for capability in ("input.set", "composer.show", "cache.set", "stage.open"):
+            with self.subTest(capability=capability):
+                self.assertIn("syncOk('%s'" % capability, src)
+        # 那 4 个异步能力才允许 resolved/thinReject。
+        for capability in ("message.send", "save.set"):
+            with self.subTest(capability=capability):
+                self.assertIn("thinReject('%s')" % capability, src)
+        # 收窄必须先看游标自身（否则桥接层拿错气泡根）。
+        self.assertIn("matchesSel(cursor, sel)", src)
+
+    def test_contract_and_accuracy_are_embedded(self):
+        html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
+        contract = bp.load_sandbox_contract()
+        self.assertIn("契约 v%s" % contract["contractVersion"], html)
+        self.assertIn("能力 30 项", html)
+        for level in ("exact", "conservative", "probe-needed"):
+            with self.subTest(level=level):
+                self.assertIn('data-preview-accuracy="%s"' % level,
+                              html_mod.unescape(html))
+        # 冷启动顺序与 payload 形状写进页面，作者一眼能核对。
+        self.assertIn("message:new → message:mount → message:done → ready", html)
+        self.assertIn("{content,id,role,serverId}", html)
+
+    def test_toolbar_exposes_simulation_controls(self):
+        html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
+        for label in ("追加 AI", "流式追加", "结束流式", "多轮对话", "切深浅色",
+                      "切会话", "平台关舞台", "键盘弹起", "事件日志"):
+            with self.subTest(label=label):
+                self.assertIn(label, html)
+        self.assertIn("__MMD_SANDBOX_SIM__.control", html_mod.unescape(html))
 
     def test_other_platforms_keep_scaffold_unchanged(self):
         for platform in ("mmd", "st"):

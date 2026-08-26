@@ -1,0 +1,324 @@
+{
+  "contractVersion": "1.0.1",
+  "title": "MMD 沙盒模式（chatVersion:1）本地仿真契约",
+  "purpose": "build-preview 沙盒全景与 mmdsandbox-sim.js 共用的事实清单。仿真页是回归工具，不是事实来源。",
+  "sourceOfTruth": {
+    "priority": "沙盒应用源码 > 实机观察 > 官方手册 > 官方 skill",
+    "primary": "sandbox-foundation/资料/基座事实卡.md",
+    "probe": "sandbox-foundation/资料/探针实测原始数据.md",
+    "probeDate": "2026-08-26",
+    "latestReadOnlyObservationDate": "2026-08-27",
+    "probeEnvironment": "https://c64257.sbx.aitchat.org 创卡页预览 iframe（瘦环境）",
+    "conflictRule": "冲突以基座事实卡为准；references/platforms/mmd-sandbox.md 为叙述性文档"
+  },
+  "accuracyLevels": {
+    "exact": "实机探针或源码逐字确证，模拟器按确证行为复现",
+    "conservative": "行为方向已知但取值/时序未逐一实测，模拟器给保守确定性实现",
+    "probe-needed": "尚未确证，模拟器不声称精确；界面必须标注需真实站验证"
+  },
+  "sdk": {
+    "global": "globalThis.sdk",
+    "version": "1",
+    "versionIsString": true,
+    "versionNote": "🚨 sdk.version 是字符串 '1'，不是数字 1。作者写 sdk.version === 1 永远为假。",
+    "frozen": false,
+    "isProxy": false,
+    "topLevelKeys": [
+      "cache", "composer", "debug", "input", "message", "on",
+      "role", "save", "stage", "user", "version"
+    ],
+    "topLevelKeyCount": 11,
+    "missingCapabilities": ["once", "off"],
+    "missingCapabilityAccuracy": "exact",
+    "missingCapabilityEvidence": "探针 F.has_once=undefined / F.has_off=undefined（双重确认）",
+    "onReturns": "undefined",
+    "unsubscribe": "无 off/once；唯一退订是内部 Ac()，会清掉所有脚本的全部订阅",
+    "callbackArgCount": 1,
+    "callbackArgCountEvidence": "探针3 argcount=1；契约里的第二参 bubbleRoot 由内核桥接层自行合成",
+    "capabilityCount": 30,
+    "errorCodes": {
+      "count": 7,
+      "known": ["NOT_SUPPORTED", "INVALID_ARGS", "BUSY", "NETWORK"],
+      "accuracy": "conservative",
+      "note": "实机共 7 个（手册漏 BUSY/NETWORK）；完整名单未探全，模拟器只用 NOT_SUPPORTED 与 INVALID_ARGS"
+    },
+    "asyncCapabilities": ["message.send", "message.edit", "save.set", "save.remove"],
+    "asyncCapabilityNote": "🚨 只有这 4 个返回 Promise。其余写类能力（input.* / composer.show|hide / cache.set|remove / stage.open|close）都是**同步 void**；把它们 Promise 化会让作者写出真机上没意义的 await，且 thin 下失败会变成未处理 rejection 而非当场抛错。",
+    "asyncCapabilityAccuracy": "conservative",
+    "messageSendReturns": "Promise<void>",
+    "messageSendReturnsNote": "不返回 payload：要拿消息 id/serverId 请订阅 message:* 事件"
+  },
+  "capabilities": {
+    "input.get": {"accuracy": "exact", "note": "瘦预览实测返回 \"\""},
+    "input.set": {"accuracy": "conservative", "note": "写类能力；模拟器写本页 composer textarea"},
+    "input.add": {"accuracy": "conservative", "note": "追加到 composer 值尾"},
+    "input.insert": {"accuracy": "conservative", "note": "按当前光标位插入"},
+    "input.clear": {"accuracy": "conservative"},
+    "input.focus": {"accuracy": "conservative"},
+    "input.blur": {"accuracy": "conservative"},
+    "input.getCursor": {"accuracy": "exact", "note": "瘦预览实测返回 0"},
+    "input.setCursor": {"accuracy": "conservative"},
+    "composer.show": {"accuracy": "conservative", "note": "改 root 的 data-composer"},
+    "composer.hide": {"accuracy": "conservative"},
+    "composer.visible": {"accuracy": "exact", "note": "瘦预览实测 true，非降级 false"},
+    "message.send": {"accuracy": "conservative", "note": "本地追加用户气泡；无真实模型回复"},
+    "message.edit": {"accuracy": "conservative", "note": "serverId===null 时拒绝"},
+    "cache.get": {"accuracy": "exact", "note": "瘦预览返回 undefined，不抛"},
+    "cache.set": {"accuracy": "conservative", "note": "本页内存，不跨会话"},
+    "cache.remove": {"accuracy": "conservative"},
+    "save.get": {"accuracy": "exact", "note": "瘦预览同步抛 SdkError"},
+    "save.keys": {"accuracy": "exact", "note": "瘦预览同步抛 SdkError"},
+    "save.set": {"accuracy": "conservative", "note": "key ≤64 且禁 :；瘦预览拒绝"},
+    "save.remove": {"accuracy": "conservative", "note": "实机无限频"},
+    "stage.open": {"accuracy": "conservative"},
+    "stage.close": {"accuracy": "exact", "note": "不派发 stage:close"},
+    "stage.el": {"accuracy": "exact", "note": "关闭时仍返回 DIV，非 null"},
+    "stage.visible": {"accuracy": "exact", "note": "唯一可信的舞台开关判据"},
+    "role.get": {"accuracy": "exact", "note": "字段恰为 name/avatarUrl"},
+    "user.get": {"accuracy": "exact", "note": "字段恰为 nickname/avatarUrl"},
+    "on": {"accuracy": "exact", "note": "返回 undefined，无法退订"},
+    "debug.log": {"accuracy": "conservative", "note": "模拟器转 console 并记入调用日志"},
+    "version": {"accuracy": "exact", "note": "实测为字符串 '1'（不是数字 1）"}
+  },
+  "eventPayloads": {
+    "message:new": {"shape": "4 键", "accuracy": "exact"},
+    "message:mount": {"shape": "4 键", "accuracy": "exact"},
+    "message:done": {"shape": "4 键", "accuracy": "exact"},
+    "message:stream": {"shape": "4 键（按 new/mount/done 同构推断）", "accuracy": "conservative"},
+    "message:unmount": {"shape": "undefined", "accuracy": "exact",
+      "note": "官方事件表无载荷。模拟器绝不伪造 4 键——否则作者写 msg.content 在预览能跑、真机是 undefined"},
+    "ready": {"shape": "undefined", "accuracy": "exact"},
+    "theme:change": {"shape": "'dark'|'light'", "accuracy": "conservative"},
+    "input:change": {"shape": "当前文本", "accuracy": "probe-needed"},
+    "conversation:switch": {"shape": "会话 id", "accuracy": "probe-needed"},
+    "back": {"shape": "undefined", "accuracy": "probe-needed"},
+    "stage:close": {"shape": "undefined", "accuracy": "probe-needed"},
+    "dispose": {"shape": "undefined", "accuracy": "probe-needed"}
+  },
+  "events": {
+    "names": [
+      "ready", "message:new", "message:done", "message:stream", "message:mount",
+      "message:unmount", "input:change", "conversation:switch", "theme:change",
+      "back", "stage:close", "dispose"
+    ],
+    "count": 12,
+    "unknownNameBehavior": "平台不报错，只是永不触发",
+    "coldStartOrder": ["message:new", "message:mount", "message:done", "ready"],
+    "coldStartOrderAccuracy": "exact",
+    "coldStartOrderEvidence": "探针 ORDER 字段按到达顺序累计；ready 最后到",
+    "readyIsLast": true,
+    "lateReplay": {
+      "replayed": ["message:mount", "message:done"],
+      "notReplayed": ["ready"],
+      "accuracy": "exact",
+      "note": "与官方手册相反：ready 没有 late replay，mount/done 有"
+    },
+    "payload": {
+      "shape": {"content": "string", "id": "string", "role": "ai|user", "serverId": "string|null"},
+      "keys": ["content", "id", "role", "serverId"],
+      "keyCount": 4,
+      "accuracy": "exact",
+      "sameForEvents": ["message:new", "message:mount", "message:done"],
+      "greetingId": "greeting",
+      "greetingServerId": null,
+      "editableRule": "serverId != null 才可 message.edit",
+      "readyPayload": "undefined"
+    }
+  },
+  "scriptExecution": {
+    "authorScriptsRunBeforeDom": true,
+    "accuracy": "exact",
+    "evidence": "探针 toplevel_found_pbOut=false；同一探针在事件回调内取同一节点成功",
+    "currentScript": null,
+    "currentScriptAccuracy": "exact",
+    "inlineEval": "(function(){…}).call(window)，顶层声明被显式回挂 window",
+    "moduleType": "被接受但按经典脚本执行 → import 必报错",
+    "externalScriptsNotAwaited": true,
+    "rerunPolicy": "chat/share 整卡只跑一次；创卡页预览反复重跑 → 基座须幂等"
+  },
+  "profiles": {
+    "chat": {
+      "label": "聊天页（完整环境）",
+      "save": "本页内可持久（真实站为跨设备存储）",
+      "cache": "本页内可持久",
+      "accuracy": "conservative",
+      "note": "真实聊天页的 save.* 能力未经探针覆盖，探针只跑过瘦环境"
+    },
+    "thin-preview": {
+      "label": "创卡页瘦预览",
+      "accuracy": "exact",
+      "evidence": "探针实测原始数据 §3.2 / 事实卡 §4.4a",
+      "saveGetThrows": true,
+      "saveKeysThrows": true,
+      "throwKind": "同步抛 SdkError（带 code）",
+      "cacheGetReturnsUndefined": true,
+      "cacheGetThrows": false,
+      "composerVisible": true,
+      "inputGet": "",
+      "inputGetCursor": 0,
+      "roleUserReal": true,
+      "writeCapabilityBehavior": "按能力签名区分：同步 void 能力（input.* 写类 / composer.show|hide / cache.set|remove）**同步抛** SdkError；异步能力（message.send|edit / save.set|remove）返回 rejected Promise",
+      "stageUsable": true
+    }
+  },
+  "messageScope": {
+    "mechanism": "全局改写 Document.prototype.querySelector/querySelectorAll/getElementById/getElementsByClassName/getElementsByTagName + 模块级游标 gc",
+    "notProxy": true,
+    "accuracy": "exact",
+    "platformNodesReachableInCallback": true,
+    "platformNodesEvidence": "探针 qs_from_document_works=true / body_qs_works=true（mount 回调内）",
+    "bubbleElementsInvisibleWhenCursorNull": true,
+    "invalidatesAcrossAwait": true,
+    "elementQuerySelectorUntouched": true,
+    "elementQuerySelectorNote": "只改 Document.prototype，Element.prototype.querySelector 不得破坏"
+  },
+  "sanitization": {
+    "authorDataAttrs": {"behavior": "全删", "accuracy": "exact", "evidence": "探针 data_mine=null"},
+    "platformDataAttrs": {
+      "behavior": "由 Vue 创建，从未进净化器",
+      "names": ["data-chat", "data-slot", "data-theme", "data-composer", "data-from", "data-state", "data-msg-id"]
+    },
+    "ariaAndRole": {"behavior": "删除", "accuracy": "exact", "reason": "ALLOW_ARIA_ATTR:!1"},
+    "htmlOnStar": {"behavior": "全部保留", "accuracy": "exact", "evidence": "b onclick/onmouseenter 均 KEPT"},
+    "svgOnStar": {"behavior": "删除", "accuracy": "exact", "evidence": "circle onclick STRIPPED"},
+    "safeForXml": {
+      "enabled": true,
+      "accuracy": "conservative",
+      "dangerousPattern": "((--!?|])>)|</(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)",
+      "behavior": "整条属性被删，且发生在 forceKeepAttr 之前",
+      "verifiedSafeForm": "title=\"a[0] > 1\"（] 与 > 之间有空格）实测 KEPT",
+      "unverified": "危险形态 ]> 无空格是否真被删属源码推断，未经实机确认"
+    },
+    "forbiddenTags": {
+      "names": ["iframe", "link", "meta", "form", "object", "embed"],
+      "behavior": "非白名单标签被正则剥壳，文字保留",
+      "accuracy": "exact"
+    },
+    "idCollision": "id 撞 document 属性名即删",
+    "cssSelectors": {"behavior": "零过滤", "note": ":root/html/body 运行时不拦，禁全局 CSS 是文档约定"}
+  },
+  "regexPipeline": {
+    "patternPolicy": {
+      "delivery": "slash",
+      "severity": "ERROR",
+      "accuracy": "exact",
+      "evidence": "实机裸字面量 {{probe}} 未生效，改 /{{probe}}/ 后立即生效（事实卡 §8.21）",
+      "contradiction": "与 worker 源码 p() 的字面量分支矛盾，说明宿主侧在交给 worker 前另有一层处理",
+      "workerHasLiteralBranch": true,
+      "previewRule": "预览不得把裸字面量当会生效的交付规则"
+    },
+    "outputBudget": {
+      "formula": "max(262144, inputLength * 4)",
+      "floor": 262144,
+      "inputMultiplier": 4,
+      "accuracy": "exact",
+      "perRule": true,
+      "rollback": "超预算整条规则回滚，页面上该规则完全不生效，只留告警",
+      "warnings": ["replacement-alone", "volume", "empty-match"],
+      "emptyMatchRule": "匹配式能匹配空串 → 每个位置都插一次 → 整条回滚"
+    },
+    "flags": {"allowed": "gimsuy", "autoAppendG": true},
+    "sortRule": "按 regexSort 升序；__ 前缀整条丢弃",
+    "userMessages": "不跑规则",
+    "streaming": "流式阶段跳过整条正则管线",
+    "codeFence": "``` 与 ` 内容先抽成占位符再还原 → 反引号里的 HTML 原样留存为文本",
+    "markdown": {
+      "accuracy": "probe-needed",
+      "note": "替换内容会过 Markdown，但具体管线边界未确证；4 空格缩进不会变代码块（与手册相反）。仅保守预警，不声称精确"
+    }
+  },
+  "limits": {
+    "dualTrack": {
+      "accuracy": "exact",
+      "confirmedDate": "2026-08-26",
+      "editorPath": {"replaceString": 20000, "behavior": "保存按钮静默失效，不是截断，改动全部回滚"},
+      "importPath": {"replaceString": 100000, "behavior": "导入路径特意放宽"},
+      "unverified": "scriptName 200 / findRegex 4096 是否同样双轨仍未确证；beginning 无双轨嫌疑"
+    },
+    "sourceConstants": {
+      "beginning": 4000, "statusbar": 200, "imageUrl": 2048,
+      "name": 200, "regex": 4096, "content": 100000, "regexList": 130
+    },
+    "editorUiValues": {"name": 20, "regex": 1000, "content": 20000},
+    "truncationFn": "Ws(e,t) 静默截断",
+    "saveKeyRules": {"maxKeyLength": 64, "forbiddenChar": ":", "maxKeysConstantExists": false}
+  },
+  "cssContract": {
+    "designTokens": [
+      "--chat-bg", "--chat-surface", "--chat-text", "--chat-text-muted",
+      "--chat-border", "--chat-accent",
+      "--chat-bubble-user-bg", "--chat-bubble-ai-bg", "--chat-bubble-text",
+      "--chat-input-bg", "--chat-input-text", "--chat-shortcut-text",
+      "--chat-more-item-bg", "--chat-share-pick-bg"
+    ],
+    "tokenCount": 14,
+    "tokenCountAccuracy": "exact",
+    "definedOn": ["[data-theme=dark]", "[data-theme=light]"],
+    "noRootDefinition": true,
+    "noPrefersColorScheme": true,
+    "manualMissedTokens": [
+      "--chat-share-pick-bg", "--chat-input-bg", "--chat-input-text",
+      "--chat-shortcut-text", "--chat-more-item-bg"
+    ],
+    "rpx": {"value": "calc(100vw / 750)", "isDesignToken": false},
+    "viewportHeight": {
+      "name": "--chat-viewport-height",
+      "isDesignToken": false,
+      "source": "JS 写在 root 的内联 style（clientHeight - 键盘 inset，随 visualViewport 更新）",
+      "accuracy": "exact"
+    },
+    "darkTokenValues": {
+      "--chat-bg": "#17181a", "--chat-surface": "#1e1f24", "--chat-text": "#fff",
+      "--chat-text-muted": "#c5c5c5", "--chat-border": "#333", "--chat-accent": "#ff6d97",
+      "--chat-bubble-user-bg": "#17181a", "--chat-bubble-ai-bg": "#17181a",
+      "--chat-bubble-text": "#fff", "--chat-input-bg": "#1e1f24", "--chat-input-text": "#fff",
+      "--chat-shortcut-text": "#fff", "--chat-more-item-bg": "#2c2e32",
+      "--chat-share-pick-bg": "#2c2e32"
+    },
+    "darkTokenAccuracy": "exact",
+    "lightTokenAccuracy": "probe-needed",
+    "bubblesSameColorAsBackground": true,
+    "themeAttribute": "[data-chat=\"root\"][data-theme=\"dark|light\"]",
+    "hostChain": "div < [data-slot=statusbar] < [data-chat=root] < div < body < html",
+    "statusbarNoFlexShrink": true,
+    "messageBodyPollution": {"white-space": "pre-line", "opacity": "0.9"},
+    "zIndex": {
+      "snackbar": 10090, "alert": 9000, "message-menu": 8200, "composer-snack": 8100,
+      "share-shot-loading": 8000, "stage-full": 3000, "stage-content": 2000,
+      "sdk-debug": 40, "assistant-tip": 10, "history-loading": 2, "rate-tip": 1
+    },
+    "chromeHasNoZIndex": true,
+    "authorOverlayRange": "3500-7999",
+    "viewport": {"width": 323, "height": 1205, "dpr": 1}
+  },
+  "environment": {
+    "architecture": "部署在 c<卡片ID>.sbx.aitchat.org 的独立 Vue 应用，跨源 iframe 嵌入 h5.aitchat.org",
+    "hostIframeSandbox": {
+      "permissions": ["allow-scripts", "allow-same-origin", "allow-forms", "allow-modals", "allow-downloads"],
+      "attribute": "allow-scripts allow-same-origin allow-forms allow-modals allow-downloads",
+      "accuracy": "exact",
+      "evidence": "2026-08-27 创卡编辑页只读 DOM：可见 iframe.chat-iframe；另有隐藏 iframe.resource-scope，不属于作者沙盒运行时"
+    },
+    "isolationBoundary": "iframe 本身；rootNode_is_document=true → 非 Shadow DOM",
+    "shadowDomNeeded": false,
+    "renderPipeline": "Web Worker（render.worker-*.js）",
+    "localStorage": "按卡天然隔离（不同源），不能跨卡共享",
+    "csp": {
+      "externalStylesheet": false, "externalFont": false, "fetchExternal": false,
+      "inlineScript": true, "externalHttpsScript": true, "inlineStyle": true,
+      "imgHttpsDataBlob": true, "authorIframeFormObject": false
+    }
+  },
+  "notSimulated": {
+    "requiresRealSite": [
+      "宿主 postMessage 握手与真实卡片数据投喂",
+      "真实多轮 AI 生成与流式分块节奏",
+      "worker 侧真实正则/净化边界（本地只做已确证子集）",
+      "真实跨设备 sdk.save 持久化与限频",
+      "Markdown 渲染管线细节",
+      "系统主题跟随、真实触控与软键盘",
+      "CSP 实际拦截行为",
+      "最终人工验收"
+    ]
+  }
+}

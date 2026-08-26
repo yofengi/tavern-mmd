@@ -63,6 +63,12 @@ class TestDoubleEscape(unittest.TestCase):
         reset()
         v.check_double_escape('class="box" id="a"', "测试")
         self.assertEqual(v.ERRORS, [])
+    def test_script_regex_backslashes_are_not_double_escape(self):
+        reset()
+        v.check_double_escape(r'<script>var r=/\[状态\]([\s\S]*?)\[\/状态\]/;</script>', "测试")
+        self.assertEqual(v.ERRORS, [])
+        self.assertEqual(v.WARNS, [])
+        self.assertTrue(any("script/onerror/onclick" in m for m in v.OKS), v.OKS)
 
 
 class TestPlatformRedlines(unittest.TestCase):
@@ -626,9 +632,9 @@ def sandbox_card(**overrides):
         "beginning": "开场白 {{panel}}",
         "personality": "<角色设定 名字：阿岚>\n正文\n</角色设定>",
         "regex_scripts": [
-            {"id": -1, "scriptName": "hud", "findRegex": "{{hud}}",
+            {"id": -1, "scriptName": "hud", "findRegex": "/{{hud}}/",
              "replaceString": "<div class='hud'>状态</div>"},
-            {"id": -2, "scriptName": "panel", "findRegex": "{{panel}}",
+            {"id": -2, "scriptName": "panel", "findRegex": "/{{panel}}/",
              "replaceString": "<div class='p'>面板</div>"},
         ],
     }
@@ -643,7 +649,8 @@ def run_sandbox(**overrides):
 
 
 def sandbox_rule(**overrides):
-    rule = {"id": -1, "scriptName": "kit", "findRegex": "{{kit}}", "replaceString": "x"}
+    # 匹配式默认写 slash 形态：实机裸字面量不生效（事实卡 §8.21），交付一律 /…/。
+    rule = {"id": -1, "scriptName": "kit", "findRegex": "/{{kit}}/", "replaceString": "x"}
     rule.update(overrides)
     return rule
 
@@ -657,7 +664,7 @@ class TestSandboxCleanCard(unittest.TestCase):
     def test_script_only_rule_needs_no_trigger_reference(self):
         """只放 <script> 的规则匹配式故意谁都不引用，不该报"永不出现"。"""
         run_sandbox(regex_scripts=[sandbox_rule(
-            findRegex="{{card-kit}}",
+            findRegex="/{{card-kit}}/",
             replaceString="<script>sdk.on('ready',function(){sdk.debug.log('go');});<\\/script>")])
         self.assertEqual(v.ERRORS, [])
         self.assertFalse(any("永远不会出现" in m for m in v.WARNS))
@@ -722,7 +729,7 @@ class TestSandboxTopLevel(unittest.TestCase):
                             for m in v.ERRORS))
 
     def test_over_130_rules_is_error(self):
-        rules = [sandbox_rule(id=-(i + 1), scriptName=str(i), findRegex="{{r%d}}" % i,
+        rules = [sandbox_rule(id=-(i + 1), scriptName=str(i), findRegex="/{{r%d}}/" % i,
                               replaceString="<style>.a{}</style>")
                  for i in range(v.SANDBOX_MAX_RULES + 1)]
         run_sandbox(regex_scripts=rules)
@@ -764,10 +771,10 @@ class TestSandboxRules(unittest.TestCase):
         self.assertTrue(any("scriptName 必须为非空字符串" in m for m in v.ERRORS))
 
     def test_script_name_over_editor_limit_warns_but_does_not_error(self):
-        """基座事实卡 §6：20 是编辑器 UI 值（WARN），200 才是源码真值（ERROR）。"""
+        """20 是 UI 显示值；200 是源码归一观察值，双路径仍待验证。"""
         run_sandbox(statusbar="{{kit}}",
                     regex_scripts=[sandbox_rule(scriptName="名" * 25)])
-        self.assertTrue(any("scriptName 共 25 字" in m and "编辑器上限" in m
+        self.assertTrue(any("scriptName 共 25 字" in m and "编辑器显示值 20" in m
                             for m in v.WARNS))
         self.assertFalse(any("scriptName 共" in m for m in v.ERRORS))
 
@@ -779,13 +786,13 @@ class TestSandboxRules(unittest.TestCase):
     def test_script_name_over_hard_limit_is_error(self):
         run_sandbox(statusbar="{{kit}}",
                     regex_scripts=[sandbox_rule(scriptName="名" * 201)])
-        self.assertTrue(any("scriptName 共 201 字" in m and "硬上限 200" in m
+        self.assertTrue(any("scriptName 共 201 字" in m and "源码归一观察值 200" in m
                             for m in v.ERRORS))
 
     def test_duplicate_script_name_is_warn(self):
         run_sandbox(statusbar="{{a}}{{b}}", regex_scripts=[
-            sandbox_rule(id=-1, scriptName="同名", findRegex="{{a}}", replaceString="<b>1</b>"),
-            sandbox_rule(id=-2, scriptName="同名", findRegex="{{b}}", replaceString="<b>2</b>"),
+            sandbox_rule(id=-1, scriptName="同名", findRegex="/{{a}}/", replaceString="<b>1</b>"),
+            sandbox_rule(id=-2, scriptName="同名", findRegex="/{{b}}/", replaceString="<b>2</b>"),
         ])
         self.assertTrue(any("重名" in m for m in v.WARNS))
         self.assertEqual(v.ERRORS, [])
@@ -795,17 +802,17 @@ class TestSandboxRules(unittest.TestCase):
         self.assertTrue(any("findRegex 必须为非空字符串" in m for m in v.ERRORS))
 
     def test_find_regex_over_editor_limit_warns_but_does_not_error(self):
-        """基座事实卡 §6：1000 是编辑器 UI 值（WARN），4096 才是源码真值（ERROR）。"""
+        """1000 是 UI 显示值；4096 是源码归一观察值，双路径仍待验证。"""
         long_fr = "{{kit%s}}" % ("x" * 1200)
         run_sandbox(statusbar=long_fr, regex_scripts=[sandbox_rule(findRegex=long_fr)])
-        self.assertTrue(any("findRegex 共" in m and "编辑器上限 1000" in m
+        self.assertTrue(any("findRegex 共" in m and "编辑器显示值 1000" in m
                             for m in v.WARNS))
         self.assertFalse(any("findRegex 共" in m for m in v.ERRORS))
 
     def test_find_regex_over_hard_limit_is_error(self):
         long_fr = "x" * (v.SANDBOX_MAX_FIND_REGEX_HARD + 1)
         run_sandbox(regex_scripts=[sandbox_rule(findRegex=long_fr)])
-        self.assertTrue(any("findRegex 共 4097 字" in m and "硬上限 4096" in m
+        self.assertTrue(any("findRegex 共 4097 字" in m and "源码归一观察值 4096" in m
                             for m in v.ERRORS))
 
     def test_replace_string_over_editor_limit_warns_but_does_not_error(self):
@@ -831,14 +838,24 @@ class TestSandboxRules(unittest.TestCase):
 
 
 class TestSandboxPatternForm(unittest.TestCase):
-    """锁定决策 D7：沙盒模式的 findRegex 不强制 slash literal，字面量是官方首选。"""
+    """🚨 原锁定决策 D7（不强制 slash、字面量是官方首选）**已被实机推翻**：
+    探针裸字面量 {{probe}} 规则完全不触发，改 /{{probe}}/ 立即生效（事实卡 §8.21）。
+    沙盒交付与 /mmd 一致，一律 slash 严格模式。"""
 
-    def test_bare_literal_is_accepted(self):
+    def test_bare_literal_is_error(self):
         for literal in ("{{hud}}", "【图鉴】", "状态面板"):
             with self.subTest(literal=literal):
                 run_sandbox(statusbar=literal,
                             regex_scripts=[sandbox_rule(findRegex=literal)])
-                self.assertEqual(v.ERRORS, [])
+                self.assertTrue(any("实机裸字面量未生效" in m for m in v.ERRORS))
+                # 文案必须点明与 worker 源码矛盾，否则作者会以为是自己写错。
+                self.assertTrue(any("worker 源码" in m for m in v.ERRORS))
+
+    def test_worker_literal_branch_stays_documented(self):
+        """worker 源码确有 literal 分支，内部函数照实描述；交付门禁另判。"""
+        self.assertEqual(v.classify_sandbox_pattern("{{hud}}"), ("literal", "{{hud}}"))
+        self.assertIn("实机裸字面量未生效", v.sandbox_pattern_delivery_error("{{hud}}"))
+        self.assertIsNone(v.sandbox_pattern_delivery_error("/{{hud}}/"))
 
     def test_slash_form_is_also_accepted(self):
         run_sandbox(statusbar="血量：10",
@@ -852,15 +869,16 @@ class TestSandboxPatternForm(unittest.TestCase):
                 run_sandbox(regex_scripts=[sandbox_rule(findRegex=literal)])
                 self.assertTrue(any("整条规则会被静默丢弃" in m for m in v.ERRORS))
 
-    def test_duplicate_literal_is_error(self):
+    def test_duplicate_trigger_word_is_error(self):
+        """同一触发词写两条：规则按顺序跑且自动补 g，后一条永远匹配不到。"""
         run_sandbox(statusbar="{{hud}}", regex_scripts=[
-            sandbox_rule(id=-1, scriptName="a", findRegex="{{hud}}", replaceString="<b>1</b>"),
-            sandbox_rule(id=-2, scriptName="b", findRegex="{{hud}}", replaceString="<b>2</b>"),
+            sandbox_rule(id=-1, scriptName="a", findRegex="/{{hud}}/", replaceString="<b>1</b>"),
+            sandbox_rule(id=-2, scriptName="b", findRegex="/{{hud}}/", replaceString="<b>2</b>"),
         ])
         self.assertTrue(any("永远匹配不到" in m for m in v.ERRORS))
 
-    def test_duplicate_slash_form_is_not_deduplicated(self):
-        """只有字面量会被前一条吃掉；正则形态不做重复判罚。"""
+    def test_duplicate_real_regex_is_not_deduplicated(self):
+        """只有「纯触发词」形态做重复判罚；含元字符的真正则不判。"""
         run_sandbox(statusbar="血量：1", regex_scripts=[
             sandbox_rule(id=-1, scriptName="a", findRegex=r"/血量[:：]\s*(\d+)/",
                          replaceString="<b>$1</b>"),
@@ -877,15 +895,15 @@ class TestSandboxPatternForm(unittest.TestCase):
         self.assertEqual(v.classify_sandbox_pattern("/a/d")[0], "literal")
 
     def test_unreferenced_visible_literal_is_warn(self):
-        run_sandbox(regex_scripts=[sandbox_rule(findRegex="{{nowhere}}",
+        run_sandbox(regex_scripts=[sandbox_rule(findRegex="/{{nowhere}}/",
                                                 replaceString="<div>看得见</div>")])
         self.assertTrue(any("永远不会出现" in m for m in v.WARNS))
 
     def test_chained_trigger_via_other_replace_string_is_accepted(self):
         run_sandbox(statusbar="{{hud}}", regex_scripts=[
-            sandbox_rule(id=-1, scriptName="hud", findRegex="{{hud}}",
+            sandbox_rule(id=-1, scriptName="hud", findRegex="/{{hud}}/",
                          replaceString="<div>{{inner}}</div>"),
-            sandbox_rule(id=-2, scriptName="inner", findRegex="{{inner}}",
+            sandbox_rule(id=-2, scriptName="inner", findRegex="/{{inner}}/",
                          replaceString="<b>链式</b>"),
         ])
         self.assertFalse(any("永远不会出现" in m for m in v.WARNS))
@@ -943,7 +961,10 @@ class TestSandboxSdkNames(unittest.TestCase):
             v.check_sandbox_sdk_names("sdk.on('%s', f)" % event, "测试")
         self.assertEqual(v.ERRORS, [])
 
-    def test_once_and_off_are_errors_with_replay_hint(self):
+    def test_once_and_off_are_errors_with_correct_replay_hint(self):
+        """🚨 文案必须说对补发规则：有 late replay 的是 message:mount / message:done，
+        **ready 没有**（事实卡 §4.1 实测）。旧文案写「ready 会补发给后来的订阅者」是错的，
+        会让作者把首屏挂到 ready 上 —— 那会晚一整轮。"""
         for name in ("once", "off"):
             with self.subTest(name=name):
                 reset()
@@ -951,7 +972,12 @@ class TestSandboxSdkNames(unittest.TestCase):
                 self.assertTrue(any("只有 sdk.on" in m for m in v.ERRORS))
         reset()
         v.check_sandbox_sdk_names("sdk.once('ready', f)", "测试")
-        self.assertTrue(any("补发给后来的订阅者" in m for m in v.ERRORS))
+        joined = "".join(v.ERRORS)
+        self.assertIn("message:mount", joined)
+        self.assertIn("message:done", joined)
+        self.assertIn("ready 没有", joined)
+        # 不得再出现「ready 会补发」这类错误说法。
+        self.assertNotIn("ready 这类只发一次的事件会**补发给后来的订阅者**", joined)
 
     def test_role_and_user_fields(self):
         reset()
@@ -1087,6 +1113,12 @@ class TestSandboxContentWarnings(unittest.TestCase):
             "sdk.on('message:mount', function(el){ sdk.on('ready', f); })", "测试")
         self.assertTrue(any("订阅要写在**脚本体**里" in m for m in v.WARNS))
 
+    def test_ready_subscription_warns_with_mount_done_guidance(self):
+        reset()
+        v.check_sandbox_content_warnings("sdk.on('ready', render);", "测试")
+        self.assertTrue(any("没有 late replay" in m and "message:mount" in m and "message:done" in m
+                            for m in v.WARNS))
+
     def test_self_reply_loop_is_warn(self):
         reset()
         v.check_sandbox_content_warnings(
@@ -1100,6 +1132,21 @@ class TestSandboxContentWarnings(unittest.TestCase):
             "var b=el.querySelector('[data-chat=\"message-body\"]');"
             "sdk.message.send(b.textContent); })", "测试")
         self.assertTrue(any("消息生成中" in m for m in v.WARNS))
+
+
+class TestSandboxOutputBudget(unittest.TestCase):
+    def test_volume_budget_rolls_back_rule_for_current_input_sample(self):
+        reset()
+        source = "x" * 70000
+        v.check_sandbox_output_budget("/x/g", "12345", source, "测试规则")
+        self.assertTrue(any("`volume`" in message and "整条规则回滚" in message
+                            for message in v.ERRORS))
+
+    def test_output_budget_preserves_js_global_default(self):
+        reset()
+        # worker 对不带 g 的 slash 形态自动补 g；五万五千次 × 五字替换超 262144 下限。
+        v.check_sandbox_output_budget("/x/", "12345", "x" * 55000, "测试规则")
+        self.assertTrue(any("`volume`" in message for message in v.ERRORS))
 
 
 class TestSandboxCardDeliverable(unittest.TestCase):

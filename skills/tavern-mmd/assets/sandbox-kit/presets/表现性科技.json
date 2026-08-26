@@ -1,0 +1,116 @@
+{
+  "name": "表现性科技",
+  "_intent": "强表现力：高对比冷底、青色强调、发光装饰。适合科幻/赛博/机械向卡。",
+  "_safety": "零外部资源（无 url()/@import/外部字体）——霓虹感全靠令牌配色与 box-shadow 发光半径，不引任何图片或字体文件。",
+  "palette": {
+    "_note": "接近纯黑的底 + 青色 accent 拉满层次。核心五键逐侧显式 hex；onAccent 用深色（青底上黑字才够 4.5:1）。",
+    "dark": {
+      "bg": "#080b12",
+      "surface": "#101826",
+      "text": "#e6f4ff",
+      "muted": "#8fa8bf",
+      "_border": "对近黑底 #080b12 达 3:1（WCAG 1.4.11）。原本的 #2e5f80 只有 2.87:1——差一点也是不过，这里不放宽阈值而是提亮边界。",
+      "border": "#3f7fa8",
+      "accent": "#22d3ee",
+      "onAccent": "#04121a",
+      "userBubble": "#152135",
+      "aiBubble": "#101826",
+      "bubbleText": "#e6f4ff",
+      "inputBg": "#101826",
+      "inputText": "#e6f4ff",
+      "shortcutText": "#e6f4ff",
+      "moreItemBg": "#1a2942",
+      "sharePick": "#1a2942"
+    },
+    "light": {
+      "bg": "#e8f2f7",
+      "surface": "#ffffff",
+      "text": "#0d1b26",
+      "muted": "#47606f",
+      "border": "#6b8394",
+      "accent": "#0e6b80",
+      "onAccent": "#ffffff",
+      "userBubble": "#d9e8f0",
+      "aiBubble": "#ffffff",
+      "bubbleText": "#0d1b26",
+      "inputBg": "#ffffff",
+      "inputText": "#0d1b26",
+      "shortcutText": "#0d1b26",
+      "moreItemBg": "#d9e8f0",
+      "sharePick": "#d9e8f0"
+    }
+  },
+  "layout": {
+    "_note": "小圆角接近直角，机械感来自硬边而不是装饰件。",
+    "dark": {
+      "gap": "calc(12 * var(--rpx))",
+      "pad": "calc(14 * var(--rpx))",
+      "radius": "calc(3 * var(--rpx))"
+    },
+    "light": {
+      "gap": "calc(12 * var(--rpx))",
+      "pad": "calc(14 * var(--rpx))",
+      "radius": "calc(3 * var(--rpx))"
+    }
+  },
+  "ui": {
+    "_note": "深色侧用青色调的阴影做冷光溢出（rgba 而非 url，零外部资源）；浅色侧收成普通中性阴影，否则白底上的青光像失焦。",
+    "dark": {
+      "shadow": "0 2px 16px rgba(34, 211, 238, .22)",
+      "lift": "rgba(34, 211, 238, .08)",
+      "ball": "calc(92 * var(--rpx))",
+      "drw-w": "calc(620 * var(--rpx))"
+    },
+    "light": {
+      "shadow": "0 2px 12px rgba(13, 27, 38, .16)",
+      "lift": "rgba(14, 107, 128, .06)",
+      "ball": "calc(92 * var(--rpx))",
+      "drw-w": "calc(620 * var(--rpx))"
+    }
+  },
+  "font": {
+    "dark": {
+      "fontSize": 15,
+      "lineHeight": 1.5,
+      "fs-sm": "calc(20 * var(--rpx))"
+    },
+    "light": {
+      "fontSize": 15,
+      "lineHeight": 1.5,
+      "fs-sm": "calc(20 * var(--rpx))"
+    }
+  },
+  "cohesion": {
+    "dark": {
+      "contrast": "AAA-ish",
+      "density": "normal",
+      "motion": "expressive",
+      "mood": "霓虹 冷光 硬边",
+      "pairing": "科幻 / 赛博 / 机械"
+    },
+    "light": {
+      "contrast": "AA",
+      "density": "normal",
+      "motion": "expressive",
+      "mood": "冷白 硬边",
+      "pairing": "科幻 / 赛博 / 机械"
+    }
+  },
+  "decoration": {
+    "_note": "深色侧发光半径拉大做霓虹感；浅色侧照旧置 0。语义色偏荧光但仍保持色相间距。",
+    "dark": {
+      "glow": "calc(18 * var(--rpx))",
+      "hp": "#ff3d71",
+      "mp": "#22d3ee",
+      "sp": "#2ee6a8",
+      "xp": "#ffd93d"
+    },
+    "light": {
+      "glow": "0",
+      "hp": "#b3123f",
+      "mp": "#0e6b80",
+      "sp": "#0f7a5a",
+      "xp": "#8f6b00"
+    }
+  }
+}

@@ -92,7 +92,7 @@
 
 > 🚨 **不要写死颜色**（`#fff` 之类）。用变量，平台深浅色切换时才跟得上；`[data-chat="root"]` 上有 `data-theme="light|dark"` 可读。算出来的值（进度条宽度、血条颜色）写在标签的内联 `style=""` 上（内联会压过 `<style>`），颜色仍尽量用 `var(--chat-accent)`。
 
-> 🚨 **HTML 不要缩进 4 个空格**：替换内容会过一遍 Markdown，缩进 4 空格会被当成代码块把源码原样印在页面上。
+> ⚠️ **HTML 仍建议顶格写，但不要把 4 空格当成已证实的运行时故障。** 沙盒 worker 实况会在 Markdown 前删除行首 4+ 空格，因此它不会像官方手册说的那样必然变代码块；官方校验仍会 WARN，且反引号包住 HTML 才会稳定把源码原样印出。
 
 ### z-index 分段（约定，平台不执法）
 
@@ -102,9 +102,9 @@
 
 ### 功能栏与长期面板
 
-`[data-slot="statusbar"]` **平台没给任何样式**，背景、高度、粘顶（`position: sticky`）全靠作者写；角色卡 `statusbar` 留空则该节点整块不存在。
+`[data-slot="statusbar"]` 平台只提供槽位，不提供业务样式；作者至少补 `flex-shrink:0`，背景/高度按设计决定。它是 root 的 flex item，天然不随消息列表滚动，一般不必额外写 sticky。
 
-> 🚨 **用 JS 往功能栏 `appendChild` 的东西留不住** —— 功能栏由平台按 `statusbar` 字段整块重画。**会变的内容写进规则，长期面板挂舞台 `sdk.stage`。**
+> 🚨 **“功能栏静态”指正则输入不随消息重跑，不等于 JS 节点留不住。** `statusbar` 字段只在装载时过一次正则，因此动态值必须由 `message:done` 等事件里的 JS 改 DOM；实机也确认 JS 插入的宿主节点可保留。挂载必须在 mount/done 回调同步期执行，并做固定 id、幂等与宿主归一。长期大面板仍应挂舞台 `sdk.stage`。
 
 跟主题的 JS 涂色订 `theme:change`：
 

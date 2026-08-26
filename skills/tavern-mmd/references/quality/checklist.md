@@ -53,7 +53,7 @@
 - [ ] 总条数≤130
 - [ ] 每条findRegex≤1000字符、replaceString<20000字符（标注实测值）；replaceString达到18000字符即预警并评估拆包
 - [ ] **（/mmd）每条 `findRegex` 都是 `/pattern/flags` slash literal**；固定标记也包斜杠，无裸 `<css>` / `<status>` 值
-- [ ] **（/mmdsandbox）`findRegex` 反过来：不强制slash literal，纯字面量 `{{hud}}` 是官方首选**，别画蛇添足包斜杠（包了就变成正则、元字符不再被转义）
+- [ ] **（/mmdsandbox）每条 `findRegex` 也写 `/pattern/flags` slash 形态**；实机裸字面量 `{{hud}}` 不生效，虽与 worker 源码的字面量分支矛盾，交付仍以实机为准
 - [ ] （/mmd）导入json：顶层恰好且仅有 `pageDepth/statusbar/beginning/regex_scripts` 四键；每条规则恰好且仅有 `id/scriptName/findRegex/replaceString` 四键，且 `id=-1`
 - [ ] （/mmdsandbox）导入json：顶层恰好 `chatVersion/pageDepth/statusbar/beginning/personality/regex_scripts` 六键，`id` 为负数——详见下方「沙盒模式」专节
 - [ ] **导入json通过 `python -m json.tool 文件 > /dev/null` 校验（拦截裸换行/未转义引号）**
@@ -121,7 +121,7 @@
 - [ ] 顶层**恰好 6 键** `chatVersion/pageDepth/statusbar/beginning/personality/regex_scripts`，`pageDepth` 为 2
 - [ ] 顶层**无禁用键** `role`/`presentation`/`worldbook`/`world_book`/`lorebook`/`lore_book`/`entries`/`characterBook`/`character_book`（出现即官方 ERROR）
 - [ ] 每条规则 `id` 是**负数**（导入时会重编号）；四字段恰好 `id/scriptName/findRegex/replaceString`
-- [ ] 长度全过：`statusbar`≤200、`beginning`≤10240、`personality`≤10000、`scriptName`≤20、`findRegex`≤1000、`replaceString`≤20000、条数≤130
+- [ ] 长度全过：`statusbar`≤200、`beginning`≤**4000**、`personality`≤10000、条数≤130；常规交付按 `scriptName`≤20 / `findRegex`≤1000 / `replaceString`≤20000。源码归一常量分别可见 200 / 4096 / 100000，但只有 replaceString 的编辑器 20000／导入 100000 双路径与编辑器拒存语义已确证；scriptName/findRegex 的双路径仍待验证
 - [ ] JSON 里 `</script>` 已写成 `<\/script>`（防宿主页面提前截断）
 - [ ] **交付说明写明「必须新建卡，并在创卡页确认这张卡是新页」**——`chatVersion` 只在新建卡导入时被读取，给已存在的卡导入会被忽略，无法用导入把老卡升级成新页
 
@@ -135,7 +135,7 @@
 ### 脚本与 SDK
 - [ ] **`sdk.on` 写在脚本体里，不写进 `message:mount` 回调**——写进去则每挂一条气泡多订一份，同一件事触发很多次
 - [ ] SDK **能力名与事件名逐字正确**（30 能力 / 12 合法事件）——**拼错既不报错也永不触发**，只能靠 `validate.py` 静态拦
-- [ ] 无 `sdk.once` / `sdk.off`（**两者都不存在**）；不需要 once：`ready` 会补发给后来的订阅者
+- [ ] 无 `sdk.once` / `sdk.off`（**两者都不存在**）；需要一次性逻辑自己加幂等哨兵。`ready` **最后到且不补发**，首屏挂 `message:mount` / `message:done`
 - [ ] **绝不把 `[data-chat="message-body"]` 当回复正文读**——空 AI 气泡挂上时里面是平台占位「消息生成中」。跟字用 `message:stream` 的 `msg.content`、收尾用 `message:done` 的 `msg.content`；`content` 空时**也不要退回去读 DOM**
 - [ ] **无 `img onerror` 点火器、无 teapot 系写法**（`onerror` 图 / `window.teapot*` / CoC 注入）——官方明令禁止，改用「一条只放 `<script>` 的规则」
 - [ ] 长期面板（地图/背包/小游戏）挂**舞台 `sdk.stage`**，不挂气泡（气泡滚出屏幕即销毁）
@@ -146,15 +146,18 @@
 - [ ] **无作者自写 `data-*`**——会被净化删掉，随后所有依赖它的 `querySelector` 全查不到。自己的按钮/容器用 `class` 或 `id`
 - [ ] 无 `iframe` / `link` / `meta` / `form` / `object` / `embed`（白名单外，会被删）
 - [ ] **无全局 CSS 选择器** `*{}` / `html{}` / `body{}` / `:root{}` → 一律改 `[data-chat="root"]`
-- [ ] **HTML 没有缩进 4 个空格**——替换内容过一遍 Markdown，4 空格缩进会被当代码块，把源码原样印在页面上
+- [ ] HTML 顶格、无反引号包裹待渲染 HTML。平台实况会在 Markdown 前删除 4+ 空格，故“4 空格必变代码块”不是实测故障；仍顶格写以通过官方 WARN，并防其他 Markdown 路径差异
 - [ ] 作者 z-index 落在 **3500–7999**（实测安全带）。依据：实测平台 `header`/`statusbar`/`messages`/`composer`/`author-stage` 全是 `z-index:auto` + `position:static`，手册所谓「平台 chrome 占 8000–8999」**不成立**；样式表穷举的真实占用是 `10090` snackbar / `9000` alert / `8200` message-menu / `8100` composer-snack / `8000` share-loading / `3000` stage-full / `2000` stage-content / `40` sdk-debug。3500 起是为避开舞台的 2000/3000，7999 止是为避开平台 8000+ 那几层（越界不会被拦，只会挡住平台长按菜单/提示/弹窗）
 - [ ] 换肤只改 `[data-chat="root"]` 上的 14 个 `--chat-*` 变量（实测确证；官方手册只记 10 个，漏记 `--chat-input-bg`/`--chat-input-text`/`--chat-shortcut-text`/`--chat-more-item-bg`/`--chat-share-pick-bg`），**不写死 `#fff`**（深浅色切换才跟得上）；JS 涂色的订 `theme:change`
-- [ ] 功能栏样式（背景/高度/sticky）自己写全——平台不给 `[data-slot="statusbar"]` 任何样式；**不用 JS 往功能栏 appendChild**（平台整块重画会一起没）
+- [ ] 功能栏自己补 `flex-shrink:0` 与所需背景/高度；它的**正则输入静态且不随消息重跑**，动态值靠 JS 改 DOM。JS 插入的宿主节点实机可保留，但必须在 mount/done 回调内挂载并做幂等/宿主归一
 
 ### 审核与验证
 - [ ] **已跑 `scripts/validate.py 文件 --platform mmdsandbox` 且 0 错误**，WARN 逐条看过并确认是有意保留
-- [ ] 已跑 `scripts/build-preview.py 文件 --platform mmdsandbox` 看过渲染。**记住预览没模拟的四类**：SDK、「消息生成中」占位、净化白名单、Markdown 管线
-- [ ] 已回实机验：创卡页预览是"瘦环境"（输入框/发送/存档一律 `NOT_SUPPORTED`，只有样式与舞台可用），完整行为必须回聊天页 + `?sdkDebug=1`
+- [ ] 已跑 `scripts/build-preview.py 文件 --platform mmdsandbox --mode both`，本地仿真的 `chat` 与 `thin-preview` profile 都通过；事件顺序、历史补发、消息 scope、主题、舞台、存储降级和多轮更新的诊断无失败
+- [ ] 已在本地浏览器验桌面、窄屏竖向、横屏/软键盘：真实点击、输入、拖动、菜单、设置、stage、深浅色与截图结构无重叠；字号/颜色/间距用 computed style 复核，不凭压缩截图猜值
+- [ ] 预览能力矩阵已看过：`exact` 可作日常回归，`conservative` 只作保守门禁，`probe-needed` 不当成平台事实
+- [ ] **真实 MMD 不是日常默认回归环境**：AI 不自行登录账号、不把正式卡/公开卡当夹具。只有出现 `probe-needed` 平台边界，或用户授权最终人工验收时才回真实站；任何「保存编辑」/公开提交先确认对外影响
+- [ ] 若做最终实站验收，已区分瘦预览真实行为：`save.get/save.keys` 会同步抛 `SdkError`，`cache.get` 返回 `undefined`，`composer.visible()` 与 stage 读能力仍可用；不能概括成“一律 NOT_SUPPORTED”
 
 ## 整卡输出形态（做整张角色卡时，当前MMD / 本地酒馆）
 

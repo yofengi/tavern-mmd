@@ -7,8 +7,8 @@
 > 🚨 **平台归属：本方法论只针对 MMD沙盒模式（`/mmdsandbox`）。** 它全程依赖 `sdk.*` 与 `[data-chat]` / `[data-slot]` DOM 契约，这两样**只在沙盒新聊天页存在** → 不能用于当前 MMD（`/mmd`）与本地酒馆（`/st`）。反向亦然：雷达法与影渲法**不能用于沙盒**，理由见末节。
 
 > ⚠️ **验证状态**：本文档陈述的**平台事实**（事件时序、CSS 令牌、净化行为、层级）来自**三轮真机探针 + 沙盒应用逆向源码**，且**已实机实测**，可信度高。
-> **基座代码 2.0 已实机截图验收通过**（2026-08-26，卡 64257 预览）：单面板（气泡内只剩一个）、三分组卡、九种数据类型、语义色不再同色、宿主唯一（`#sbk-hud` 计数 1）。代码侧另有分层 harness 与生成器 **180 项**测试全绿。
-> 🚨 **仍未验证的四项**：浮层拖动与菜单翻转、舞台开关、平台深浅色切换的跟随、多轮真实对话里的增量更新。这几项只有离线 harness 与代码审查背书，读到相关章节时请按「设计规范」而非「已验收结论」对待。
+> **基座代码 2.0 的历史实机截图已通过**（2026-08-26，卡 64257 预览）：单面板、三分组卡、语义色和宿主唯一。3.0 修复与模块拆分的当前自动化证据记录在 `sandbox-quality-review/工作/验证记录.md`；测试数量以实际运行报告为准，不在本文固定写死。
+> **当前本地 GUI 已覆盖**单宿主/单状态面板、preset 切换、tooltip 原生按钮、多轮/switch 与 chat/thin profile。拖动、真实舞台几何、系统主题/触控/软键盘及真实多轮 AI 仍属 `probe-needed` 或最终人工验收范围。
 > 🚨 **要在预览里验证，必须点底部「保存编辑」——预览只读卡片正式数据，不读草稿。** 正则面板的「保存配置」只进内存草稿、底部「保存草稿」只写服务端草稿，两者预览都看不到。这一条踩错会让你误以为基座坏了（实机验收时正是它造成四轮误判）。操作纪律见 `../../assets/sandbox-kit/README.md` 的「怎么在实机验证自己的卡」节。
 
 平台事实一律不在本文档展开，指向 `../platforms/mmd-sandbox.md`（1231 行，已含全部实测修正）。本文档只讲**方法论与设计思路**：为什么必须这么做。
@@ -136,7 +136,7 @@ message:new  →  message:mount  →  message:done  →  ready
 
 `status` 还有个设计取巧处：正则**不负责计算**。它只把 `[状态]…[/状态]` 换成 `<div class="sbk-snap sbk-snap--raw">原文</div>`（纯文本，天然无净化风险），真正的结构化渲染由 `SBK.ui.snapshot.hydrate()` 在 mount 回调内接管。好处是百分比、进度条宽度这类计算全在 JS 里做，正则只搬字符串——正则算不了数，硬凑会写出极长的替换文本，反而撞上输出预算。
 
-外壳类名要两个都带：`.sbk-snap` 管重置，`.sbk-snap--raw` 是 `hydrate()` 的选择器（`SBK.dom.all(root, '.sbk-snap--raw')`）。少了后者 JS 升级永远不触发，气泡里只留一段纯文本。生成器为此做了**双向**一致性校验，且升级类名是从 `hud.js` 里**读出来**的而不是写死一份副本——真值只有一处，改了不会漂移成「校验通过但实机不升级」。
+外壳类名要两个都带：`.sbk-snap` 管重置，`.sbk-snap--raw` 是 `hydrate()` 的选择器。生成器为此做双向一致性校验，并优先从拆分后的 `hud-render.js` 读取升级类名（兼容旧单文件 `hud.js`），不复制第二份真值。
 
 ### 3.1 版面层：`section` 分组（1.0 最大的缺口）
 
@@ -188,9 +188,11 @@ Shadow DOM 与降级链、`img onerror` 点火、禁裸双引号铁律、`String
 
 ## 四、三层架构
 
-- **内核层** `core.js` —— 单例哨兵 / 事件总线 / 状态仓 / 持久化 / rAF 调度 / DOM 工具 / `SBK.boot` 编排 / `pinned` 精简条
-- **主题层** `theme.js` —— 语义 token → 平台 `--chat-*`；风格包（preset）+ 玩家微调（overrides）两层合成、设置面板、偏好持久化
-- **组件层** `protocol.js` 协议解析、`hud.js` 状态面板渲染器（九种数据类型 + `section` 版面项）、`ui.js` panel（浮层/抽屉/悬浮球）与 chrome（功能栏入口）、`ui-stage.js` stage（舞台面板）
+- **内核基础** `core.js`：SDK 快照、claim/事件桥、状态仓、调度与 DOM/宿主工具；`core-store.js`：持久化与合并队列；`core-boot.js`：modes/schema/pinned 与唯一编排入口
+- **主题层** `theme.js`：token、作者基线/preset/overrides、偏好语义与落地；`theme-panel.js`：设置表单和抽屉
+- **组件层** `protocol.js` 协议解析；`hud.js` 控件/归一/注册表 + `hud-render.js` 快照/hydrate；`ui.js` CSS/队列/定位工具 + `ui-panel.js` panel/chrome；`ui-stage.js` stage
+
+所有源模块都是完整经典脚本 IIFE，独立 claim，固定顺序装载；生成器只按连续文件边界装箱，不会从函数或字符串中间切开。
 
 `SBK.boot(opts)` 是**唯一**把各层接起来的地方（生成器产出的 boot 规则只调它）：归一化 `modes`/`pinnedFields`/`schema` → 应用主题 → 配协议块名 → 按 `modes` 启动 `status`/`chrome`/`pinned`。它是**纯集成层**，不重复实现任何一层的功能；**缺层一律告警并跳过该功能，绝不抛异常炸整卡**（只装了 core 没装 ui 时，状态面板会被跳过并在返回的句柄里标出来）。返回句柄的 `modes` 是**实际生效值**而非请求值，方便实机自查。boot 自带哨兵：预览反复重跑时第二次起直接返回首次的句柄，不再挂任何订阅。
 
@@ -232,7 +234,8 @@ SBK.state.subscribe(fn)         // -> unsubscribe
 
 SBK.store.key(k)                // 改存档 key（校验 ≤64、禁 ':'）
 SBK.store.load()                // 同步。任何异常都返回 null，绝不外抛
-SBK.store.save(obj?)            // 异步 + 800ms 节流；缺省存 state.get()
+SBK.store.save(obj?)            // 业务整文档 + 800ms 队列；缺省用 state.get()，保留未覆盖的 _sbk*
+SBK.store.merge(partial)        // 顶层补丁；与 save 同窗合并，不覆盖其它业务字段
 SBK.store.clear()
 
 SBK.schedule(fn)                // rAF 合帧，同一 fn 每帧只跑一次
@@ -260,7 +263,7 @@ SBK.theme.base()                     // -> 实测深色基线副本，供「微�
 SBK.theme.current()                  // -> 最近一次 apply 的入参，清空时为 null
 SBK.theme.reset()                    // = apply(null)
 
-// 偏好层（玩家侧）。ui.js 只认这一层，不自己碰存储与合成
+// 偏好核心语义在 theme.js；表单/抽屉扩展在 theme-panel.js，chrome 由 ui-panel.js 调用
 SBK.theme.prefs.presets()            // -> 已注册的风格包名数组
 SBK.theme.prefs.preset(name?)        // 读/切风格包
 SBK.theme.prefs.enabled(v?)          // 启用美化；false = 撤销全部覆盖，完全跟随平台
@@ -368,7 +371,7 @@ worker 用这个正则剥掉非白名单标签（事实卡 §5.4）：
 
 消费点只有一个（进度条填充与 chip 竖条读 `var(--sbk-tone, var(--chat-accent))`），赋值靠修饰类：`.sbk-tone--*` 挂在任意祖先染整组、`.sbk-bar--*` 挂在槽上只染一条。**用 CSS 变量继承 + 修饰类而不是 `data-*` 属性**——作者自写 `data-*` 会被净化器全删，属性选择器在气泡内必然失效。没有 tone 就回退 `--chat-accent`，与 1.0 视觉一致。
 
-> ⚠️ **当前只有 `level` 的经验条自动上色。** 渲染器里没有「字段 key → tone」的映射，其余 `bar` 一律回退 accent。要给体力/灵力分色得靠自定义控件自带类名或自备 CSS。设计意图（按字段 key 或 schema 的 `tone` 字段选色）**只落地了一半**。
+**当前实现已完成 key → tone 接线。** `bar` 默认按字段 key 推断 `hp/mp/sp/xp`，schema 显式 `tone` 恒优先；`section` 可显式给整组 tone，字段自身声明会覆盖继承。自动推断只是可复现的默认值，不是真理：例如「体力」默认判 `hp`，作耐力时必须显式写 `tone:'sp'`。
 
 ### 🚨 设置面板的语义漂移：`light|dark` 是平台级的，作者只能读不能写
 
@@ -401,7 +404,7 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 2. **`overrides.dark` 与 `overrides.light` 分开存**，切深浅色不串值；玩家把某项**改回默认时删除该 override**，而不是存一份等于默认的值（否则这个字段又跟不上升级了）。平台切主题时还要回填面板控件，否则面板显示的是另一套主题的值。
 3. **白名单校验 + 逐字段降级。** 微调值只走字段表里的 key（`__proto__`/`constructor`/未知键天然进不来），颜色严格 `#RRGGBB`，数值越界一律拒绝并**回落默认而不是夹取**。玩家存档里的脏值只丢那一个字段，**绝不让 bootstrap 失败**。偏好文档带 schema 版本号，日后改字段语义时按版本迁移而不是让旧存档静默错解。
 
-**载体复用 `SBK.store`**（三级降级链 `sdk.save` → `sdk.cache` → 内存），**绝不另写一套存储**。但 store 只有一个可变 key + 800ms 尾部合并写，为偏好临时改 key 会与业务写入抢同一次 flush → 偏好挂在状态仓的**保留字段** `_sbkTheme` 上：业务存档与偏好天然同文档、同一次写入，既不抢 key 也不互相覆盖。`_` 开头的键在状态面板里不渲染，所以它不会漏进面板。
+**载体复用 `SBK.store`**（三级降级链 `sdk.save` → `sdk.cache` → 内存），不另写存储。主题运行时把 `_sbkTheme` 留在 state 以跨会话保留，但持久化只调用 `store.merge({_sbkTheme:…})`；它不会把当前 state 冒充完整业务存档。`store.save(obj)` 与 merge 共用 800ms 队列，同一窗口合成一次写入，并保留调用方未显式覆盖的 `_sbk*` 内部键。
 
 读档必须**再兜一层 try/catch**：瘦预览下 `save.get`/`save.keys` **同步抛 `SdkError`**，取不到偏好只能回默认，不能炸整卡。
 
@@ -450,7 +453,7 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 
 ## 八、工作流
 
-① 复制 `sbk.config.example.json` → ② 改 `theme`/`schema`/`beginning`/`personality` → ③ `build_sbk.py --out … --verbose`（看拆条与体积报告）→ ④ `validate.py --platform mmdsandbox` 须 0 错 → ⑤ 创卡页「**导入正则**」导入 JSON，再把 `personality` **手工粘贴**进人设框（导入页不读该字段）。命令原文见 `../../assets/sandbox-kit/README.md`。
+① 复制配置 → ② 修改主题/schema/正文 → ③ 生成器与 validator → ④ 本地 sandbox `chat` + `thin-preview` → ⑤ 桌面/竖屏/横屏 GUI 与截图。只有能力矩阵标为 `probe-needed`，或用户授权最终人工验收时才进真实站；AI 不默认登录账号、不把正式卡/公开卡当日常夹具。真实站操作仍按固定交付形态导入 6 键 JSON，并手工粘贴 persona。
 
 **沙盒不用 PNG 整卡、不用 `chara_card_v2`**——交付物就是一份 6 键 JSON。
 

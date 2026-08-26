@@ -20,6 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_sbk as B
 
 
+def asset_group_text(names):
+    base = Path(__file__).resolve().parent / "sbk"
+    return "\n".join((base / n).read_text(encoding="utf-8") for n in names if (base / n).is_file())
+
+
 def diag_of(fn, text, **kw):
     """跑单个校验器，返回 (errors, warns)。"""
     d = B.Diag()
@@ -57,17 +62,69 @@ class TestStripJsComments(unittest.TestCase):
         self.assertIn("var z = 3;", out)
 
     def test_real_assets_stay_valid_after_strip(self):
-        """剥注释后必须仍语法有效（已裁决第 1 条：生成时剥注释）。有 node 才断言。"""
+        """每个声明模块剥注释后仍是合法 JS，且含 script 包装不超过固定安全预算。"""
         adir = Path(__file__).resolve().parent / "sbk"
         if not adir.is_dir():
             self.skipTest("sbk/ 资源目录不存在")
         if not shutil.which("node"):
             self.skipTest("未装 node")
-        for p in sorted(adir.glob("*.js")):
-            with self.subTest(asset=p.name):
+        for name in B.ASSET_ORDER:
+            p = adir / name
+            with self.subTest(asset=name):
+                self.assertTrue(p.is_file(), "声明的资源文件不存在：%s" % name)
+                stripped = B.strip_js_comments(p.read_text(encoding="utf-8"))
                 d = B.Diag()
-                r = B.node_check(B.strip_js_comments(p.read_text(encoding="utf-8")), d, p.name)
-                self.assertTrue(r, "%s 剥注释后语法无效: %s" % (p.name, d.errors))
+                self.assertTrue(B.node_check(stripped, d, name),
+                                "%s 剥注释后语法无效: %s" % (name, d.errors))
+                self.assertLessEqual(len(stripped) + B.WRAPPER_OVERHEAD, B.MAX_SOURCE_RULE,
+                                     "%s 单模块超过 %d，必须继续按完整 IIFE 拆分"
+                                     % (name, B.MAX_SOURCE_RULE))
+
+
+class TestSplitModuleContracts(unittest.TestCase):
+    """拆分模块必须是完整、唯一、可独立装箱的经典脚本单元。"""
+
+    EXPECTED_CLAIMS = {
+        "core.js": "core",
+        "core-store.js": "core-store",
+        "core-boot.js": "core-boot",
+        "theme.js": "theme",
+        "theme-panel.js": "theme-panel",
+        "protocol.js": "protocol",
+        "hud.js": "hud",
+        "hud-render.js": "hud-render",
+        "ui.js": "ui",
+        "ui-panel.js": "ui-panel",
+        "ui-stage.js": "ui-stage",
+    }
+
+    def setUp(self):
+        self.adir = Path(__file__).resolve().parent / "sbk"
+
+    def test_declared_modules_are_complete_iifes(self):
+        for name in B.ASSET_ORDER:
+            with self.subTest(asset=name):
+                p = self.adir / name
+                self.assertTrue(p.is_file(), "缺模块 %s" % name)
+                code = B.strip_js_comments(p.read_text(encoding="utf-8")).strip()
+                self.assertRegex(code, r"^\(function\s*\(W\)\s*\{", "%s 不是完整 IIFE 开头" % name)
+                self.assertRegex(code, r"\}\)\(typeof window !== 'undefined' \? window : globalThis\);$",
+                                 "%s 不是完整经典脚本 IIFE 结尾" % name)
+
+    def test_claim_names_are_unique_and_expected(self):
+        got = {}
+        for name in B.ASSET_ORDER:
+            src = (self.adir / name).read_text(encoding="utf-8")
+            claims = re.findall(r"(?:SBK\.)?claim\('([^']+)'\)", src)
+            # core.js 同时用内部 claim('core') 启动 bridge；其余模块直接 SBK.claim。
+            expected = self.EXPECTED_CLAIMS[name]
+            self.assertIn(expected, claims, "%s 缺 claim(%r)：%s" % (name, expected, claims))
+            got[name] = expected
+        self.assertEqual(len(set(got.values())), len(got), "模块 claim 名重复会让后装模块静默短路")
+
+    def test_runtime_boot_claim_still_exists(self):
+        src = asset_group_text(("core.js", "core-store.js", "core-boot.js"))
+        self.assertRegex(src, r"claim\('boot'\)", "SBK.boot 必须保留独立运行时幂等哨兵")
 
 
 class TestStripCssComments(unittest.TestCase):
@@ -158,7 +215,7 @@ class TestSlashForm(unittest.TestCase):
 
 
 class TestLengths(unittest.TestCase):
-    """事实卡 §6：运行时真值硬限（ERROR）／编辑器 UI 值（WARN）。"""
+    """事实卡 §6：UI 显示值保守 WARN／源码观察值外保守 ERROR。"""
 
     def _rule(self, name="n", find="/x/", repl="r"):
         return {"scriptName": name, "findRegex": find, "replaceString": repl}
@@ -502,11 +559,18 @@ class TestEmitScriptRules(unittest.TestCase):
         # id 递减，worker 按 regexSort 升序 → 数组序生效
         self.assertEqual([r["id"] for r in rules], sorted([r["id"] for r in rules], reverse=True))
 
-    def test_unsplittable_file_warns(self):
+    def test_unsplittable_file_over_safe_budget_is_error(self):
         d = B.Diag()
         B.emit_script_rules(-1, "sbk-ui", "{{sbk-ui}}", [self._e("ui.js", 19000)],
                             18000, d, strip=False)
-        self.assertTrue(any("无法再拆" in w for w in d.warns))
+        self.assertTrue(any("安全上限" in e and "完整 IIFE" in e for e in d.errors), d.errors)
+
+    def test_lower_custom_threshold_only_warns_for_safe_module(self):
+        d = B.Diag()
+        B.emit_script_rules(-1, "sbk-ui", "{{sbk-ui}}", [self._e("ui.js", 5000)],
+                            4000, d, strip=False)
+        self.assertEqual(d.errors, [])
+        self.assertTrue(any("自定义拆条阈值" in w for w in d.warns), d.warns)
 
     def test_empty_input_yields_nothing(self):
         d = B.Diag()
@@ -552,47 +616,836 @@ class TestEscaping(unittest.TestCase):
         self.assertEqual(len(e), 1)
 
 
-class TestThemeCss(unittest.TestCase):
-    """事实卡 §7.1 / 硬约束 10。"""
+class TestThemeOwnership(unittest.TestCase):
+    """🚨 2.1 单一运行时所有权（审计报告高风险 1）。
 
-    def test_specificity_selector(self):
-        css = B.theme_override_css({"accent": "#fff"}, B.Diag())
-        # 必须 [data-chat="root"][data-theme="*"] 才是 (0,2,0)，高于平台 (0,1,0)
-        self.assertIn('[data-chat="root"][data-theme="dark"]', css)
-        self.assertIn('[data-chat="root"][data-theme="light"]', css)
-        self.assertNotIn(":root", css)
-        self.assertNotIn("!important", css)
+    1.0 有两条主题通道：生成器把 config.theme 永久编译进静态 sbk-css，theme.js 又写
+    #sbk-theme-vars。后果是 prefs.enabled(false) 只清得掉动态那条 → 「关闭美化＝完全
+    跟随平台」不成立。本类守的就是「静态通道已彻底拆除」这件事。
+    """
 
-    def test_semantic_token_mapping(self):
-        css = B.theme_override_css({"accent": "#f00", "muted": "#888"}, B.Diag())
-        self.assertIn("--chat-accent:#f00;", css)
-        self.assertIn("--chat-text-muted:#888;", css)
+    def test_generator_no_longer_has_a_theme_to_css_compiler(self):
+        """反向守卫：编译 theme→CSS 的函数必须【不存在】。
 
-    def test_unknown_token_goes_to_sbk_namespace(self):
-        css = B.theme_override_css({"onAccent": "#000"}, B.Diag())
-        self.assertIn("--sbk-on-accent:#000;", css)
+        留着它就迟早有人在 build() 里再拼一次，双通道原地复活。
+        """
+        self.assertFalse(hasattr(B, "theme_override_css"),
+                         "theme_override_css 又回来了——静态主题通道必须彻底拆除，"
+                         "作者基线只能经 boot 信封交给 theme.js")
 
-    def test_split_dark_light(self):
-        css = B.theme_override_css({"dark": {"accent": "#111"}, "light": {"accent": "#eee"}},
-                                   B.Diag())
-        self.assertIn('[data-theme="dark"]{--chat-accent:#111;}', css)
-        self.assertIn('[data-theme="light"]{--chat-accent:#eee;}', css)
+    def test_theme_var_mapping_still_available_for_validation(self):
+        """令牌名映射本身仍要保留：风格包校验要用它判断令牌落到哪个变量。"""
+        self.assertEqual(B.theme_var("accent"), "--chat-accent")
+        self.assertEqual(B.theme_var("muted"), "--chat-text-muted")
+        self.assertEqual(B.theme_var("onAccent"), "--sbk-on-accent")
+        self.assertEqual(B.theme_var("--chat-bg"), "--chat-bg")
 
-    def test_brace_in_value_is_rejected(self):
-        # 扁平 theme 会同时写 dark 与 light 两套 → 同一个坏值被拒两次，属预期
+
+class TestThemeEnvelope(unittest.TestCase):
+    """boot 信封：作者基线 + 风格包 + 默认包名，走 o.theme 这一个键。"""
+
+    def _cfg(self, **over):
+        cfg = {"theme": {}, "presets": {}, "preset": ""}
+        cfg.update(over)
+        return cfg
+
+    def test_envelope_shape(self):
+        e = B.theme_envelope(self._cfg(theme={"dark": {"accent": "#111"}}))
+        self.assertEqual(set(e.keys()), {"v", "base", "presets", "preset"})
+        self.assertEqual(e["v"], 2, "信封必须带 v:2 判别键，否则 theme.js 分不清它和 1.0 的扁平写法")
+        self.assertEqual(e["base"], {"dark": {"accent": "#111"}})
+
+    def test_envelope_is_always_truthy_even_when_empty(self):
+        """🚨 主题初始化与 chrome 解耦的落点。
+
+        core.js 只有 `if (o.theme) SBK.theme.apply(o.theme)` 一条主题接线。信封恒为
+        非空对象 → 无论 modes.chrome 真假，boot 都会把主题层 start 一次。
+        1.0 关掉 chrome 就没人调 theme.start，玩家上次存的字号/配色开局不生效。
+        """
+        e = B.theme_envelope(self._cfg())
+        self.assertTrue(e, "空配置下信封也必须是真值，否则关掉 chrome 就没人读偏好存档")
+        self.assertIsNone(e["base"])
+        self.assertEqual(e["presets"], {})
+
+    def test_old_flat_theme_config_still_accepted_as_base(self):
+        """规范化后的作者基线仍经信封原样下发。"""
+        old = {
+            "dark": {"tokens": {"accent": "#c8a15a"}, "tune": {}},
+            "light": {"tokens": {"accent": "#8a6a2f"}, "tune": {}},
+        }
+        e = B.theme_envelope(self._cfg(theme=old))
+        self.assertEqual(e["base"], old)
+
+
+class TestAuthorThemeValidation(unittest.TestCase):
+    """config.theme 作者基线与 preset 共用 token 安全边界，但允许局部覆写。"""
+
+    def setUp(self):
+        self.adir = Path(__file__).resolve().parent / "sbk"
+
+    def test_partial_two_side_theme_is_normalized(self):
         d = B.Diag()
-        css = B.theme_override_css({"accent": "#fff}.evil{color:red"}, d)
-        self.assertEqual(len(d.errors), 2)
-        self.assertNotIn("evil", css)
+        out = B.normalize_author_theme({
+            "dark": {"accent": "#c8a15a", "onAccent": "#1a1712"},
+            "light": {"accent": "#8a6a2f", "onAccent": "#ffffff"},
+        }, self.adir, d)
+        self.assertEqual(d.errors, [], d.errors)
+        self.assertEqual(out["dark"]["tokens"]["accent"], "#c8a15a")
+        self.assertEqual(out["light"]["tokens"]["onAccent"], "#ffffff")
 
-    def test_style_close_in_value_is_rejected(self):
+    def test_flat_legacy_theme_expands_to_both_sides(self):
         d = B.Diag()
-        css = B.theme_override_css({"dark": {"accent": "#fff</style><b>"}}, d)
-        self.assertEqual(len(d.errors), 1)
-        self.assertNotIn("</style>", css)
+        out = B.normalize_author_theme({"accent": "#5aa9e6"}, self.adir, d)
+        self.assertEqual(d.errors, [], d.errors)
+        self.assertEqual(out["dark"], out["light"])
 
-    def test_empty_theme_yields_nothing(self):
-        self.assertEqual(B.theme_override_css({}, B.Diag()), "")
+    def test_explicit_theme_requires_both_sides(self):
+        d = B.Diag()
+        out = B.normalize_author_theme({"dark": {"accent": "#5aa9e6"}}, self.adir, d)
+        self.assertEqual(out, {})
+        self.assertTrue(any("同时给 dark/light" in e for e in d.errors), d.errors)
+
+    def test_structural_and_unknown_tokens_are_rejected(self):
+        d = B.Diag()
+        out = B.normalize_author_theme({
+            "--rpx": "999px", "--sbk-z-pop": 9999, "--chat-nope": "#fff", "accent": "#5aa9e6"
+        }, self.adir, d)
+        self.assertGreaterEqual(len(d.errors), 3, d.errors)
+        for mode in ("dark", "light"):
+            self.assertNotIn("--rpx", out[mode]["tokens"])
+            self.assertNotIn("--sbk-z-pop", out[mode]["tokens"])
+            self.assertNotIn("--chat-nope", out[mode]["tokens"])
+            self.assertIn("accent", out[mode]["tokens"])
+
+    def test_dangerous_value_is_rejected(self):
+        d = B.Diag()
+        out = B.normalize_author_theme({"accent": "#fff;color:red"}, self.adir, d)
+        self.assertTrue(any("危险片段" in e for e in d.errors), d.errors)
+        self.assertNotIn("accent", out["dark"]["tokens"])
+
+    def test_structured_tune_is_validated(self):
+        d = B.Diag()
+        out = B.normalize_author_theme({
+            "dark": {"tokens": {"accent": "#5aa9e6"}, "tune": {"fontSize": 16}},
+            "light": {"tokens": {"accent": "#1a5f96"}, "tune": {"fontSize": 99}},
+        }, self.adir, d)
+        self.assertEqual(out["dark"]["tune"]["fontSize"], 16)
+        self.assertNotIn("fontSize", out["light"]["tune"])
+        self.assertTrue(any("tune.fontSize" in e for e in d.errors), d.errors)
+
+    def test_supplied_color_pair_must_pass_contrast(self):
+        d = B.Diag()
+        B.normalize_author_theme({
+            "dark": {"bg": "#ffffff", "text": "#ffffff"},
+            "light": {"bg": "#000000", "text": "#ffffff"},
+        }, self.adir, d)
+        self.assertTrue(any("对比度不足" in e and "dark" in e for e in d.errors), d.errors)
+
+
+class TestBundleCompiler(unittest.TestCase):
+    """六维风格包编译与生成期校验。"""
+
+    def _dim(self, **kw):
+        return {"dark": dict(kw), "light": dict(kw)}
+
+    def _palette(self, **over):
+        """一套过得了对比度的最小 palette（核心五键齐全）。"""
+        dark = {"bg": "#101010", "surface": "#1c1c1c", "text": "#f0f0f0",
+                "accent": "#5aa9e6", "border": "#6b7280"}
+        light = {"bg": "#f5f5f5", "surface": "#ffffff", "text": "#1a1a1a",
+                 "accent": "#1a5f96", "border": "#767676"}
+        dark.update(over.get("dark") or {})
+        light.update(over.get("light") or {})
+        return {"dark": dark, "light": light}
+
+    def _bundle(self, **over):
+        b = {
+            "palette": self._palette(),
+            "layout": self._dim(),
+            "ui": self._dim(),
+            "font": self._dim(),
+            "cohesion": self._dim(),
+            "decoration": self._dim(),
+        }
+        b.update(over)
+        return b
+
+    def test_minimal_bundle_compiles(self):
+        d = B.Diag()
+        c, ok = B.compile_bundle("测试包", self._bundle(), d)
+        self.assertTrue(ok, d.errors)
+        self.assertEqual(set(c.keys()), {"dark", "light"})
+        self.assertEqual(set(c["dark"].keys()), {"tokens", "tune"})
+        self.assertEqual(c["dark"]["tokens"]["accent"], "#5aa9e6")
+
+    def test_tune_fields_go_to_tune_not_tokens(self):
+        """🚨 可微调项必须以【结构化数字】下传，不能只变成 CSS。
+
+        prefs.get 要回读 fontSize/lineHeight/opacity；若只有 tokens，运行时就得去
+        反解析 'calc(24 * var(--rpx))' 这类任意 CSS —— 那必然出错（审计报告 8）。
+        """
+        d = B.Diag()
+        c, ok = B.compile_bundle("测试包", self._bundle(
+            font=self._dim(fontSize=16, lineHeight=1.8, **{"fs-sm": "calc(22 * var(--rpx))"})), d)
+        self.assertTrue(ok, d.errors)
+        self.assertEqual(c["dark"]["tune"], {"fontSize": 16, "lineHeight": 1.8})
+        self.assertNotIn("fontSize", c["dark"]["tokens"])
+        self.assertEqual(c["dark"]["tokens"]["fs-sm"], "calc(22 * var(--rpx))")
+
+    def test_unknown_dimension_is_error(self):
+        d = B.Diag()
+        _, ok = B.compile_bundle("测试包", self._bundle(shadowcast=self._dim(x="1")), d)
+        self.assertFalse(ok)
+        self.assertTrue(any("未知六维键" in e for e in d.errors), d.errors)
+
+    def test_six_dims_are_exactly_the_contract(self):
+        self.assertEqual(B.BUNDLE_DIMS,
+                         ("palette", "layout", "ui", "font", "cohesion", "decoration"))
+
+    def test_missing_dimension_is_error(self):
+        d = B.Diag()
+        b = self._bundle()
+        del b["decoration"]
+        _, ok = B.compile_bundle("测试包", b, d)
+        self.assertFalse(ok)
+        self.assertTrue(any("缺少六维键" in e for e in d.errors), d.errors)
+
+    def test_missing_one_side_is_error(self):
+        """盘点 E.3：平台强制两套主题都存在，单侧包切过去会整卡失效。"""
+        d = B.Diag()
+        b = self._bundle()
+        b["palette"] = {"dark": b["palette"]["dark"]}          # 只给 dark
+        _, ok = B.compile_bundle("测试包", b, d)
+        self.assertFalse(ok)
+        self.assertTrue(any("双侧完整" in e for e in d.errors), d.errors)
+
+    def test_unknown_token_name_is_error(self):
+        d = B.Diag()
+        _, ok = B.compile_bundle("测试包", self._bundle(layout=self._dim(wobble="3px")), d)
+        self.assertFalse(ok)
+        self.assertTrue(any("不在白名单" in e for e in d.errors), d.errors)
+
+    def test_fabricated_chat_var_is_error(self):
+        """--chat-* 只认平台真实存在的 14 个：臆造名写了不报错也不生效（静默失效）。"""
+        d = B.Diag()
+        b = self._bundle()
+        b["palette"]["dark"]["--chat-nope"] = "#fff"
+        b["palette"]["light"]["--chat-nope"] = "#000"
+        _, ok = B.compile_bundle("测试包", b, d)
+        self.assertFalse(ok)
+        self.assertTrue(any("--chat-nope" in e for e in d.errors), d.errors)
+
+    def test_unknown_private_token_is_error_on_fallback_path(self):
+        """🚨 读不到 theme.js 时也必须【严格】，不能放行一切 --sbk-*。
+
+        放行一切等于生成期不校验私有令牌：作者写错一个名字会静默无效。
+        """
+        d = B.Diag()
+        b = self._bundle()
+        b["layout"] = {"dark": {"--sbk-wobble": "3px"}, "light": {"--sbk-wobble": "3px"}}
+        _, ok = B.compile_bundle("测试包", b, d, None)      # sbk_ok=None → 走内置镜像
+        self.assertFalse(ok, "未知私有令牌在兜底路径上也应被拒")
+        self.assertTrue(any("wobble" in e for e in d.errors), d.errors)
+
+    def test_ok_token_defaults_to_strict(self):
+        self.assertTrue(B.ok_token("gap"))
+        self.assertTrue(B.ok_token("--sbk-radius"))
+        self.assertTrue(B.ok_token("accent"))
+        self.assertFalse(B.ok_token("wobble"))
+        self.assertFalse(B.ok_token("--sbk-wobble"))
+        self.assertFalse(B.ok_token("--chat-nope"))
+        self.assertFalse(B.ok_token("--rpx"), "--rpx 是平台尺寸基准，只读不写")
+
+    def test_sbk_private_token_whitelist_is_read_from_theme_js(self):
+        """白名单真值只有一处（theme.js 的 SBK_OK），生成器不写死副本。"""
+        adir = Path(__file__).resolve().parent / "sbk"
+        if not (adir / "theme.js").is_file():
+            self.skipTest("sbk/theme.js 不存在")
+        wl = B._sbk_whitelist_from_theme_js(adir, B.Diag())
+        self.assertIsNotNone(wl, "没能从 theme.js 读出 SBK_OK")
+        for k in ("gap", "pad", "radius", "fs", "lh", "glow", "hp", "shadow"):
+            self.assertIn(k, wl, "SBK_OK 里应有 %s" % k)
+        # 结构约定不得让风格包改：z 层安全带（硬约束 12）与逐条 bar 的语义色游标
+        self.assertNotIn("z-panel", wl, "--sbk-z-panel 是硬约束 12 的安全带，不许风格包改")
+        self.assertNotIn("tone", wl, "--sbk-tone 是 hud.js 逐条 bar 的局部游标，全局写死会让所有进度条同色")
+
+    def test_dangerous_values_are_rejected(self):
+        """危险值闸门：截断样式块 / 外部资源 / 多写声明。"""
+        bad = {
+            "brace": "#fff}.evil{color:red",
+            "style_close": "#fff</style><b>",
+            "url": "url(https://x.example/a.png)",
+            "import": "@import 'https://x.example/a.css'",
+            "expression": "expression(alert(1))",
+            "semicolon": "#fff;color:red",
+        }
+        for label, v in bad.items():
+            with self.subTest(case=label):
+                d = B.Diag()
+                b = self._bundle()
+                b["palette"]["dark"]["userBubble"] = v
+                b["palette"]["light"]["userBubble"] = v
+                _, ok = B.compile_bundle("测试包", b, d)
+                self.assertFalse(ok, "%s 应被拒绝" % label)
+                self.assertTrue(any("危险片段" in e for e in d.errors), d.errors)
+
+    def test_cohesion_never_emits_css(self):
+        """cohesion 是一致性元信息，只校验不输出。"""
+        d = B.Diag()
+        c, ok = B.compile_bundle("测试包", self._bundle(
+            cohesion=self._dim(contrast="AA", density="loose", mood="纸感")), d)
+        self.assertTrue(ok, d.errors)
+        for mode in ("dark", "light"):
+            for k in ("contrast", "density", "mood"):
+                self.assertNotIn(k, c[mode]["tokens"], "cohesion 泄漏进 tokens：%s" % k)
+            self.assertNotIn("contrast", c[mode]["tune"])
+
+    def test_cohesion_object_value_is_error(self):
+        d = B.Diag()
+        _, ok = B.compile_bundle("测试包",
+                                 self._bundle(cohesion=self._dim(contrast={"a": 1})), d)
+        self.assertFalse(ok)
+        self.assertTrue(any("cohesion" in e for e in d.errors), d.errors)
+
+    def test_out_of_range_tune_is_error(self):
+        """越界 tune 在运行时会被 okField 逐字段丢弃 → 生成期放行等于静默失效。"""
+        d = B.Diag()
+        _, ok = B.compile_bundle("测试包", self._bundle(font=self._dim(fontSize=48)), d)
+        self.assertFalse(ok)
+        self.assertTrue(any("越界" in e for e in d.errors), d.errors)
+
+    def test_bad_preset_name_is_error(self):
+        for nm in ("", " 前导空格", 'a"b', "<b>", "x" * 33):
+            with self.subTest(name=nm):
+                d = B.Diag()
+                _, ok = B.compile_bundle(nm, self._bundle(), d)
+                self.assertFalse(ok, "%r 应被拒绝" % nm)
+
+    def test_good_preset_names_accepted(self):
+        for nm in ("素雅阅读", "dense-status", "Neon_Tech 2"):
+            with self.subTest(name=nm):
+                d = B.Diag()
+                _, ok = B.compile_bundle(nm, self._bundle(), d)
+                self.assertTrue(ok, "%r 应被接受：%s" % (nm, d.errors))
+
+    def test_empty_side_after_compile_is_error(self):
+        d = B.Diag()
+        b = {dim: self._dim() for dim in B.BUNDLE_DIMS}
+        b["cohesion"] = self._dim(note="x")
+        _, ok = B.compile_bundle("测试包", b, d)
+        self.assertFalse(ok)
+        self.assertTrue(any("没有任何令牌" in e for e in d.errors), d.errors)
+
+
+class TestBundleContrast(unittest.TestCase):
+    """生成期对比度校验（WCAG 2.1）。只对可解析 hex 严格检查，不可解析【报错】而非假通过。"""
+
+    def _compiled(self, dark, light):
+        return {"dark": {"tokens": dark, "tune": {}},
+                "light": {"tokens": light, "tune": {}}}
+
+    OK_DARK = {"bg": "#101010", "surface": "#1c1c1c", "text": "#f0f0f0",
+               "accent": "#5aa9e6", "border": "#6b7280"}
+    OK_LIGHT = {"bg": "#f5f5f5", "surface": "#ffffff", "text": "#1a1a1a",
+                "accent": "#1a5f96", "border": "#767676"}
+
+    def test_contrast_math_matches_wcag_reference(self):
+        # 黑白极值 21:1，同色 1:1（WCAG 2.x 公式的两个锚点）
+        self.assertAlmostEqual(B.contrast("#000000", "#ffffff"), 21.0, places=2)
+        self.assertAlmostEqual(B.contrast("#777777", "#777777"), 1.0, places=6)
+
+    def test_good_palette_passes(self):
+        d = B.Diag()
+        self.assertTrue(B.check_bundle_contrast("t", self._compiled(self.OK_DARK, self.OK_LIGHT), d),
+                        d.errors)
+
+    def test_body_text_below_4_5_is_error(self):
+        dark = dict(self.OK_DARK, text="#4a4a4a")      # 深灰字压在近黑底上
+        d = B.Diag()
+        self.assertFalse(B.check_bundle_contrast("t", self._compiled(dark, self.OK_LIGHT), d))
+        self.assertTrue(any("正文对页面底" in e for e in d.errors), d.errors)
+
+    def test_accent_below_3_is_error(self):
+        dark = dict(self.OK_DARK, accent="#26303a")
+        d = B.Diag()
+        self.assertFalse(B.check_bundle_contrast("t", self._compiled(dark, self.OK_LIGHT), d))
+        self.assertTrue(any("强调色" in e for e in d.errors), d.errors)
+
+    def test_border_below_3_is_error(self):
+        """border 承载控件边界与焦点环，按 1.4.11 非文本对比 3:1 判。"""
+        dark = dict(self.OK_DARK, border="#2a2d33")
+        d = B.Diag()
+        self.assertFalse(B.check_bundle_contrast("t", self._compiled(dark, self.OK_LIGHT), d))
+        self.assertTrue(any("控件边界" in e for e in d.errors), d.errors)
+
+    def test_unparsable_core_color_is_error_not_silent_pass(self):
+        """🚨 「不可解析就跳过」是假通过：作者写 var(--x)，实机可能白底白字。"""
+        for bad in ("var(--chat-text)", "rgba(255,255,255,.9)", "white"):
+            with self.subTest(value=bad):
+                dark = dict(self.OK_DARK, text=bad)
+                d = B.Diag()
+                self.assertFalse(B.check_bundle_contrast("t", self._compiled(dark, self.OK_LIGHT), d))
+                self.assertTrue(any("不是可解析" in e for e in d.errors), d.errors)
+
+    def test_missing_core_key_is_error(self):
+        dark = {k: v for k, v in self.OK_DARK.items() if k != "border"}
+        d = B.Diag()
+        self.assertFalse(B.check_bundle_contrast("t", self._compiled(dark, self.OK_LIGHT), d))
+        self.assertTrue(any("缺 palette.border" in e for e in d.errors), d.errors)
+
+    def test_on_accent_checked_against_accent(self):
+        dark = dict(self.OK_DARK, onAccent="#7ec0f0")     # 亮蓝字压在亮蓝底上
+        d = B.Diag()
+        self.assertFalse(B.check_bundle_contrast("t", self._compiled(dark, self.OK_LIGHT), d))
+        self.assertTrue(any("onAccent" in e for e in d.errors), d.errors)
+
+    def test_short_hex_is_normalized(self):
+        self.assertEqual(B.norm_hex("#ABC"), "#aabbcc")
+        self.assertEqual(B.norm_hex("#AABBCC"), "#aabbcc")
+        self.assertIsNone(B.norm_hex("rgba(0,0,0,.5)"))
+        self.assertIsNone(B.norm_hex(None))
+
+    def test_light_side_is_checked_too(self):
+        """双侧都查：只查一侧等于「浅色下能不能读」全凭运气。"""
+        light = dict(self.OK_LIGHT, text="#cccccc")
+        d = B.Diag()
+        self.assertFalse(B.check_bundle_contrast("t", self._compiled(self.OK_DARK, light), d))
+        self.assertTrue(any("light 侧" in e for e in d.errors), d.errors)
+
+
+class TestShippedPresets(unittest.TestCase):
+    """仓库自带的三套代表包必须真能编译且双侧全绿（美化决策：第一批只做三套）。"""
+
+    NAMES = ("素雅阅读", "密集状态", "表现性科技")
+
+    def setUp(self):
+        self.here = Path(__file__).resolve().parent
+        self.pdir = self.here / "presets"
+        if not self.pdir.is_dir():
+            self.skipTest("presets/ 目录不存在")
+
+    def test_three_representative_bundles_exist(self):
+        for n in self.NAMES:
+            self.assertTrue((self.pdir / ("%s.json" % n)).is_file(), "缺风格包 %s.json" % n)
+
+    def test_all_shipped_bundles_compile_and_pass_contrast(self):
+        sbk_ok = B._sbk_whitelist_from_theme_js(self.here / "sbk", B.Diag())
+        for n in self.NAMES:
+            with self.subTest(preset=n):
+                d = B.Diag()
+                src = B.load_presets(["presets/%s.json" % n], self.here, d)
+                self.assertEqual(d.errors, [], d.errors)
+                c, ok = B.compile_bundle(n, src[n], d, sbk_ok)
+                self.assertTrue(ok, "%s 编译失败：%s" % (n, d.errors))
+                self.assertTrue(B.check_bundle_contrast(n, c, d),
+                                "%s 对比度不达标：%s" % (n, d.errors))
+                self.assertEqual(d.errors, [], d.errors)
+
+    def test_shipped_bundles_are_dual_side_complete(self):
+        for n in self.NAMES:
+            with self.subTest(preset=n):
+                doc = json.loads((self.pdir / ("%s.json" % n)).read_text(encoding="utf-8"))
+                dims = [k for k in doc if k in B.BUNDLE_DIMS]
+                self.assertEqual(sorted(dims), sorted(B.BUNDLE_DIMS),
+                                 "%s 六维不全（代表包必须演示全部六维）" % n)
+                for dim in dims:
+                    self.assertIn("dark", doc[dim], "%s.%s 缺 dark" % (n, dim))
+                    self.assertIn("light", doc[dim], "%s.%s 缺 light" % (n, dim))
+
+    def test_shipped_bundles_have_no_external_resources(self):
+        """美化决策：所有外部字体、图片字体、CDN 与 fetch 排除；仅系统字体与本地 CSS。
+
+        只查【真正会编译进 CSS 的令牌值】。说明性 _ 键里出现 "url(" 这类字样是文档
+        （例如「零外部资源：无 url()」），按裸文本查会把注释误判成违规。
+        """
+        for n in self.NAMES:
+            with self.subTest(preset=n):
+                doc = json.loads((self.pdir / ("%s.json" % n)).read_text(encoding="utf-8"))
+                for dim in [k for k in doc if k in B.BUNDLE_DIMS]:
+                    for mode in ("dark", "light"):
+                        for k, v in doc[dim][mode].items():
+                            if k.startswith("_"):
+                                continue
+                            sv = str(v)
+                            for bad in ("url(", "@import", "http://", "https", "@font-face"):
+                                self.assertNotIn(bad, sv,
+                                                 "%s.%s.%s 含外部资源片段 %s：%r"
+                                                 % (n, dim, mode, bad, sv))
+
+    def test_palette_maps_to_platform_tokens(self):
+        """要求之一：至少有一组把 palette 映到 14 个平台令牌。"""
+        doc = json.loads((self.pdir / "素雅阅读.json").read_text(encoding="utf-8"))
+        pal = doc["palette"]["dark"]
+        mapped = {B.theme_var(k) for k in pal if not k.startswith("_")}
+        platform = {"--chat-" + v for v in B._PLATFORM_VARS}
+        hit = mapped & platform
+        self.assertEqual(len(hit), 14,
+                         "素雅阅读 的 palette 应覆盖全部 14 个平台令牌，当前 %d 个：%s"
+                         % (len(hit), sorted(hit)))
+
+    def test_other_dims_map_to_sbk_private_tokens(self):
+        """layout/ui/font/decoration 必须落到 --sbk-* 已有/合理私有令牌。"""
+        doc = json.loads((self.pdir / "密集状态.json").read_text(encoding="utf-8"))
+        for dim in ("layout", "ui", "font", "decoration"):
+            keys = [k for k in doc[dim]["dark"]
+                    if not k.startswith("_") and k not in B.TUNE_FIELDS]
+            self.assertTrue(keys, "%s 维没有任何令牌" % dim)
+            for k in keys:
+                self.assertTrue(B.theme_var(k).startswith("--sbk-"),
+                                "%s.%s 应落到 --sbk-* 私有令牌，实际 %s"
+                                % (dim, k, B.theme_var(k)))
+
+
+class TestPresetLoading(unittest.TestCase):
+    """config.presets 的两种写法。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    MINI = {"palette": {"dark": {"bg": "#101010", "surface": "#1c1c1c", "text": "#f0f0f0",
+                                "accent": "#5aa9e6", "border": "#6b7280"},
+                        "light": {"bg": "#f5f5f5", "surface": "#ffffff", "text": "#1a1a1a",
+                                  "accent": "#1a5f96", "border": "#767676"}}}
+
+    def test_inline_object_map(self):
+        d = B.Diag()
+        got = B.load_presets({"甲": self.MINI}, self.tmp, d)
+        self.assertEqual(sorted(got), ["甲"])
+        self.assertEqual(d.errors, [])
+
+    def test_path_array_single_bundle_file(self):
+        doc = dict(self.MINI)
+        doc["name"] = "乙"
+        (self.tmp / "b.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        d = B.Diag()
+        got = B.load_presets(["b.json"], self.tmp, d)
+        self.assertEqual(sorted(got), ["乙"])
+        self.assertEqual(d.errors, [])
+
+    def test_path_array_falls_back_to_filename(self):
+        (self.tmp / "丙.json").write_text(json.dumps(self.MINI, ensure_ascii=False),
+                                          encoding="utf-8")
+        d = B.Diag()
+        got = B.load_presets(["丙.json"], self.tmp, d)
+        self.assertEqual(sorted(got), ["丙"], d.errors)
+
+    def test_path_array_bundle_map_file(self):
+        (self.tmp / "m.json").write_text(
+            json.dumps({"丁": self.MINI, "戊": self.MINI}, ensure_ascii=False), encoding="utf-8")
+        d = B.Diag()
+        got = B.load_presets(["m.json"], self.tmp, d)
+        self.assertEqual(sorted(got), ["丁", "戊"], d.errors)
+
+    def test_missing_file_is_error(self):
+        d = B.Diag()
+        B.load_presets(["nope.json"], self.tmp, d)
+        self.assertTrue(any("不存在" in e for e in d.errors), d.errors)
+
+    def test_bad_json_is_error(self):
+        (self.tmp / "x.json").write_text("{not json", encoding="utf-8")
+        d = B.Diag()
+        B.load_presets(["x.json"], self.tmp, d)
+        self.assertTrue(any("不是合法 JSON" in e for e in d.errors), d.errors)
+
+    def test_only_configured_bundles_are_shipped(self):
+        """🚨 绝不把整个 style-db 打包：每个包都要进 boot 规则的 replaceString。"""
+        (self.tmp / "a.json").write_text(json.dumps({"甲": self.MINI}, ensure_ascii=False),
+                                         encoding="utf-8")
+        (self.tmp / "b.json").write_text(json.dumps({"乙": self.MINI}, ensure_ascii=False),
+                                         encoding="utf-8")
+        d = B.Diag()
+        got = B.load_presets(["a.json"], self.tmp, d)          # 只列 a
+        self.assertEqual(sorted(got), ["甲"], "只应加载配置里列出的包")
+
+
+class TestHostIdValidation(unittest.TestCase):
+    """审计报告 7：hostId 同时插入 HTML 与 CSS 属性选择器，1.0 完全无校验。"""
+
+    def test_valid_ids_pass(self):
+        for v in ("sbk-hud", "hud_1", "A", "a" * 60):
+            with self.subTest(host=v):
+                d = B.Diag()
+                self.assertEqual(B.check_host_id(v, d), v)
+                self.assertEqual(d.errors, [])
+
+    def test_invalid_ids_error_and_fall_back(self):
+        for v in ("", "2hud", "a b", 'a"b', "a>b", "a]b", "a" * 61, "有中文"):
+            with self.subTest(host=v):
+                d = B.Diag()
+                self.assertEqual(B.check_host_id(v, d), "sbk-hud")
+                self.assertTrue(d.errors, "%r 应被拒绝" % v)
+
+    def test_regex_is_the_documented_one(self):
+        self.assertEqual(B.HOST_ID_RE.pattern, r"^[A-Za-z][A-Za-z0-9_-]{0,59}$")
+
+    def test_derived_ids_stay_within_runtime_limit(self):
+        d = B.Diag()
+        base = B.check_host_id("a" * 60, d)
+        self.assertEqual(len(base + "-pin"), 64)
+        self.assertEqual(len(base + "-chr"), 64)
+        self.assertEqual(d.errors, [])
+
+    def test_end_to_end_bad_host_id_is_error(self):
+        d = B.Diag()
+        cfg = B.normalize_config({"beginning": "hi", "statusbar": "{{hud}}",
+                                  "hostId": 'x"><script>'}, "c.json", d)
+        self.assertEqual(cfg["hostId"], "sbk-hud")
+        self.assertTrue(any("hostId" in e for e in d.errors), d.errors)
+
+
+class TestSchemaValidation(unittest.TestCase):
+    """未知 schema type 生成期报错；schema.persist 是假契约，WARN 并丢弃。"""
+
+    def test_known_types_pass(self):
+        d = B.Diag()
+        fields = [{"key": "k%d" % i, "type": t} for i, t in enumerate(B.SCHEMA_TYPES)]
+        B.normalize_schema({"fields": fields}, d)
+        self.assertEqual(d.errors, [], d.errors)
+
+    def test_new_display_types_are_supported(self):
+        """本轮按美化决策新增三种纯展示控件。"""
+        for t in ("time", "summary", "turn"):
+            self.assertIn(t, B.SCHEMA_TYPES)
+
+    def test_unknown_type_is_error(self):
+        d = B.Diag()
+        B.normalize_schema({"fields": [{"key": "x", "type": "table"}]}, d)
+        self.assertTrue(any("不受支持" in e for e in d.errors), d.errors)
+
+    def test_persist_is_warned_and_dropped(self):
+        """审计报告 3：协议说明声称走 SBK.store，运行时既没加载也没保存。"""
+        d = B.Diag()
+        out = B.normalize_schema({"persist": True, "fields": []}, d)
+        self.assertNotIn("persist", out, "persist 必须在进 boot 载荷之前就被删掉")
+        self.assertTrue(any("假契约" in w for w in d.warns), d.warns)
+        self.assertEqual(d.errors, [])
+
+    def test_persist_never_reaches_boot_payload(self):
+        d = B.Diag()
+        cfg = B.normalize_config({"beginning": "hi", "statusbar": "{{hud}}",
+                                  "schema": {"persist": True, "fields": []}}, "c.json", d)
+        js = B.boot_script(cfg, d)
+        self.assertNotIn("persist", js, "persist 泄漏进了 boot 载荷")
+
+
+class TestThemeJsContract(unittest.TestCase):
+    """🚨 theme.js 的源码契约。守的是【层间接缝】：生成器与运行时对同一件事的口径。
+
+    这些断言看着"测源码形状"，但它们各自对应一个已证实的静默失效：口径一漂移，
+    生成期放行的东西运行时会被逐字段丢弃，而两边的单测都测不到。
+    """
+
+    def setUp(self):
+        p = Path(__file__).resolve().parent / "sbk" / "theme.js"
+        if not p.is_file():
+            self.skipTest("sbk/theme.js 不存在")
+        self.raw = p.read_text(encoding="utf-8")
+        self.code = B.strip_js_comments(self.raw)
+
+    def test_font_size_field_is_css_px_not_rpx(self):
+        """审计报告 8：v1 的 24rpx 在 323px 视口约 10px，小到几乎不能读。"""
+        m = re.search(r"\{\s*key:\s*'fontSize'[^}]*\}", self.code)
+        self.assertIsNotNone(m, "没能定位 fontSize 字段定义")
+        f = m.group(0)
+        self.assertIn("unit: 'px'", f, "fontSize 必须改成 CSS px（美化决策「尺寸」）")
+        self.assertNotIn("rpx", f, "fontSize 不应再带 rpx 单位")
+        got = dict(re.findall(r"(min|max|def|step):\s*([\d.]+)", f))
+        self.assertEqual(int(got["min"]), B.TUNE_FIELDS["fontSize"]["min"])
+        self.assertEqual(int(got["max"]), B.TUNE_FIELDS["fontSize"]["max"])
+        self.assertTrue(B.TUNE_FIELDS["fontSize"]["min"] <= int(got["def"])
+                        <= B.TUNE_FIELDS["fontSize"]["max"],
+                        "默认字号必须落在 px 值域内")
+
+    def test_tune_field_ranges_match_generator(self):
+        """值域两侧必须一致：漂移会让生成期放行的包被运行时 okField 丢弃（静默失效）。"""
+        for key, spec in B.TUNE_FIELDS.items():
+            with self.subTest(field=key):
+                m = re.search(r"\{\s*key:\s*'%s'[^}]*\}" % key, self.code)
+                self.assertIsNotNone(m, "没能定位 %s 字段定义" % key)
+                got = dict(re.findall(r"(min|max):\s*([\d.]+)", m.group(0)))
+                self.assertAlmostEqual(float(got["min"]), float(spec["min"]), places=4)
+                self.assertAlmostEqual(float(got["max"]), float(spec["max"]), places=4)
+
+    def test_schema_version_bumped_for_migration(self):
+        m = re.search(r"var SCHEMA = (\d+)", self.code)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 2,
+                                "fontSize 换了量纲，SCHEMA 必须升版，否则旧存档被静默错解")
+
+    def test_v1_font_size_is_migrated_not_reinterpreted(self):
+        """🚨 旧 24rpx 不该直接变 24px（那是放大 2.4 倍，玩家一升级就破版）。"""
+        self.assertIn("migrateFontSize", self.code, "缺 v1→v2 的 fontSize 迁移函数")
+        m = re.search(r"function migrateFontSize\([^)]*\)\s*\{(.*?)\n  \}", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 migrateFontSize")
+        body = m.group(1)
+        self.assertIn("V1_RPX_PER_PX", body, "迁移必须做换算，不能照搬数值")
+        # 必须夹取而不是丢弃：夹取保住玩家「偏小还是偏大」的意图
+        self.assertIn("f.min", body)
+        self.assertIn("f.max", body)
+
+    def test_override_delete_contract_is_implemented(self):
+        """审计报告 2：文档承诺写回默认值会删 override，1.0 代码无条件保存。"""
+        m = re.search(r"set: function \(k, v, m\) \{(.*?)\n    \},", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 prefs.set")
+        body = m.group(1)
+        self.assertIn("sameAsDefault", body,
+                      "set 必须比对「不含当前 override 的 resolved 默认值」")
+        self.assertRegex(body, r"delete\s+prefs\.ov\[mm\]\[k\]",
+                         "等于默认值时必须【删除】该 override，而不是存一份等于默认的值——"
+                         "否则该字段再也跟不上 preset 升级")
+
+    def test_same_as_default_normalizes_color_case_and_number_step(self):
+        m = re.search(r"function sameAsDefault\(.*?\n  \}", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 sameAsDefault")
+        body = m.group(0)
+        self.assertIn("toLowerCase", body, "颜色必须大小写归一，否则 #FFF000 与 #fff000 判成不同")
+        self.assertIn("f.step", body, "数字必须按 step 容差比较，否则 0.1 步进的浮点噪声会漏判")
+
+    def test_prefs_get_reads_preset_not_just_field_default(self):
+        """审计报告 8：1.0 的非颜色分支直接 return f.def，无视 preset。"""
+        m = re.search(r"get: function \(k, m\) \{(.*?)\n    \},", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 prefs.get")
+        body = m.group(1)
+        self.assertIn("defaultOf", body, "回读必须走 override → resolved preset/base → 字段默认")
+        self.assertNotRegex(body, r"return\s+f\.def\s*;",
+                            "非颜色字段不能直接回落字段默认，那会无视 preset 的 tune")
+
+    def test_default_of_uses_structured_tune_not_css_parsing(self):
+        """要求：可微调项以结构化 tune 传入，避免反解析任意 CSS。"""
+        m = re.search(r"function defaultOf\(.*?\n  \}", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 defaultOf")
+        body = m.group(0)
+        self.assertIn("tuneOf", body, "非颜色字段必须从结构化 tune 取值")
+        for bad in ("parseFloat", "parseInt", "match", "replace"):
+            self.assertNotIn(bad, body,
+                             "defaultOf 不该反解析 CSS（出现 %s）——tune 已是数字" % bad)
+
+    def test_bridge_covers_both_host_and_snap_for_fs_and_lh(self):
+        """审计报告 8：1.0 字号只作用 .sbk-host，气泡内状态面板完全不跟着变。"""
+        m = re.search(r"var BRIDGE = (.*?);\n", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 BRIDGE")
+        bridge = m.group(1)
+        self.assertIn(".sbk-host", bridge)
+        self.assertIn(".sbk-snap", bridge, "BRIDGE 必须同时作用气泡内面板根 .sbk-snap")
+        self.assertIn("font-size:var(--sbk-fs", bridge, "BRIDGE 必须桥字号")
+        self.assertIn("line-height:var(--sbk-lh", bridge, "BRIDGE 必须桥行距")
+        self.assertNotIn("!important", bridge,
+                         "带 [data-chat=root] 祖先已是 (0,2,0)，不需要 !important（硬约束 10）")
+
+    def test_resolve_writes_font_size_in_px(self):
+        m = re.search(r"function resolve\(m\) \{(.*?)\n  \}", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 resolve")
+        body = m.group(1)
+        self.assertIn("'px'", body, "resolve 必须写 --sbk-fs:<n>px")
+        self.assertNotIn("var(--rpx)", body, "字号不再用 calc(n * var(--rpx))")
+
+    def test_register_requires_both_sides(self):
+        m = re.search(r"function regOne\(name, def\) \{(.*?)\n  \}", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 regOne")
+        body = m.group(1)
+        self.assertRegex(body, r"hasOwn\(def, 'dark'\)")
+        self.assertRegex(body, r"hasOwn\(def, 'light'\)")
+        self.assertIn("return false", body, "校验失败必须返回 false 且不注册")
+        self.assertIn("PRESETS[name] = norm", body, "成功才写进 PRESETS")
+
+    def test_register_returns_boolean_and_batch_returns_map(self):
+        m = re.search(r"register: function \(name, def\) \{(.*?)\n    \},", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 theme.register")
+        body = m.group(1)
+        self.assertIn("out[k] = regOne(k, name[k])", body, "批量应返回结果对象")
+        self.assertIn("return regOne(name, def)", body, "单个应返回 boolean")
+
+    def test_danger_regex_matches_generator_side(self):
+        """危险值口径两侧一致：生成期拒的，运行时也要拒（反之亦然）。
+
+        比较前把 JS 正则里的 `\\/` 还原成 `/`——JS 正则字面量里的斜杠必须转义，
+        Python 侧不必，直接按裸文本比会假红。
+        """
+        m = re.search(r"var DANGER = /(.*?)/i;", self.code)
+        self.assertIsNotNone(m, "没能定位 theme.js 的 DANGER")
+        js = m.group(1).replace(r"\/", "/")
+        py = B.THEME_DANGER_RE.pattern
+        for frag in (r"\}", r"\{", ";", "</style", "</script",
+                     "url", "@import", "expression", "javascript"):
+            self.assertIn(frag, js, "theme.js DANGER 缺 %s" % frag)
+            self.assertIn(frag, py, "build_sbk.THEME_DANGER_RE 缺 %s" % frag)
+
+    def test_sbk_private_fallback_mirrors_theme_js_exactly(self):
+        """🚨 内置镜像必须与 theme.js 的 SBK_OK 完全相等。
+
+        镜像只在读不到 theme.js 时兜底（此时走严格路径而非放行一切）。一旦漂移，
+        兜底路径就会与运行时口径不一致——生成期放行、运行时丢弃，静默失效。
+        """
+        parsed = B._sbk_whitelist_from_theme_js(
+            Path(__file__).resolve().parent / "sbk", B.Diag())
+        self.assertEqual(parsed, set(B.SBK_PRIVATE_FALLBACK),
+                         "SBK_PRIVATE_FALLBACK 与 theme.js 的 SBK_OK 已漂移："
+                         "只在 theme.js 里的 %s / 只在镜像里的 %s"
+                         % (sorted(parsed - set(B.SBK_PRIVATE_FALLBACK)),
+                            sorted(set(B.SBK_PRIVATE_FALLBACK) - parsed)))
+
+    def test_enabled_true_clears_forced_native(self):
+        """要求：prefs.enabled(false) 清空动态 style 后真跟随平台；重新开启要恢复。"""
+        m = re.search(r"enabled: function \(v\) \{(.*?)\n    \},", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 prefs.enabled")
+        body = m.group(1)
+        apply = re.search(r"function apply\(x\) \{(.*?)\n  \}", self.code, re.S)
+        self.assertIsNotNone(apply, "没能定位 theme.apply")
+        flag = re.search(r"if \(!x \|\| x === 'native'\) \{\s*(\w+) = true;", apply.group(1))
+        self.assertIsNotNone(flag, "apply(null/native) 必须设置粘滞 native 标志")
+        self.assertRegex(body, r"if \(prefs\.on\)\s*%s = false" % re.escape(flag.group(1)),
+                         "重新开启美化必须清掉 apply(null) 设置的同一个 native 标志")
+
+    def test_render_is_the_only_writer(self):
+        """🚨 单一所有权的结构保证：只有 render() 调底层 write()。
+
+        write() 是唯一真正往 <style> 落 CSS 的地方。多一个调用点就多一个主题写入者，
+        1.0 的双通道缺陷正是这么来的。
+        """
+        rm = re.search(r"function render\(\) \{.*?\n  \}", self.code, re.S)
+        self.assertIsNotNone(rm, "没能定位 render()")
+        # 排除 write 的函数定义本身（function write(...)），只看调用点
+        calls = [m.start() for m in re.finditer(r"(?<!function )(?<![\w.])write\(", self.code)]
+        self.assertTrue(calls, "源码里压根没有 write() 调用——落地口没了")
+        outside = [p for p in calls if not (rm.start() <= p <= rm.end())]
+        self.assertEqual(
+            outside, [],
+            "write() 在 render() 之外被调用（偏移 %s）——那会出现第二个主题写入者，"
+            "「关闭美化＝完全跟随平台」将再次不可证明" % outside)
+
+    def test_start_is_idempotent(self):
+        """chrome 的第二次 start 不得重新读档、不得空 resolve 覆盖。"""
+        m = re.search(r"start: function \(name, opt\) \{(.*?)\n    \},", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 theme.start")
+        body = m.group(1)
+        self.assertIn("boot1()", body, "读档必须走一次性哨兵 boot1()")
+        self.assertRegex(body, r"if \(first \|\| !current\) render\(\)",
+                         "第二次且已有产物时不该重画")
+
+    def test_boot_envelope_is_recognised_by_apply(self):
+        """生成器下发 v:2 信封，apply 必须认得它（否则风格包压根进不来）。"""
+        m = re.search(r"function apply\(x\) \{(.*?)\n  \}", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 apply")
+        body = m.group(1)
+        self.assertIn("x.v === 2", body, "apply 必须按 v:2 判形识别 boot 信封")
+        self.assertIn("envelope(x)", body)
+
+    def test_preset_name_regex_matches_generator(self):
+        m = re.search(r"var NAME_OK = /(.*?)/;", self.code)
+        self.assertIsNotNone(m, "没能定位 NAME_OK")
+        # 两侧都限 32 字符上限（首字符 + 31）
+        self.assertIn("{0,31}", m.group(1))
+        self.assertIn("{0,31}", B.PRESET_NAME_RE.pattern)
+
+    def test_sbk_private_whitelist_excludes_structural_tokens(self):
+        m = re.search(r"var SBK_OK = \{(.*?)\};", self.code, re.S)
+        self.assertIsNotNone(m, "没能定位 SBK_OK")
+        body = m.group(1)
+        self.assertNotIn("'z-panel'", body, "z 层安全带属硬约束 12，不许风格包改")
+        self.assertNotIn("'tone'", body, "--sbk-tone 是逐条 bar 的局部游标")
 
 
 class TestConfigNormalize(unittest.TestCase):
@@ -631,6 +1484,12 @@ class TestConfigNormalize(unittest.TestCase):
         self.assertEqual(cfg["markers"], B.DEFAULT_MARKERS)
         self.assertEqual(cfg["hostId"], "sbk-hud")
         self.assertEqual(cfg["protocolTag"], "状态")
+
+    def test_split_threshold_cannot_exceed_safe_budget(self):
+        d = B.Diag()
+        cfg = B.normalize_config(self._cfg(splitThreshold=B.MAX_SOURCE_RULE + 1), "c.json", d)
+        self.assertEqual(cfg["splitThreshold"], B.DEFAULT_SPLIT_THRESHOLD)
+        self.assertTrue(any("固定安全上限" in e for e in d.errors), d.errors)
 
     def test_non_dict_config_raises(self):
         with self.assertRaises(B.BuildError):
@@ -840,10 +1699,10 @@ class TestBuildEndToEnd(unittest.TestCase):
         self.assertLess(names.index("sbk-ui-1"), names.index("sbk-ui-2"))
         blob = "".join(r["replaceString"] for r in doc["regex_scripts"])
         self.assertLess(blob.index("SBK.parse"), blob.index("var u="))
-        # 每条都在编辑器上限内，且匹配式唯一且 slash 形态
+        # 每条都在固定安全预算内，且匹配式唯一且 slash 形态
         ui = [r for r in doc["regex_scripts"] if r["scriptName"].startswith("sbk-ui")]
         for r in ui:
-            self.assertLessEqual(len(r["replaceString"]), B.UI_SOFT["content"])
+            self.assertLessEqual(len(r["replaceString"]), B.MAX_SOURCE_RULE)
             self.assertEqual(B.classify_pattern(r["findRegex"])[0], "slash")
         self.assertEqual(len(set(r["findRegex"] for r in ui)), len(ui))
         self.assertEqual(d.errors, [])
@@ -894,6 +1753,16 @@ class TestBuildEndToEnd(unittest.TestCase):
         self.assertIn("脚本拆条", rep)
         self.assertIn("protocol.js", rep)
         self.assertIn("{{sbk-ui-1}}", rep)
+
+    def test_split_base_marker_left_in_beginning_warns(self):
+        """多箱后 {{sbk-core}} 不再对应规则，留在正文会裸显。"""
+        (self.assets / "core.js").write_text(
+            "(function(W){W.SBK={version:'1'};var a='%s';})(window);\n" % ("x" * 12000), encoding="utf-8")
+        (self.assets / "theme.js").write_text(
+            "(function(W){var b='%s';})(window);\n" % ("x" * 12000), encoding="utf-8")
+        cfg = self._write_cfg(beginning="正文 {{sbk-core}}\n[状态]\n血量: 1/2\n[/状态]")
+        _, _, _, d = B.build_document(cfg)
+        self.assertTrue(any("原始基名 marker" in w and "sbk-core" in w for w in d.warns), d.warns)
 
     def test_missing_config_raises(self):
         with self.assertRaises(B.BuildError):
@@ -1044,37 +1913,38 @@ class TestExampleConfig(unittest.TestCase):
         self.assertEqual(doc["pageDepth"], 2)
         self.assertTrue(metrics)
         self.assertLessEqual(len(doc["regex_scripts"]), B.HARD["regexList"])
-        # 每条脚本规则都必须在运行时硬限内；匹配式唯一且非空串匹配
+        # 每条规则都必须低于固定编辑器安全预算；匹配式唯一且非空串匹配
         finds = [r["findRegex"] for r in doc["regex_scripts"]]
         self.assertEqual(len(set(finds)), len(finds))
         for r in doc["regex_scripts"]:
-            self.assertLessEqual(len(r["replaceString"]), B.HARD["content"])
+            self.assertLessEqual(len(r["replaceString"]), B.MAX_SOURCE_RULE,
+                                 "%s 超过固定安全预算" % r["scriptName"])
             self.assertFalse(B.matches_empty(r["findRegex"]))
 
     def test_real_assets_load_order(self):
-        """真实资源：protocol.js → hud.js → ui.js → ui-stage.js 的装载顺序不能被拆条打乱。
-
-        只断言**已交付**文件之间的相对顺序，未交付的跳过——否则每次新增资源名
-        这条测试就整体 skip，反而失去防回归价值。
-        """
+        """真实生成物必须保持 ASSET_ORDER 的完整模块顺序。"""
         here = Path(__file__).resolve().parent
         adir = here / "sbk"
         if not (here / "sbk.config.example.json").is_file() or not adir.is_dir():
             self.skipTest("示例配置或 sbk/ 资源目录不存在")
-        present = [n for n in B.UI_ASSETS if (adir / n).is_file()]
-        if len(present) < 2:
-            self.skipTest("已交付的 UI 资源不足 2 个，无顺序可验")
-        doc, _, _, _ = B.build_document(here / "sbk.config.example.json")
+        missing = [n for n in B.ASSET_ORDER if not (adir / n).is_file()]
+        self.assertEqual(missing, [], "声明模块尚未交付：%s" % missing)
+        doc, _, _, d = B.build_document(here / "sbk.config.example.json")
+        self.assertEqual(d.errors, [], d.errors)
         blob = "".join(r["replaceString"] for r in doc["regex_scripts"])
-        # 每个文件末尾的 SBK.log('… ready') 是它的装载指纹
-        marks = {"protocol.js": "protocol ready", "hud.js": "hud ready",
-                 "ui.js": "ui ready", "ui-stage.js": "stage ready"}
-        seen = [(n, blob.index(marks[n])) for n in present
-                if n in marks and marks[n] in blob]
-        self.assertGreaterEqual(len(seen), 2, "至少要认出两个装载指纹")
-        # 出现位置必须与 UI_ASSETS 声明顺序一致
-        self.assertEqual([n for n, _ in seen],
-                         [n for n, _ in sorted(seen, key=lambda x: x[1])],
+        marks = {
+            "core.js": "core ready", "core-store.js": "core-store ready",
+            "core-boot.js": "core-boot ready", "theme.js": "theme ready",
+            "theme-panel.js": "theme-panel ready", "protocol.js": "protocol ready",
+            "hud.js": "hud ready", "hud-render.js": "hud-render ready",
+            "ui.js": "ui ready (kit)", "ui-panel.js": "ui-panel ready",
+            "ui-stage.js": "stage ready",
+        }
+        seen = []
+        for name in B.ASSET_ORDER:
+            self.assertIn(marks[name], blob, "%s 缺 ready 指纹 %r" % (name, marks[name]))
+            seen.append((name, blob.index(marks[name])))
+        self.assertEqual([n for n, _ in seen], [n for n, _ in sorted(seen, key=lambda x: x[1])],
                          "装载顺序被打乱：%s" % seen)
 
     def _cfg_for_boot(self):
@@ -1097,10 +1967,9 @@ class TestExampleConfig(unittest.TestCase):
         各层单测都测不到它：每层只测自己，生成器只测产物形状，没人测「装载后真跑起来」。
         """
         here = Path(__file__).resolve().parent
-        core = here / "sbk" / "core.js"
-        if not core.is_file():
-            self.skipTest("sbk/core.js 不存在")
-        src = core.read_text(encoding="utf-8")
+        src = asset_group_text(B.CORE_ASSETS)
+        if not src:
+            self.skipTest("SBK core 模块不存在")
 
         # core.js 的导出面：`var SBK = {…}` 里 4 空格缩进的键，加上 `SBK.x =` 形式的补挂
         exported = set(re.findall(r"^\s{4}(\w+)\s*:", src, re.M))
@@ -1142,10 +2011,10 @@ class TestExampleConfig(unittest.TestCase):
         self.assertIsNotNone(block, "没能在 hud.js 里定位 TYPES 表")
         real = set(re.findall(r"^\s{4}(\w+):\s*function", block.group(1), re.M))
         self.assertTrue(real, "TYPES 表解析为空")
-        # 版面项（section）【故意不在 TYPES 表里】：它没有 key、不渲染值，由 tree() 的
-        # 分组游标处理（hud.js 的 `d.type === 'section'` / `f.type === 'section'`）。
-        # 所以「支持的 type」= TYPES 表 ∪ 版面项。两者都从源码取，不在测试里写死会漂移的副本。
-        layout = set(re.findall(r"\.type === '(\w+)'", body))
+        hud_render = here / "sbk" / "hud-render.js"
+        hud_source = body + ("\n" + hud_render.read_text(encoding="utf-8") if hud_render.is_file() else "")
+        # 版面项（section）故意不在 TYPES 表里：它由渲染模块的 tree() 分组游标处理。
+        layout = set(re.findall(r"\.type === '(\w+)'", hud_source))
         self.assertIn("section", layout,
                       "没能从 hud.js 解析出版面项 section；若它已改名，请同步本断言的推导方式")
         real |= layout
@@ -1179,11 +2048,17 @@ class TestExampleConfig(unittest.TestCase):
             self.assertIn("sbk-snap", rs, "根元素必须带 .sbk-snap（硬约束 11）")
 
     def test_ui_assets_declared_in_load_order(self):
-        """UI_ASSETS 是硬编码列表，顺序即装载顺序，新增文件必须插到正确位置。"""
-        self.assertEqual(B.UI_ASSETS, ("protocol.js", "hud.js", "ui.js", "ui-stage.js"))
-        self.assertEqual(B.CORE_ASSETS, ("core.js", "theme.js"))
-        # ui-stage.js 必须排在 ui.js 之后（WP-3 拆分产物，依赖 ui.js 先挂 SBK.ui）
-        self.assertLess(B.UI_ASSETS.index("ui.js"), B.UI_ASSETS.index("ui-stage.js"))
+        """资源清单是唯一装载顺序，新增模块必须插在依赖之后、消费者之前。"""
+        self.assertEqual(B.CORE_ASSETS,
+                         ("core.js", "core-store.js", "core-boot.js", "theme.js", "theme-panel.js"))
+        self.assertEqual(B.UI_ASSETS,
+                         ("protocol.js", "hud.js", "hud-render.js", "ui.js", "ui-panel.js", "ui-stage.js"))
+        self.assertEqual(B.ASSET_ORDER, B.CORE_ASSETS + B.UI_ASSETS)
+        self.assertLess(B.CORE_ASSETS.index("core-store.js"), B.CORE_ASSETS.index("core-boot.js"))
+        self.assertLess(B.CORE_ASSETS.index("theme.js"), B.CORE_ASSETS.index("theme-panel.js"))
+        self.assertLess(B.UI_ASSETS.index("hud.js"), B.UI_ASSETS.index("hud-render.js"))
+        self.assertLess(B.UI_ASSETS.index("ui.js"), B.UI_ASSETS.index("ui-panel.js"))
+        self.assertLess(B.UI_ASSETS.index("ui-panel.js"), B.UI_ASSETS.index("ui-stage.js"))
 
 
 class TestModes20(unittest.TestCase):
@@ -1362,15 +2237,14 @@ class TestDualModeGuard(unittest.TestCase):
         return {"scriptName": name, "findRegex": fr or self.FR, "replaceString": rs}
 
     # ---- 选择器来源 ----
-    def test_hydrate_class_is_read_from_hud_js(self):
-        """守卫的类名真值只有一处：hud.js 的 SBK.dom.all(root, '.sbk-snap--raw')。"""
-        if not (self.ADIR / "hud.js").is_file():
-            self.skipTest("sbk/hud.js 不存在")
+    def test_hydrate_class_is_read_from_hud_renderer(self):
+        """守卫类名真值优先来自拆分后的 hud-render.js。"""
+        if not (self.ADIR / "hud-render.js").is_file():
+            self.skipTest("sbk/hud-render.js 不存在")
         cls, found = B.hydrate_class(self.ADIR)
-        self.assertTrue(found, "没能从 hud.js 读出升级选择器——守卫会退化成写死常量")
+        self.assertTrue(found, "没能从 HUD 渲染模块读出升级选择器")
         self.assertEqual(cls, "sbk-snap--raw")
-        # 确认它真的来自源码而非常量兜底
-        src = (self.ADIR / "hud.js").read_text(encoding="utf-8")
+        src = (self.ADIR / "hud-render.js").read_text(encoding="utf-8")
         self.assertIn("dom.all(root, '.%s')" % cls, src)
 
     def test_missing_hud_js_falls_back_and_warns(self):
@@ -1500,10 +2374,10 @@ class TestBootPayload(unittest.TestCase):
         守的是「生成器投喂了但内核不读」这类静默失效——1.0 的 modes.hud 就是这么
         变成死键的（改名后生成器还在发，boot 已经不认了）。
         """
-        core = Path(__file__).resolve().parent / "sbk" / "core.js"
-        if not core.is_file():
-            self.skipTest("sbk/core.js 不存在")
-        src = core.read_text(encoding="utf-8")
+        core = asset_group_text(("core.js", "core-store.js", "core-boot.js"))
+        if not core:
+            self.skipTest("SBK core 模块不存在")
+        src = core
         p, _ = self._payload()
         for k in p:
             self.assertRegex(src, r"\bo\.%s\b" % re.escape(k),
@@ -1515,10 +2389,10 @@ class TestBootPayload(unittest.TestCase):
         必须先剥注释【与字符串字面量】再查：别名兼容层的告警文案里本就含
         "modes.hud is gone in 2.0" 这类字样，按裸文本查会误报。
         """
-        core = Path(__file__).resolve().parent / "sbk" / "core.js"
-        if not core.is_file():
-            self.skipTest("sbk/core.js 不存在")
-        code = B.strip_js_comments(core.read_text(encoding="utf-8"))
+        source = asset_group_text(("core.js", "core-store.js", "core-boot.js"))
+        if not source:
+            self.skipTest("SBK core 模块不存在")
+        code = B.strip_js_comments(source)
         code = re.sub(r"'(?:[^'\\\n]|\\.)*'", "''", code)      # 单引号串（core.js 全用单引号）
         code = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', code)
         # 只禁【modes 对象上】的点取值。SBK.ui.snapshot 是合法的——气泡内渲染器在
@@ -1536,10 +2410,10 @@ class TestBootPayload(unittest.TestCase):
         若与 chrome 共用 #sbk-hud，第一次 state 变化就把入口按钮全擦掉 →
         boot 必须给 pinned 派生一个独立宿主 id。
         """
-        core = Path(__file__).resolve().parent / "sbk" / "core.js"
-        if not core.is_file():
-            self.skipTest("sbk/core.js 不存在")
-        code = B.strip_js_comments(core.read_text(encoding="utf-8"))
+        source = asset_group_text(("core.js", "core-store.js", "core-boot.js"))
+        if not source:
+            self.skipTest("SBK core 模块不存在")
+        code = B.strip_js_comments(source)
         # 按行抓：实参是 (o.hostId || 'sbk-hud') + '-pin'，含括号，不能用 [^)]* 收尾
         m = re.search(r"pinned\(pins,(.*)$", code, re.M)
         self.assertIsNotNone(m, "没能定位 boot 里的 pinned(...) 调用")
@@ -1549,26 +2423,25 @@ class TestBootPayload(unittest.TestCase):
 
     def test_pin_max_matches_core_js(self):
         """PIN_MAX 在生成器与 core.js 各有一份 → 漂移了会「校验放行 3 项、运行时截成 2 项」。"""
-        core = Path(__file__).resolve().parent / "sbk" / "core.js"
-        if not core.is_file():
-            self.skipTest("sbk/core.js 不存在")
-        m = re.search(r"var PIN_MAX = (\d+)", core.read_text(encoding="utf-8"))
-        self.assertIsNotNone(m, "没能在 core.js 里定位 PIN_MAX")
+        source = asset_group_text(("core.js", "core-store.js", "core-boot.js"))
+        if not source:
+            self.skipTest("SBK core 模块不存在")
+        m = re.search(r"var PIN_MAX = (\d+)", source)
+        self.assertIsNotNone(m, "没能在 core 模块里定位 PIN_MAX")
         self.assertEqual(int(m.group(1)), B.PIN_MAX,
-                         "build_sbk.PIN_MAX 与 core.js 的 PIN_MAX 不一致")
+                         "build_sbk.PIN_MAX 与运行时 PIN_MAX 不一致")
 
     def test_core_js_defaults_match_generator_defaults(self):
         """两侧默认值也必须一致：生成器不发 modes 时，boot 自己的默认得是同一套。"""
-        core = Path(__file__).resolve().parent / "sbk" / "core.js"
-        if not core.is_file():
-            self.skipTest("sbk/core.js 不存在")
-        m = re.search(r"var MODES = \{([^}]*)\}", core.read_text(encoding="utf-8"))
-        self.assertIsNotNone(m, "没能在 core.js 里定位 MODES 默认表")
+        source = asset_group_text(("core.js", "core-store.js", "core-boot.js"))
+        if not source:
+            self.skipTest("SBK core 模块不存在")
+        m = re.search(r"var MODES = \{([^}]*)\}", source)
+        self.assertIsNotNone(m, "没能在 core 模块里定位 MODES 默认表")
         got = dict(re.findall(r"(\w+):\s*(true|false)", m.group(1)))
         self.assertEqual({k: v == "true" for k, v in got.items()}, B.DEFAULT_MODES,
-                         "core.js MODES 与 build_sbk.DEFAULT_MODES 不一致")
-        # 兼容层本身必须还在（旧配置不能直接报错）
-        self.assertIn("'hud'", core.read_text(encoding="utf-8"))
+                         "运行时 MODES 与 build_sbk.DEFAULT_MODES 不一致")
+        self.assertIn("'hud'", source)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@
 
 > 🚨 **平台归属：本文档只针对当前 MMD（`/mmd`）与本地酒馆（`/st`）。MMD沙盒模式（`/mmdsandbox`）不可用本方案。** 两条独立原因：① 影渲法的点火载体是 `img onerror`，而沙盒模式**官方明令禁止 `img onerror` 点火器与 teapot 系写法**；② 沙盒的运行容器形态已由实测查明——它是**部署在独立子域的 Vue 应用、以跨源 iframe 嵌入宿主**（`window===window.top` 为 false、`getRootNode()===document` 为真），且 `document.currentScript` **恒为 `null`**（走 eval，无 script 节点）。所以 `attachShadow` 自定位这套写法在那里既无依据也无收益：**iframe 本身就是隔离边界，再套 Shadow DOM 是纯负债**（平台 14 个 `--chat-*` 令牌定义在 iframe 文档的 `[data-theme]` 上，shadow 内继承不到具体规则，主题得重搭一遍）。沙盒模式做状态栏走「专开一条规则只放 `<script>`」+ `sdk.on('message:mount')` + 长期面板挂 `sdk.stage`，规范见 `../platforms/mmd-sandbox.md`。**本文档的双轨代谢、全量快照协议、schema 驱动字段设计仍可参考，渲染载体必须整体重写。**
 >
-> **而渲染载体已经有现成的了**：沙盒模式做状态栏/美化请直接用基座 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`），方法论见 `sandbox-kit.md`。基座把载体这一层（脚本点火、事件时序、light DOM 渲染、双模状态栏、主题与 z-index）都封好了，你只需搬**与载体无关的那部分**：双轨代谢的字段分类、全量快照的协议形态、schema 驱动的字段设计，正好对上基座的块协议与 schema。本文档配套的**模型侧协议文档**（`../../assets/shadowcast-examples/状态栏-模型侧协议.md`、`RPG协议.md`、`宅邸协议.md`）也可直接复用，只需把标记形态换成方括号 `[状态]`。
+> **而渲染载体已经有现成的了**：沙盒模式做状态栏/美化请直接用基座 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`），方法论见 `sandbox-kit.md`。基座封装脚本点火、事件时序、light DOM 渲染、`status/chrome/pinned` 三职责、主题与 z-index；你只需搬**与载体无关的部分**：双轨代谢字段分类、全量快照协议、schema 驱动字段设计。本文档配套的模型侧协议也可参考，但标记必须换成方括号 `[状态]`。
 
 ## 一句话内核
 

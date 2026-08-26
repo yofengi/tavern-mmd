@@ -16,6 +16,7 @@
      一份结构，两条出口：toDom 走 SBK.dom.h（建真 DOM），toHtml 拼字符串。
      🚨 字符串出口【不能】用 dom.h：它服务 snapshot()，产物要塞进正则 replaceString，
         那里只接受字符串。DOM 出口服务 hydrate() 与功能栏精简条 pinned。 */
+  function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function esc(s) {
     // 把 > 也转义掉，顺带根治 §5.5：属性值/文本里的 ]> 与 --> 命中 SAFE_FOR_XML 会让整条属性被删
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -25,12 +26,14 @@
     var a = {};
     if (v.c) a['class'] = v.c;
     if (v.s) a.style = v.s;
+    if ((v.t || '').toLowerCase() === 'button') a.type = 'button';
     if (v.on) a.onclick = v.on;         // dom.h 见 function 型 on* 走 addEventListener，不过净化器
     var kids = v.k ? v.k.map(toDom) : null;
     return SBK.dom.h(v.t || 'div', a, v.x !== undefined ? String(v.x) : kids);
   }
   function toHtml(v) {
     var t = v.t || 'div', s = '<' + t;
+    if (String(t).toLowerCase() === 'button') s += ' type="button"';
     if (v.c) s += ' class="' + esc(v.c) + '"';
     if (v.s) s += ' style="' + esc(v.s) + '"';
     /* oc = 内联 onclick 字符串。v.on 是函数，只能走 toDom（字符串路径没法带函数）→
@@ -69,8 +72,8 @@
        ① stopPropagation —— 气泡自带点击/长按菜单（§7.2 message-menu z=8200），不拦会掀起菜单。
        ② 显隐用【内联 style】而非 class：base.css 归 WP-B，此处不能假设某个类已存在；
           内联 display 自带初值，缺 CSS 也能正常开合，只是没有浮层定位（可读性仍在）。
-     🚨 §5.5：属性值禁 ]> / --> / --!>，比较运算符两侧留空格 —— TT_JS 全程只用 === 与 ？:，
-        不含 ] 紧跟 >，故 SAFE_FOR_XML 不会命中。 */
+     ③ 触发器用原生 button：平台会删 aria/role，但原生 button 自带 Tab/Enter/Space 语义。
+     🚨 §5.5：属性值禁 ]> / --> / --!>，TT_JS 全程不含 ] 紧跟 >。 */
   var TT_JS = "event.stopPropagation();var b = this.nextElementSibling;" +
     "if (b) b.style.display = b.style.display === 'block' ? 'none' : 'block';";
   function ttFn(ev) {
@@ -80,13 +83,13 @@
       if (b) b.style.display = b.style.display === 'block' ? 'none' : 'block';
     } catch (e) {}
   }
-  /* 有 note 就包成「触发词 + 折叠的说明」，没有就退回一个普通 span —— 调用方无需分支。 */
+  /* 有 note 就包成「原生按钮触发词 + 折叠说明」，没有就退回普通 span。 */
   function tip(text, note, cls) {
     var c = cls || 'sbk-val';
     if (!note) return { t: 'span', c: c, x: text };
     return {
       t: 'span', c: 'sbk-tt', k: [
-        { t: 'span', c: c + ' sbk-tt__hit', x: text, on: ttFn, oc: TT_JS },
+        { t: 'button', c: c + ' sbk-tt__hit', x: text, on: ttFn, oc: TT_JS },
         { t: 'span', c: 'sbk-tt__box', s: 'display:none', x: note }
       ]
     };
@@ -96,7 +99,17 @@
      f = {key,label,type,value,max,unit,opt}。可扩展：SBK.ui.hud.type('自定义', fn)。
      🚨 配色一律 var(--chat-*)，零硬编码色值：写死颜色会让平台深浅色切换失效（§7.1）。
         §9 实测深色 --chat-accent:#ff6d97，只作视觉参考，代码里仍用变量。 */
-  function pct(v, m) { return m > 0 ? Math.max(0, Math.min(100, v / m * 100)) : 0; }
+  /* 🚨 pct 是 width:NaN% 的最后一道闸（审计报告问题 5）。
+     入参可能是 NaN / Infinity / undefined（typed 描述对象绕过归一时），而
+     `NaN > 0` 为 false、`NaN.toFixed(1)` 得 'NaN' → 直接吐出 `width:NaN%`，
+     实测浏览器把整条 style 丢掉，条子变成 0 宽，做卡人只看到「条不见了」。
+     故此处对两个入参都做有限数收敛，绝不把非有限数算进百分比。 */
+  function pct(v, m) {
+    var x = Number(v), y = Number(m);
+    if (!isFinite(x)) x = 0;
+    if (!isFinite(y) || y <= 0) return 0;
+    return Math.max(0, Math.min(100, x / y * 100));
+  }
 
   /* ---------- 语义色：字段 → tone（2.0 §3.3 / 盘点 B.5 + D.1） ----------
      base.css（WP-B）已备好令牌与 tone 类，但没有任何代码把字段映射到 tone，
@@ -172,7 +185,13 @@
   }
   var TYPES = {
     bar: function (f) {
-      var p = pct(f.value, f.max), tx = f.unit === '%' ? f.value + '%' : f.value + '/' + f.max;
+      /* value 已由 normTyped 收敛成有限数、max 已由 normMax 收敛（bar 缺 max 时 cell 补 100）。
+         这里仍对 max 兜一次：自定义控件可能不经 cell() 直接调本渲染器，
+         那时 f.max 可能是 undefined → 旧写法会拼出 "380/undefined"（本缺口的报错形态之一）。 */
+      var mx = normMax(f.max);
+      var v = isNum(f.value) ? f.value : 0;
+      var p = pct(v, mx === undefined ? 100 : mx);
+      var tx = f.unit === '%' ? v + '%' : (mx === undefined ? String(v) : v + '/' + mx);
       /* tone 类挂在【bar 槽本身】而不是祖先：.sbk-tone--* 挂祖先会让整行/整组的条与
          .sbk-stat 竖条一起变色（base.css L166-173 两种用法同一个消费点），
          对「一行一条」的 bar 而言那是外溢。槽上加 .sbk-bar--* 只染这一条，精确。 */
@@ -184,47 +203,52 @@
         val(tx)
       ]);
     },
-    num: function (f) { return row(f.label, [val(String(f.value) + (f.unit || ''), 1)]); },
-    text: function (f) { return row(f.label, [val(f.value, 1)]); },
+    // isNum 兜底同 bar：不经 cell() 直接调渲染器时，NaN 会显示成字面量 'NaN'
+    num: function (f) { return row(f.label, [val((isNum(f.value) ? String(f.value) : txt(f.value)) + (f.unit || ''), 1)]); },
+    text: function (f) { return row(f.label, [val(txt(f.value), 1)]); },
     tags: function (f) {
-      var k = [], a = f.value, i;
-      for (i = 0; i < a.length; i++) k.push({ t: 'span', c: 'sbk-chip', x: a[i] });
+      var k = [], a = Array.isArray(f.value) ? f.value : [], i;
+      for (i = 0; i < a.length; i++) k.push({ t: 'span', c: 'sbk-chip', x: txt(a[i]) });
       return { t: 'div', c: 'sbk-row sbk-row--wrap', k: (f.label ? [{ t: 'span', c: 'sbk-label', x: f.label }] : []).concat(k) };
     },
     /* ---- 2.0 §3.2 值的内部结构。四个都是纯展示零状态，两条出口通用。 ---- */
     /* path：面包屑 chips，段间 › （\u203A）。复用 .sbk-chip，只新增箭头类名。 */
     path: function (f) {
-      var a = f.value, k = [], i;
+      var a = Array.isArray(f.value) ? f.value : [], k = [], i;
       for (i = 0; i < a.length; i++) {
         if (i) k.push({ t: 'span', c: 'sbk-arrow', x: '\u203A' });
-        k.push({ t: 'span', c: 'sbk-chip sbk-crumb', x: a[i] });
+        k.push({ t: 'span', c: 'sbk-chip sbk-crumb', x: txt(a[i]) });
       }
       return { t: 'div', c: 'sbk-row sbk-row--wrap', k: (f.label ? [{ t: 'span', c: 'sbk-label', x: f.label }] : []).concat(k) };
     },
     /* level：上行「左等级名 + 右经验」，下行 XP 条。
        🚨 只有经验段解析成功才画条（盘点 B.6）：否则只留一行名字，不画 0% 的空槽 —— 那是
-          1.0 bar 在缺 max 时的取巧写法留下的视觉噪音。 */
+          1.0 bar 在缺 max 时的取巧写法留下的视觉噪音。
+       ⚠ 局部标志名从 has 改成 hasXp：模块级已有工具函数 has()（hasOwnProperty 包装），
+         同名局部变量会在本函数内把它遮蔽掉 —— 现在不出错，但日后在这里加一行 has(o,k)
+         就会得到「has is not a function」。改名是为了让遮蔽不可能发生。 */
     level: function (f) {
-      var v = f.value || {}, k = [], has = typeof v.value === 'number' && typeof v.max === 'number' && v.max > 0;
+      var v = f.value && typeof f.value === 'object' ? f.value : {}, k = [];
+      var hasXp = isNum(v.value) && isNum(v.max) && v.max > 0;
       k.push({
         t: 'div', c: 'sbk-row', k: [
-          { t: 'span', c: 'sbk-val sbk-grow', x: v.name || '' },
-          { t: 'span', c: 'sbk-label', x: has ? v.value + '/' + v.max : '' }
+          { t: 'span', c: 'sbk-val sbk-grow', x: txt(v.name) },
+          { t: 'span', c: 'sbk-label', x: hasXp ? v.value + '/' + v.max : '' }
         ]
       });
-      if (has) k.push({ t: 'div', c: 'sbk-bar sbk-bar--xp', k: [{ t: 'div', c: 'sbk-bar__fill', s: 'width:' + pct(v.value, v.max).toFixed(1) + '%' }] });
+      if (hasXp) k.push({ t: 'div', c: 'sbk-bar sbk-bar--xp', k: [{ t: 'div', c: 'sbk-bar__fill', s: 'width:' + pct(v.value, v.max).toFixed(1) + '%' }] });
       return row(f.label, [{ t: 'div', c: 'sbk-col sbk-grow sbk-level', k: k }]);
     },
     /* stats：`键:值` chip 紧凑网格（chip 左 3px 主题色竖条由 WP-B 的 .sbk-stat 提供）。
        第三段成因 → tap toggle tooltip，把第三层信息折进第二层（盘点 B.7 / E.4）。 */
     stats: function (f) {
-      var a = f.value, k = [], i, e;
+      var a = Array.isArray(f.value) ? f.value : [], k = [], i, e;
       for (i = 0; i < a.length; i++) {
-        e = a[i];
+        e = a[i] || {};
         k.push({
           t: 'span', c: 'sbk-chip sbk-stat', k: [
-            { t: 'span', c: 'sbk-label', x: e.name },
-            tip(e.value, e.note, 'sbk-val')
+            { t: 'span', c: 'sbk-label', x: txt(e.name) },
+            tip(txt(e.value), txt(e.note), 'sbk-val')
           ]
         });
       }
@@ -232,33 +256,88 @@
     },
     /* kvlist：竖排「槽位：名」，信息密度最高的控件（盘点 B.8）。名带 |说明 → tooltip。 */
     kvlist: function (f) {
-      var a = f.value, k = [], i, e;
+      var a = Array.isArray(f.value) ? f.value : [], k = [], i, e;
       for (i = 0; i < a.length; i++) {
-        e = a[i];
-        k.push({ t: 'div', c: 'sbk-row sbk-kv', k: [{ t: 'span', c: 'sbk-label', x: e.name }, tip(e.value, e.note, 'sbk-val sbk-grow')] });
+        e = a[i] || {};
+        k.push({ t: 'div', c: 'sbk-row sbk-kv', k: [{ t: 'span', c: 'sbk-label', x: txt(e.name) }, tip(txt(e.value), txt(e.note), 'sbk-val sbk-grow')] });
       }
       if (f.label) k.unshift({ t: 'span', c: 'sbk-label', x: f.label });
       return { t: 'div', c: 'sbk-col', k: k };
     },
     entities: function (f) {
-      var k = [], a = f.value, i, e, top = 0;
-      for (i = 0; i < a.length; i++) if (a[i].value > top) top = a[i].value;
-      if (top <= 0) top = 1;
+      /* 上限缺省取组内最大值。
+         🚨 top 必须只从【有限数】里取：normTyped 已把 value 收敛成有限数，
+            但不经 cell() 直接调本渲染器时仍可能进来 NaN —— 而 `NaN > top` 恒 false，
+            top 会停在 0 → 旧代码 `f.max || top` 得 0 → pct 除零。故显式兜到 1。 */
+      var k = [], a = Array.isArray(f.value) ? f.value : [], i, e, v, top = 0;
+      var mx = normMax(f.max);
+      for (i = 0; i < a.length; i++) { v = Number(a[i] && a[i].value); if (isFinite(v) && v > top) top = v; }
+      if (!(top > 0)) top = 1;
       for (i = 0; i < a.length; i++) {
-        e = a[i];
-        k.push(row(e.name, [
-          { t: 'div', c: 'sbk-bar sbk-grow', k: [{ t: 'div', c: 'sbk-bar__fill', s: 'width:' + pct(e.value, f.max || top).toFixed(1) + '%' }] },
-          val(String(e.value))
+        e = a[i] || {};
+        v = numOr0(e.value);
+        k.push(row(txt(e.name), [
+          { t: 'div', c: 'sbk-bar sbk-grow', k: [{ t: 'div', c: 'sbk-bar__fill', s: 'width:' + pct(v, mx === undefined ? top : mx).toFixed(1) + '%' }] },
+          val(String(v))
         ]));
       }
       if (f.label) k.unshift({ t: 'span', c: 'sbk-label', x: f.label });
       return { t: 'div', c: 'sbk-col', k: k };
+    },
+    /* ---- 三种纯展示控件（美化决策「控件范围」/ 审计报告「值得迁入的旧资产能力」） ----
+       共同纪律，三个都严格遵守：
+         ① 【零本地业务状态】：只读 f，不缓存、不订阅、不写任何模块级变量 →
+            两次渲染同一个 f 必得同一份 vnode，天生幂等（hydrate 会对同一气泡重跑）。
+         ② 【双出口共用同一份 vnode】：不写任何只在 DOM 出口成立的东西
+            （无 on/oc 函数句柄、无内联 style 之外的 DOM API）→ toHtml 与 toDom 结果同构。
+         ③ 【格式容错】：值一律经 normTyped→txt() 压成短文本，空值不产出空壳。
+       🚨 都【不做关键词猜测】：不解析日期语义、不判断「这是第几轮」，
+          模型写什么就显示什么。猜测不可复现，且一旦猜错就是静默错显（tone 推断的教训）。 */
+    /* time：紧凑的时间/日期行。
+       只做一件事 —— 若值里有空白分隔（'第三日 黄昏' / '2026-08-26 19:30'），
+       就把首段与其余分成两个 span 给一点视觉层次；没有空白就整条一个 span。
+       这【不是语义解析】：不判断哪段是日期哪段是时刻，纯粹按分隔符切，切不动就不切。 */
+    time: function (f) {
+      var s = txt(f.value).replace(/\s+/g, ' ').trim(), i, k;
+      if (!s) return null;                       // 空值不占位（与 pinned 的 pinText 同一口径）
+      i = s.indexOf(' ');
+      k = i > 0
+        ? [{ t: 'span', c: 'sbk-time__d', x: s.slice(0, i) }, { t: 'span', c: 'sbk-time__t', x: s.slice(i + 1) }]
+        : [{ t: 'span', c: 'sbk-time__t', x: s }];
+      return row(f.label, [{ t: 'span', c: 'sbk-time', k: k }]);
+    },
+    /* summary：可折行摘要块。与 text 的区别是【整块独立成段】而不是「标签 + 一行值」——
+       摘要通常是一两句话，挤在 .sbk-row 里会把标签行撑开、右侧文字被压成窄柱。
+       故走 .sbk-col：标签一行、正文一块，正文自己折行（.sbk-sum 的 CSS 负责）。 */
+    summary: function (f) {
+      var s = txt(f.value).trim(), k;
+      if (!s) return null;
+      k = [{ t: 'div', c: 'sbk-sum', x: s }];
+      if (f.label) k.unshift({ t: 'span', c: 'sbk-label', x: f.label });
+      return { t: 'div', c: 'sbk-col sbk-sum-w', k: k };
+    },
+    /* turn：「当前轮次/阶段」紧凑角标。
+       值可以是 '3'、'第三幕'、'3/12'（normTyped 对 turn 走 txt()，'3/12' 原样保留）。
+       形态刻意做成一个小角标而不是普通行：轮次是【元信息】不是业务数值，
+       跟 bar/num 同形会让读者以为它是一项属性。 */
+    turn: function (f) {
+      var s = txt(f.value).replace(/\s+/g, ' ').trim();
+      if (!s) return null;
+      return row(f.label, [{ t: 'span', c: 'sbk-turn', x: s }]);
     }
   };
+  /* 内置类型表快照：normTyped 只对内置类型跑（自定义控件的值形态由作者自己定义，
+     压成文本会破坏它的契约）。🚨 必须在 TYPES 定义【之后】立刻取，且之后
+     SBK.ui.hud.type() 注册的自定义控件不会进这张表 —— 这正是想要的。 */
+  var BUILTIN = {};
+  (function () { for (var k in TYPES) if (has(TYPES, k)) BUILTIN[k] = 1; })();
+  var unknownSeen = {};        // 未知 type 的告警去重（每个坏 type 只吼一次，不逐轮刷屏）
 
   /* ---------- schema → 字段列表 ----------
-     schema = { title?, fields?: [ {key,label?,type?,max?,unit?} | '键名' ], extra?:true, persist?:true }
-     fields 缺省 = 按模型输出顺序全渲染（order 由 SBK.parse 给出）。 */
+     schema = { title?, fields?: [ {key,label?,type?,max?,unit?,tone?} | '键名' ], extra?:true }
+     fields 缺省 = 按模型输出顺序全渲染（order 由 SBK.parse 给出）。
+     ⚠ 没有 persist 键：`schema.persist` 是已删除的假契约（从未实现存取，作用域也没定义），
+       core.js 的 normSchema 现在会删它并告警。存档请显式调 SBK.store.load/save。 */
   /* schema 里 type 覆写后，值的形态可能与控件不符（把 text 强制成 tags 等）。
      不 coerce 的话 tags 渲染器会把字符串按【字符】迭代，一个字一个 chip。
      所以按目标类型重新分类一次，让「type 覆写」在任何输入上都安全。 */
@@ -300,7 +379,18 @@
       re = SBK.parse.value(raw);
       return typeof re.value === 'number' ? re.value : 0;
     }
-    return typeof v === 'string' ? v : (Array.isArray(v) ? v.join(', ') : String(raw === undefined ? v : raw));
+    /* 兜底分支 = text 与三种纯展示类型（time/summary/turn）走的路。
+       🚨 末项原先是 String(raw === undefined ? v : raw)：v 是对象时得字面量 '[object Object]'，
+          直接进 DOM（本次一并收口的报错形态之一）。改走 txt()：
+          它对对象取 raw/name/value 里第一个可读的原始值，取不到就返回 ''（宁可空着也不显示垃圾）。
+       数组仍按 ', ' 拼接：那是「把 tags 强制成 text」的既有行为，逐项过 txt() 防对象项漏出。 */
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) {
+      re = [];
+      for (var ti = 0; ti < v.length; ti++) re.push(txt(v[ti]));
+      return re.join(', ');
+    }
+    return raw === undefined ? txt(v) : txt(raw);
   }
   /* ---------- 直喂结构化入参的识别（做卡人直接调 API 会踩的坑） ----------
      🚨 成因：cell() 原先只认「parse 出来的描述对象」（带 .type），其余一律过 SBK.parse.value()，
@@ -336,6 +426,75 @@
   // entities 的 value 必须是有限数：非数字会让 pct() 算出 NaN（本缺口的报错形态），故兜底 0
   function numOr0(v) { var n = Number(v); return isFinite(n) ? n : 0; }
   function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  /* 任意值 → 安全短文本。null/undefined 得 ''（而不是字面量 'null'/'undefined'），
+     对象取 raw/name/value 里第一个可读的原始值，仍不可读才退 ''。
+     🚨 绝不 String(对象) —— 那正是 '[object Object]' 漏进 DOM 的来源。 */
+  function txt(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'number') return isFinite(v) ? String(v) : '';
+    if (typeof v !== 'object') return String(v);
+    if (typeof v.raw === 'string' && v.raw) return v.raw;
+    if (v.name !== undefined && typeof v.name !== 'object') return txt(v.name);
+    if (v.value !== undefined && typeof v.value !== 'object') return txt(v.value);
+    return '';
+  }
+
+  /* ---------- typed 描述对象的统一归一化（审计报告问题 5） ----------
+     🚨 修的缺陷：cell() 只在【值不带 .type】时才过 direct()/parse.value() 归一化。
+        做卡人直接喂一个「已经带 type 的描述对象」就【整条绕过】所有归一化：
+          state.patch({ 好感: { type:'entities', value:[{name:'苏九',value:'很高'}] } })
+          state.patch({ 好感: { type:'entities', value:[{name:1/0, value:NaN}] } })
+        旧代码里 `ty === f.type` 成立 → 连 fit() 都不跑，value 原样进渲染器 →
+        e.value 是字符串/NaN，pct() 算出 NaN → 实测 `width:NaN%` 与显示 `undefined`。
+        这与「强制 type 覆写」那条路径（fit 里已修）是同一种失败形态，只是入口不同。
+     修法 = 让 typed 与 untyped 汇到【同一个归一化出口】：无论值从哪来，
+        按最终 type 把形状收敛成渲染器的契约形态。纪律与 fit() 一致：
+        形状不合就给空壳 + 告警，绝不把 NaN / undefined / '[object Object]' 送进 DOM。
+     只做【最小收敛】，不发明数据：数值非有限数 → 0；名字缺失 → ''；条目不是对象 → 丢弃。 */
+  function normTyped(type, v, max) {
+    var i, e, out;
+    if (type === 'entities') {
+      if (!Array.isArray(v)) return [];
+      out = [];
+      for (i = 0; i < v.length; i++) {
+        e = v[i];
+        if (!e || typeof e !== 'object' || Array.isArray(e)) continue;   // 原始值项：不是实体，丢弃
+        out.push({ name: txt(e.name), value: numOr0(e.value) });
+      }
+      if (out.length !== v.length) {
+        SBK.warn('hud: entities entries need {name,value}; ' + (v.length - out.length) +
+          ' malformed entry(ies) dropped');
+      }
+      return out;
+    }
+    if (type === 'stats' || type === 'kvlist') {
+      if (!Array.isArray(v)) return [];
+      out = [];
+      for (i = 0; i < v.length; i++) {
+        e = v[i];
+        if (!e || typeof e !== 'object' || Array.isArray(e)) continue;
+        out.push({ name: txt(e.name), value: txt(e.value), note: txt(e.note) });
+      }
+      return out;
+    }
+    if (type === 'tags' || type === 'path') {
+      if (!Array.isArray(v)) return [];
+      out = [];
+      // 逐项压成短文本：对象项在这里被 txt() 吃掉，不会渲染出 '[object Object]' 的 chip
+      for (i = 0; i < v.length; i++) out.push(txt(v[i]));
+      return out;
+    }
+    if (type === 'level') {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return { name: txt(v), value: null, max: null };
+      // value/max 只认有限数，其余一律 null → level 渲染器据此决定「画不画 XP 条」
+      return { name: txt(v.name), value: isNum(v.value) ? v.value : null, max: isNum(v.max) ? v.max : null };
+    }
+    if (type === 'bar' || type === 'num') return numOr0(v);
+    // text 与三种纯展示类型（time/summary/turn）都消费短文本
+    return txt(v);
+  }
+  // max 也可能是脏值：Infinity / NaN / '100' 都会让 bar 算错 → 只认有限非零数，否则交回调用方兜底
+  function normMax(m) { var n = Number(m); return isFinite(n) && n !== 0 ? n : undefined; }
 
   /* 入参已是结构化值 → 合成一个与 parse.value() 【同形】的描述对象（{type,value,max?,unit?}）。
      同形是关键：cell() 下游（fit/toneOf/渲染器）完全不需要知道值是文本解析来的还是直喂的，
@@ -358,7 +517,7 @@
       // entities：名 + 数。value 走 numOr0 兜底，杜绝 pct() 的 NaN。
       if (want === 'entities' || (!want && allNumVal(v))) {
         out = [];
-        for (i = 0; i < v.length; i++) out.push({ name: String(v[i].name), value: numOr0(v[i].value) });
+        for (i = 0; i < v.length; i++) out.push({ name: txt(v[i].name), value: numOr0(v[i].value) });
         return { type: 'entities', value: out };
       }
       /* stats/kvlist 同形（{name,value,note}），靠 want 区分；没写 want 时取 stats ——
@@ -368,8 +527,7 @@
         out = [];
         for (i = 0; i < v.length; i++) {
           e = v[i];
-          out.push({ name: String(e.name), value: e.value === undefined ? '' : String(e.value),
-            note: e.note === undefined || e.note === null ? '' : String(e.note) });
+          out.push({ name: txt(e.name), value: txt(e.value), note: txt(e.note) });
         }
         return { type: want === 'kvlist' ? 'kvlist' : 'stats', value: out };
       }
@@ -382,7 +540,7 @@
       if (want === 'bar' && !isNum(v.value)) return null;
       if (want !== 'bar') {
         return { type: 'level', value: {
-          name: String(v.name),
+          name: txt(v.name),
           value: isNum(v.value) ? v.value : null,
           max: isNum(v.max) ? v.max : null } };
       }
@@ -406,17 +564,41 @@
       f = d || SBK.parse.value(f === undefined || f === null ? '' : f);
     }
     var ty = def.type || f.type;
-    var mx = def.max !== undefined ? def.max : f.max;
+    /* 未知 type 在【运行时】收口（plan.md：生成期报错、运行时告警回退）。
+       🚨 旧行为是 tree() 里 `TYPES[f.type] || TYPES.text` 静默回落 —— 做卡人把
+          type 拼错成 'entites' 时页面上只是少了个控件，没有任何线索。
+          改为在此明确告警一次并【真的把 type 改成 text】，理由是 type 必须在 cell()
+          这一层就定下来：下游的 normTyped/fit/toneOf 都按它决定形状，
+          留着一个渲染器不认识的 type 会让「值按 entities 归一、却用 text 渲染」这类错配复活。
+       告警按 type 名去重（unknownSeen）：state 每轮都重跑 cell()，
+       逐轮刷屏会把 debug 通道淹掉，做卡人反而看不到真正的错误。 */
+    if (ty && !has(TYPES, ty) && ty !== 'section') {
+      if (!unknownSeen[ty]) {
+        unknownSeen[ty] = 1;
+        SBK.warn('hud: unknown type ' + JSON.stringify(ty) + ' on field ' + JSON.stringify(String(key)) +
+          ', rendered as text (valid: ' + hud.types().join('|') + '). ' +
+          'Register custom widgets with SBK.ui.hud.type(name, fn).');
+      }
+      ty = 'text';
+    }
+    var mx = normMax(def.max !== undefined ? def.max : f.max);
     // 强制成 bar 却没给上限（「金币: 380」+ type:'bar'）→ 按百分比常规取 100，
     // 否则会渲染出 "380/undefined" 和 0% 宽度的空条
-    if (ty === 'bar' && !(typeof mx === 'number' && isFinite(mx) && mx !== 0)) mx = 100;
+    if (ty === 'bar' && mx === undefined) mx = 100;
     /* tone 在此【算一次】并落到字段对象上 —— cell() 是 snapshot()（字符串路径）与
        hydrate()（DOM 路径）唯一的公共上游（两者都经 tree → pick → cell），
        所以两条路径拿到的 tone 必然同源。类名同源的纪律见上方 PANEL/SNAP 的注释：
        此前正是「两处各写一份」导致过漂移。 */
+    /* 值的最终形态：先按需 fit()（type 覆写路径），再【无条件】过 normTyped()。
+       🚨 normTyped 必须对两条路径都跑，这正是本次修的缺口：
+          `ty === f.type` 时旧代码原样透出 f.value，于是 typed 描述对象里的
+          NaN / 字符串 value / 坏形状条目直通渲染器。现在两条路径同一个出口。
+       自定义控件（SBK.ui.hud.type 注册的 type）不在 normTyped 的表内 → 落 txt() 分支
+       会把结构值压成文本，那会破坏作者自己的控件契约 → 故仅对【内置类型】归一化。 */
+    var raw2 = ty === f.type ? f.value : fit(ty, f.value, f.raw);
     return {
       key: key, label: def.label === undefined ? key : def.label,
-      type: ty, value: ty === f.type ? f.value : fit(ty, f.value, f.raw),
+      type: ty, value: has(BUILTIN, ty) ? normTyped(ty, raw2, mx) : raw2,
       max: mx, unit: def.unit || f.unit, tone: toneOf(ty, key, def), opt: def
     };
   }
@@ -452,60 +634,9 @@
     }
     return out;
   }
-  /* ---------- 版面层：section 分组（2.0 §3.1，最大缺口） ----------
-     1.0 只有 sbk-card 一个容器，20 个字段拉平成一张长表，读者拿不到「哪几项是一组」
-     （盘点 E.1 判定这是「视觉太朴素」的根因）。
-     实现是一个【游标 + 惰性开卡】：遇到 section 先把上一组收口，后续字段累进当前组，
-     直到下一个 section。组内一个字段都没有就【不产出这张卡】——
-     连续两个 section、或整组字段本轮模型全没输出时，都不会留下空卡片。
-     三层明度递进（面板 → 分组卡 → 内容区）与组标题配色属 WP-B 的 .sbk-sect*，此处只给结构。 */
-  function tree(state, schema, order) {
-    var fs = pick(state, schema, order), out = [], cur = null, curLabel = '', curTone = '', i, f, fn, node;
-    if (schema && schema.title) out.push({ t: 'div', c: 'sbk-label sbk-title', x: schema.title });
-
-    function flush() {
-      if (cur && cur.length) {
-        var k = curLabel ? [{ t: 'div', c: 'sbk-label sbk-sect__t', x: curLabel }].concat(cur) : cur;
-        /* 组级 tone 挂在【分组卡】这个祖先上（base.css 的 .sbk-tone--* 用法①）：
-           --sbk-tone 靠继承传给组内所有 .sbk-bar__fill 与 .sbk-stat 左竖条，一次染整组。
-           🚨 字段自己的 .sbk-bar--* 仍然赢：那是 bar 槽【自身】的声明，
-              层叠里「自身声明」强于「继承值」，与特异度/源码顺序无关（base.css 同处有说明）。
-           🚨 只能走 class 不能走 data-*：事实卡 §5.5 作者自写 data-* 全删（硬约束 9）。 */
-        out.push({ t: 'div', c: PANEL + ' sbk-sect' + (curTone ? ' sbk-tone--' + curTone : ''), k: k });
-      }
-      cur = null; curLabel = ''; curTone = '';
-    }
-
-    for (i = 0; i < fs.length; i++) {
-      f = fs[i];
-      if (f.type === 'section') { flush(); cur = []; curLabel = f.label; curTone = f.tone || ''; continue; }
-      fn = TYPES[f.type] || TYPES.text;
-      node = null;
-      try { node = fn(f); } catch (e) { SBK.warn('hud: renderer threw for ' + f.key); }
-      if (!node) continue;
-      // 有分组游标就进组，没有（schema 没写 section，或首个 section 之前的字段）就直接进面板
-      if (cur) cur.push(node); else out.push(node);
-    }
-    flush();
-    return out;
-  }
-
   /* ---------- SBK.ui.hud —— 2.0 已废弃，退化为控件注册表 + 告警壳 ----------
-     处置理由（2.0 设计文档 §一/§2.1，实机截图确证）：
-       1.0 的 hud 是「把状态数据面板渲染进功能栏槽位」。截图里页面同时出现两个一模一样的
-       面板（功能栏一个、气泡内一个），字段与样式完全相同 —— 这是 1.0 的头号缺陷，
-       性质是【违反 MMD 惯例】（功能栏历来放 chrome，状态栏在气泡内），不是代码 bug。
-     2.0 里它的三项职责已各有归属，没有任何调用方剩下：
-       · 状态数据面板 → 气泡内状态面板（本文件 snapshot/hydrate）= modes.status
-       · 功能栏常驻   → core.js 的 pinned()（单行精简条，形态被强制区分，默认关）
-       · 功能栏入口   → ui.js 的 chrome()
-     实证：core.js 的 boot() 已完全不引用 SBK.ui.hud（status→snapshot.auto、chrome→ui.chrome、
-     pinned→core 自带），全仓库无其它调用点。→ 渲染器本体是死代码，删掉省预算（§5.2）。
-     🚨 但【不能连符号一起删】：协议说明 §3.1 把 SBK.ui.hud.type() 写成自定义控件的公开
-        注册入口，做卡人代码里存在。故保留同名壳：
-          · .type()/.types() 原样可用（注册表是真的，注册进去的控件在快照里生效）
-          · 直接当渲染器调 → 告警并返回一个惰性句柄（feed 返回 false、el 返回 null），
-            不挂任何订阅、不写任何 DOM。老卡不会抛异常炸整卡，但也不会再渲染出重复面板。 */
+     公开壳必须先于 hud-render.js 挂载：自定义 type() 直接写入共享 TYPES，
+     render 模块随后经 SBK._hudKit 取得同一对象，不复制控件表。 */
   function hud() {
     SBK.warn('SBK.ui.hud is removed in 2.0 (it put a data panel in the toolbar, which duplicated ' +
       'the in-bubble panel). Use SBK.ui.snapshot.auto(schema) for the status panel, ' +
@@ -521,68 +652,9 @@
   hud.type = function (name, fn) { if (name && typeof fn === 'function') TYPES[String(name)] = fn; return hud; };
   hud.types = function () { return Object.keys(TYPES); };
 
-  /* ---------- 气泡内状态面板（modes.status，唯一的状态数据渲染器） ----------
-     随消息滚动 = 天然的历史快照，故内部与 API 沿用 snapshot 之名。
-     返回 HTML 字符串（要塞进正则 replaceString，故【不能】用 dom.h）。
-     🚨 已裁决第 4 条：根元素必须带 .sbk-snap —— base.css 靠它把 message-body 的
-        opacity:.9 与 white-space:pre-line 重置掉（§7.3 / 硬约束 11），少这个类排版必烂。
-     🚨 净化合规（§5.5）：无自写 data-* 属性（全删）、无 aria 属性与 role（ALLOW_ARIA_ATTR:!1 全删）、
-        属性值经 esc() 后不可能含 ]> 或 -->（SAFE_FOR_XML 会删整条属性）。
-        标签只用 div/span（§5.4 worker 白名单 ∩ DOMPurify）。
-     🚨 §5.2 单条规则输出预算 max(262144, 输入长度×4)，超限【整条回滚】→ 产物必须紧凑：
-        无缩进、无换行、无注释，class 名复用 base.css 已有原语。 */
-  function snapshot(state, schema) {
-    var st = state, ord = null;
-    if (st && typeof st === 'object' && st.state && typeof st.state === 'object') {
-      ord = st.order; st = st.state;    // 容忍直接把 SBK.parse 的返回值传进来
-    }
-    if (!st || typeof st !== 'object') return '';
-    var kids = tree(st, schema || {}, ord), s = '', i;
-    for (i = 0; i < kids.length; i++) s += toHtml(kids[i]);
-    if (!s) return '';
-    return '<div class="' + SNAP + ' ' + PANEL + '">' + s + '</div>';   // 类名单一真相源，见 PANEL/SNAP 定义
-  }
-
-  /* 升级：正则把 <状态>…</状态> 换成 <div class="sbk-snap sbk-snap--raw">原文</div>（纯文本，
-     不含 HTML，天然安全），这里在 mount 回调内把它解析并替换成真渲染。
-     好处是不需要正则会算百分比 —— 正则只搬字符串，计算全在 JS。
-     §4.3：必须用回调给的 root（dom.all 在 root 上查，走 Element.prototype 原生实现，不受 gc 影响）。 */
-  function hydrate(root, schema) {
-    var nodes = SBK.dom.all(root, '.sbk-snap--raw'), i, n, r, kids, box, j;
-    for (i = 0; i < nodes.length; i++) {
-      n = nodes[i];
-      if (n.getAttribute('class').indexOf('sbk-snap--done') >= 0) continue;   // 幂等：mount 可能补发
-      var tx = n.textContent;
-      r = SBK.parse(tx);
-      // §5.4 剥壳在正则管线【之后】跑：若做卡人的 replaceString 原样吐回 <状态>，这个中文标签
-      // 会被当非白名单标签删掉，此处拿到的就是裸行。补回方括号标记再试一次，两种写法都能活。
-      if (!r || !r.order.length) {
-        var w = SBK.parse(SBK.parse.wrap(tx));
-        // 只在真解析出字段时才采纳：否则一段普通文字会被「成功解析成空块」而被清空
-        if (w && w.order.length) r = w;
-      }
-      // 解析不出来就原样留着（.sbk-pre 保住换行），比清空成空白块友好
-      if (!r || !r.order.length) { n.setAttribute('class', SNAP + ' sbk-pre sbk-snap--raw sbk-snap--done'); continue; }
-      kids = tree(r.state, schema || {}, r.order);
-      while (n.firstChild) n.removeChild(n.firstChild);
-      box = SBK.dom.h('div', { 'class': PANEL });          // 与 snapshot() 同源（PANEL），不再各写一份
-      for (j = 0; j < kids.length; j++) box.appendChild(toDom(kids[j]));
-      n.appendChild(box);
-      n.setAttribute('class', SNAP + ' sbk-snap--raw sbk-snap--done');
-    }
-    return nodes.length;
-  }
-  snapshot.hydrate = hydrate;
-  // 自动升级开关：装一次即可，mount 有补发（§4.1）故历史气泡也会被处理
-  snapshot.auto = function (schema) {
-    SBK.on('mount', function (p, root) { if (root) hydrate(root, schema); });
-    SBK.on('done', function (p, root) { if (root) hydrate(root, schema); });
-    return snapshot;
-  };
-
-  /* 合并而非覆盖：WP-3 的 ui.js 会往同一个 SBK.ui 上挂 panel/stage，直接赋新对象会互相踩掉 */
   SBK.ui = SBK.ui || {};
   SBK.ui.hud = hud;
-  SBK.ui.snapshot = snapshot;
+  /* hud-render.js 只取这个最小共享包；TYPES 是同一引用，注册自定义控件后快照立即可见。 */
+  SBK._hudKit = { TYPES: TYPES, PANEL: PANEL, SNAP: SNAP, pick: pick, toDom: toDom, toHtml: toHtml };
   SBK.log('hud ready, types=' + hud.types().join(','));
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -46,7 +46,7 @@
 4. 静态换肤也应使用自有前缀；只有维护历史选择器时才允许旧方言 adapter。
 5. token 负责视觉值，不夹带 owner、路由或存储逻辑；运行时合同见 `theme-runtime.md`。
 
-> **沙盒模式（`/mmdsandbox`）**：本文的六维度风格模型与 light/dark 配对**可以照用**，落地时把自有前缀 token 挂在 `[data-chat="root"]` 上，并把最终视觉值映射到平台的 14 个 `--chat-*` 变量（实测确证，官方手册只记 10 个；`--chat-bg` / `--chat-surface` / `--chat-text` / `--chat-accent` 等）。上面第 2 条在沙盒模式是**平台硬规则**而不只是纪律：`*{}` / `html{}` / `body{}` / `:root{}` 全部被官方校验判 WARN，必须改写成 `[data-chat="root"]`。第 3 条的「light DOM 根主题属性」在沙盒模式**不适用** —— 作者自写 `data-*` 会被净化删掉，主题状态读平台的 `data-theme="light|dark"`、变化订 `theme:change`。见 `global-css.md`「沙盒模式换肤」与 `../platforms/mmd-sandbox.md` §6。
+> **沙盒模式（`/mmdsandbox`）**：本文的**制作期**六维风格模型、规范 token、整体性检查与 light/dark 配对可以复用；当前 MMD 的 owner/route/native 运行时合同**不可复用**。沙盒产物由 SBK 编译器把六维 bundle 映射到平台 14 个 `--chat-*` 与自有 `--sbk-*`，主题状态只读平台 `data-theme="light|dark"` 并订 `theme:change`。作者不能新增主题状态 `data-*`（会被净化），也不使用 `:root/html/body` 作为 token 源。见 `sandbox-kit.md` 与 `../platforms/mmd-sandbox.md` §6。
 
 ## 2. 三套旧方言的兼容边界
 

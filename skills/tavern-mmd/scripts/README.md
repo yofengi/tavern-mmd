@@ -74,11 +74,11 @@ python validate.py <文件> [--type regex|card|worldbook] [--platform mmd|mmdsan
 沙盒模式（官方口径「新页 / 新聊天页」，开关 `chatVersion: 1`）换的是一整套检查，与 `mmd` 分支不共用：
 
 - **结构**：顶层**恰好 6 键**白名单 `chatVersion/pageDepth/statusbar/beginning/personality/regex_scripts`；`chatVersion` 必须为 1；禁用顶层键（`role`/`presentation`/`worldbook`/`world_book`/`lorebook`/`lore_book`/`entries`/`characterBook`/`character_book`）→ ERROR；其他未知顶层键 → WARN；`id` 必须为**负数**
-- **长度**：`statusbar`≤200、`beginning`≤10240、`personality`≤10000、`scriptName`≤20、`findRegex`≤1000、`replaceString`≤20000、`regex_scripts`≤130 条
-- **匹配式**（对齐官方 `classifyPattern`）：**纯字面量放行**（`{{hud}}` 是官方首选写法，不再要求 slash literal）；slash 形式语法错 → ERROR（平台会**整条静默丢弃**）；字面量重复 → ERROR（后一条永远匹配不到）
+- **长度**：`statusbar`≤200、`beginning`≤4000、`personality`≤10000、`regex_scripts`≤130。常规交付按 `scriptName`≤20 / `findRegex`≤1000 / `replaceString`≤20000；源码归一常量分别可见 200 / 4096 / 100000。只有 replaceString 的编辑器 20000／导入 100000 双路径与编辑器拒存语义已确证，scriptName/findRegex 的双路径仍待验证。
+- **匹配式**：当前 MMD 与沙盒交付都强制 slash 形态；沙盒 worker 的裸字面量分支不等于实机可交付能力。
 - **SDK**：能力名不在 30 能力表、`sdk.on()` 事件名不在 12 事件表、用了不存在的 `sdk.once` / `sdk.off`、`role.get()`/`user.get()` 读封闭字段之外的字段 → 全部 ERROR（平台侧名字写错**不报错只是永不触发**，只能靠静态校验拦）
 - **被禁写法**：`img onerror` 点火器与 teapot 系 → ERROR（官方明令；沙盒 `<script>` 装卡即抽出必然执行，点火器无存在意义）
-- **WARN 项**：作者自写 `data-*`（会被净化删掉）；`iframe`/`link`/`meta`/`form`/`object`/`embed` 等被删标签；全局 CSS（`*{}`/`html{}`/`body{}`/`:root{}` → 应改 `[data-chat="root"]`）；HTML 缩进 4 空格（被 Markdown 当代码块，源码印在页面上）；`sdk.on` 写进 `message:mount` 回调（每挂一条气泡重复订阅）；`message:done` + `message.send` 自问自答死循环
+- **WARN 项**：作者自写 `data-*`（会被净化删掉）；`iframe`/`link`/`meta`/`form`/`object`/`embed` 等被删标签；全局 CSS（`*{}`/`html{}`/`body{}`/`:root{}` → 应改 `[data-chat="root"]`）；HTML 缩进 4 空格（官方 WARN；实机当前会在 Markdown 前剥掉缩进，不据此断言会变代码块，仍保守顶格写）；`sdk.on` 写进 `message:mount` 回调（每挂一条气泡重复订阅）；`message:done` + `message.send` 自问自答死循环
 - 判罚级别刻意与官方脚本对齐，改动前请读 `validate.py` 里 `check_comment_length` / `classify_sandbox_pattern` 的 docstring（都写明了「请勿顺手修正」的理由）
 
 ## build-preview.py — 平台保真预览
@@ -112,7 +112,7 @@ python build-preview.py <文件> --platform mmd|mmdsandbox|st [--mode panels|pan
 - `mmd`：script/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行；inline onclick 按已实测的净化规则处理
 - `mmdsandbox`：复刻真实 DOM 契约 —— `[data-chat="root"]`、顶栏、`[data-slot="statusbar"]`、messages / list / message-frame / message / message-body、composer / input / send、author-stage，以及 **14 个 `--chat-*` 设计令牌**（实测确证，官方手册只记 10 个；清单见脚本里的 `SANDBOX_DESIGN_TOKENS`），深浅两套各一份。另注入 `--rpx`（= `calc(100vw / 750)`，平台尺寸基准，作者写 `calc(24 * var(--rpx))` 才算得出来）与 `--chat-viewport-height` 静态值 —— 后两个**不属于**那 14 个令牌（`--chat-viewport-height` 在真机是 JS 写的内联 style）。并按平台的做法把**未被匹配命中**规则里的 `<style>` / `<script>` 也抽出装上（沙盒模式装卡即抽出，不需要命中）
 
-> **沙盒预览带一条 NOTE，列明没有模拟的四类**：SDK（`sdk.*` 全部能力与 12 事件）、「消息生成中」占位、净化白名单（作者自写 `data-*` 与被删标签不会真的被删）、Markdown 管线（4 空格缩进不会真的变代码块）。这四类只能回实机 + `?sdkDebug=1` 验。创卡页预览本身也是"瘦环境"：输入框/发送/存档一律 `NOT_SUPPORTED`，只有样式与舞台可用。
+> **沙盒预览带能力精度诊断**：已装零依赖本地 SDK 模拟器，提供 `chat` / `thin-preview` profile、30 能力、12 事件、message scope、stage/theme/switch 与已确证净化/预算子集。每项标 `exact` / `conservative` / `probe-needed`；宿主握手、真实 AI 流式、完整 Markdown/净化、跨设备 save、CSP、触控/软键盘仍由真实站承担。
 
 输出是自包含 HTML 文件。默认路径规则：输入文件直属项目 `output/` 时输出到 sibling `工作/`；其他位置输出到输入文件同目录。结构、findRegex、最终 inline onclick 和悬空标记的致命审计全部在写文件前完成，失败不遗留 preview/panorama 文件。不能调 Preview 工具的 agent：提示用户用浏览器打开。
 

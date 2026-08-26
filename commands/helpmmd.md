@@ -13,7 +13,7 @@ description: 查看 tavern-mmd 全部指令说明（平台指令×任务指令�
 | 指令 | 平台 | 关键特点 |
 |---|---|---|
 | `/mmd` | 当前MMD（魅魔岛/sexyai.top，旧聊天页） | 支持`<script>`与ES6（实测全支持）；状态栏走 img onerror；正则≤130条、findRegex必须包斜杠、角色卡仅v2 |
-| `/mmdsandbox` | MMD沙盒模式（同站**新聊天页**，`chatVersion: 1`） | `<script>`一等公民（整卡只跑一次）+官方SDK 30能力/12事件+舞台+跨设备存档；导入正则json为**6键**；findRegex可用纯字面量；禁img onerror；不产v2卡与整卡PNG |
+| `/mmdsandbox` | MMD沙盒模式（同站**新聊天页**，`chatVersion: 1`） | `<script>`一等公民（整卡只跑一次）+官方SDK 30能力/12事件+舞台+跨设备存档；导入正则json为**6键**；findRegex实机要求slash形态；禁img onerror；不产v2卡与整卡PNG |
 | `/st` | 本地酒馆SillyTavern | 无限制：script/ES6+可用、正则json直接导入、世界书全字段 |
 
 平台会写入项目 main.md；未设定平台时，任务指令会先弹窗询问。

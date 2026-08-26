@@ -314,7 +314,7 @@ python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/�
 | `<短名>-persona.txt` | **人设纯文本**（未转义正文） | **手工粘贴进人设框** |
 | `<短名>-worldbook.json`（可选） | 独立世界书，根对象**只留 `entries`** | 世界书独立导入入口 |
 
-字段规范、上限、`findRegex` 两形态与完整合法样例见 `regex-output.md` **第三节**；世界书字段见 `worldbook-json.md`。
+字段规范、上限、worker 两分支与**交付强制 slash**的结论、完整合法样例见 `regex-output.md` **第三节**；世界书字段见 `worldbook-json.md`。
 
 > 🚨 **为什么必须单独给一份 persona 文本：导入页不会读 JSON 里的 `personality` 字段。** `personality` 仍要写进 JSON（供校验与留档），但用户只导 JSON 的话人设是空的。两份内容必须一致。
 
@@ -354,4 +354,4 @@ python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/�
 </输出格式>
 ```
 
-上限：`personality` **10000 字**（公开卡审核文案建议 2000–5000）。`beginning`（开场白）是**玩家看见的第一句话，不是人设**，别把整篇人设贴进去，上限 **10240 字**。
+上限：`personality` **10000 字**（公开卡审核文案建议 2000–5000）。`beginning`（开场白）是**玩家看见的第一句话，不是人设**，别把整篇人设贴进去，上限 **4000 字**。

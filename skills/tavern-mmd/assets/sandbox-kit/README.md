@@ -9,7 +9,7 @@ MMD 沙盒模式的状态栏 / 美化基座：三层运行时（内核 / 主题 
 > 🚨 **反向同样不成立**：`../radar-examples/`（雷达法）与 `../shadowcast-examples/`（影渲法）**不能导入沙盒**——它们的点火载体是 `img onerror`，沙盒官方明令禁止；且影渲法的 Shadow DOM 隔离在沙盒是**纯负债**（沙盒本身就是跨源 iframe，隔离边界已经免费拿到了）。详见方法论文档「与既有资产的关系」节。
 
 > ✅ **验证状态（务必先读）**：2.0 已**实机截图验收通过**（2026-08-26，卡 64257 预览）：气泡内**只剩一个**状态面板、功能栏是 `设置` 按钮（chrome）、三张分组卡（状态/行囊/见闻）、九种数据类型全渲染、进度条不再是五条同色、`pinned` 默认关未出现、`[状态]` 裸标记不外泄、`#sbk-hud` 宿主计数 1。逐项结果见工作目录的 `资料/基座2.0设计.md` 第四bis节。
-> 代码侧另有：分层 harness（内核 / 协议+HUD / 组件）与生成器 **180 项**测试全绿、全部 `.js` 过 `node --check`、生成器实跑 0 error、产物过 `python -m json.tool` 与 `validate.py --platform mmdsandbox`。
+> 代码侧另有零依赖 runtime、生成器和本地 sandbox 仿真回归；全部 `.js` 需过 `node --check`，示例产物还须过 `json.tool` 与 `validate.py --platform mmdsandbox`。当前实测数字统一记录在本轮 `sandbox-quality-review/工作/验证记录.md`，不在 README 多处复制。
 > **仍未验证的**：浮层拖动与菜单翻转、舞台开关、平台深浅色切换的跟随、多轮真实对话里的增量更新。这几项只有离线 harness 与代码审查背书。
 > 注意区分两种可信度：**平台事实**（事实卡 21 条硬约束、CSS 令牌、事件时序）来自**三轮真机探针 + 逆向源码**；**基座代码**的状态面板与版面层已实机截图确认，上面列出的四项仍待验。首次导入建议开 `?sdkDebug=1` 看 `[SBK]` 日志。
 >
@@ -21,17 +21,22 @@ MMD 沙盒模式的状态栏 / 美化基座：三层运行时（内核 / 主题 
 |---|---|
 | `build_sbk.py` | **生成器**。声明式 config → 可导入的 6 键正则 JSON。含剥注释、体积预算估算、自动拆条、净化合规校验 |
 | `sbk.config.example.json` | **配置示例**（可直接跑）。JSON 不支持注释，故用 `_xxx` 键写说明，生成器丢弃所有 `_` 开头顶层键 |
-| `test_build_sbk.py` | 生成器测试，180 项 |
-| `sbk/base.css` | 基础样式与骨架原语。零硬编码颜色（全走 `var(--chat-*)`），含 `message-body` 与 `flex-shrink` 两处必要重置 |
-| `sbk/core.js` | **内核层**：单例哨兵 / 事件总线 / 状态仓 / 持久化 / rAF 调度 / DOM 工具。导出 `window.SBK` |
-| `sbk/theme.js` | **主题层**：语义 token → 平台 `--chat-*`（14 个）；风格包（preset）+ 玩家微调（overrides）两层合成、设置面板表单、偏好持久化 |
-| `sbk/protocol.js` | **协议解析器**：`[状态]…[/状态]` 块 → 状态对象。容错优先，模型格式漂移不致崩 |
-| `sbk/hud.js` | **状态面板渲染器**：`snapshot()` 拼字符串 / `hydrate()` 建 DOM，共用一份 vnode 与控件表（九种数据类型 + `section` 版面项）。`SBK.ui.hud` 已废弃为注册表，见下文 |
-| `sbk/ui.js` | **组件层**：`SBK.ui.panel` 浮层 / 抽屉 / 可拖动悬浮球。另导出私有工具箱 `SBK._uiKit` 给 ui-stage 复用 |
-| `sbk/ui-stage.js` | **组件层**：`SBK.ui.stage` 舞台面板（走 `sdk.stage`）。从 ui.js 拆出，**依赖 ui.js 先装载** |
-| `sbk/协议说明.md` | 协议格式、schema、控件类型、模型侧输出约定的**完整文档**。写协议或调状态栏字段一律看这份，本 README 不重复 |
+| `test_build_sbk.py` | 生成器、模块边界、装载顺序与体积门禁测试 |
+| `sbk/base.css` | 基础样式与骨架原语；颜色走 `var(--chat-*)`，含平台污染重置与响应式规则 |
+| `sbk/core.js` | **内核基础**：SDK 快照、claim、事件桥、状态仓、调度与 DOM/宿主工具；创建 `window.SBK` |
+| `sbk/core-store.js` | **持久化**：`save/load/merge/clear/key`、800ms 合并队列与 save→cache→内存降级 |
+| `sbk/core-boot.js` | **编排**：schema/modes/pinned 归一、精简条与 `SBK.boot` |
+| `sbk/theme.js` | **主题引擎**：14 个平台 token、作者基线/preset/overrides 合成、偏好语义与持久化 |
+| `sbk/theme-panel.js` | **主题设置界面**：表单、设置抽屉与 `prefs.form/panel/toggle/open/close` |
+| `sbk/protocol.js` | **协议解析器**：`[状态]…[/状态]` 块 → 状态对象 |
+| `sbk/hud.js` | **HUD 基础**：vnode、十二种控件、归一化、控件注册表 `SBK.ui.hud` |
+| `sbk/hud-render.js` | **HUD 渲染**：section 分组、`snapshot()`、`hydrate()`、`snapshot.auto()` |
+| `sbk/ui.js` | **组件工具层**：CSS、DOM 就绪队列、定位/事件/标题栏工具，导出 `SBK._uiKit` |
+| `sbk/ui-panel.js` | **组件面板层**：浮层/抽屉/悬浮球 `panel` 与功能栏入口 `chrome` |
+| `sbk/ui-stage.js` | **舞台层**：`SBK.ui.stage`，依赖 `ui.js` 的工具箱 |
+| `sbk/协议说明.md` | 协议格式、schema、控件类型、模型侧输出约定的完整文档 |
 
-装载顺序固定：`core.js` → `theme.js` → `protocol.js` → `hud.js` → `ui.js` → `ui-stage.js`。后面每个文件都假定 `window.SBK` 已存在，顺序错了就静默少功能（各文件自带告警）。
+装载顺序固定：`core.js` → `core-store.js` → `core-boot.js` → `theme.js` → `theme-panel.js` → `protocol.js` → `hud.js` → `hud-render.js` → `ui.js` → `ui-panel.js` → `ui-stage.js`。每个文件都是完整经典脚本 IIFE，拥有独立 claim；顺序错了会由依赖检查告警并短路。
 
 ## `modes`：三个职责不同的东西（2.0 语义）
 
@@ -59,7 +64,7 @@ SBK.ui.chrome({ hostId: 'sbk-hud', settings: true, label: '设置', title: '阅�
 `boot()` 在 `modes.chrome` 为真时自己调它（传 `{hostId}`），一般不用手写。**模块级单例**：重复调用直接返回已有句柄并告警。它也容错 `chrome(hostEl, opts)` 形态（首参是元素就当宿主）。
 
 - 只负责「功能栏上有个按钮，点了调设置抽屉」。抽屉本体归主题层（`SBK.theme.prefs.panel/toggle`），chrome 不持有引用——单一归属，避免两处状态不同步。
-- 它建的是宿主里的子容器 `<hostId>-chr`，**只清自己这一个子节点**。精简条宿主是 `<hostId>-pin`，两者是兄弟：清整个宿主会把对方擦掉（`core.js` 与 `ui.js` 都就此留了注释）。
+- 它建的是宿主里的子容器 `<hostId>-chr`，**只清自己这一个子节点**。精简条宿主是 `<hostId>-pin`，两者是兄弟：清整个宿主会把对方擦掉（`core.js` 与 `ui.js` 都就此留了注释）。配置/`chrome()` 的 `hostId` 是派生基名，限 ASCII 字母开头、其后字母数字 `_` `-`、总长 ≤60；追加 4 字符后缀后最终 DOM id 仍 ≤64。
 - 缺主题层时按钮仍在，点了只告警，不抛异常炸整卡。
 
 ### `theme` 层：preset + overrides 两层合成
@@ -85,7 +90,7 @@ SBK.theme.reset()                  // = apply(null)，撤销全部主题覆盖
 2. **`overrides.dark` 与 `overrides.light` 分开存**，切深浅色不串值；写回默认值时**删除**该 override 而不是存一份等于默认的值。
 3. **白名单 + 逐字段降级**：微调值只走字段表里的 key（`__proto__` / 未知键天然进不来），颜色严格 `#RRGGBB`，数值越界一律拒绝并回落默认。玩家存档里的脏值只丢那一个字段，绝不让整卡起不来。
 
-持久化复用 `SBK.store` 的三级降级链（`sdk.save` → `sdk.cache` → 内存），偏好挂在状态仓的保留字段 `_sbkTheme` 上：与业务存档同文档、同一次节流写入，既不抢 key 也不互相覆盖。`_` 开头的键在状态面板里不渲染，所以它不会漏进面板。
+持久化复用 `SBK.store` 的三级降级链（`sdk.save` → `sdk.cache` → 内存）。运行时偏好仍位于保留字段 `_sbkTheme`，切会话时不会清掉；落盘则调用 `store.merge({_sbkTheme:…})` 做顶层补丁，不把当前 state 冒充完整业务存档。业务 `store.save(obj)` 在同一 800ms 窗口与补丁合成一次写入，并自动保留调用方未显式覆盖的 `_sbk*` 内部键。
 
 🚨 **设置面板里没有「日间/夜间/原生」三按钮，这是刻意的。** 沙盒的 `light|dark` 是**平台级**、玩家在平台设置里切，**作者只能读不能写** → 那三个按钮按了切不动，放上去就是坏控件。取代物是**风格包选择 + 启用美化开关（关＝跟随平台）+ 玩家微调（字号/行距/正文色/强调色/气泡色/气泡透明度）**。
 
@@ -117,7 +122,7 @@ python ../../scripts/validate.py dist/my-card.json --type regex --platform mmdsa
 
 生成器会打印一张表：每条规则的 `findRegex` / `replaceString` 长度与**输出预算**估算。预算超限（事实卡 §5.2）会直接报 ERROR 并拒绝写文件（`--force` 可强写，仅调试用）。
 
-`--no-strip-comments` 保留注释便于排查，但 `core.js + theme.js` 带注释已 20757 字符、逼近创卡页编辑器显示上限 20000，正式产出**别开**。
+所有正式产物都会剥源注释；`--no-strip-comments` 只供本地排查。生成器对**最终每条规则**执行不可调高的 18000 字符安全门禁，因此保留注释导致超限时会直接报错，不会产出只能导入、不能在编辑器保存的规则。
 
 ### 交付物形态
 
@@ -131,18 +136,25 @@ chatVersion(=1) / pageDepth(=2) / statusbar / beginning / personality / regex_sc
 - `personality` 虽然写在 JSON 里，但**导入页不读这个字段**——它只是随 JSON 归档。你得自己把它从 JSON 里复制出来，**手工粘贴**进创卡页的人设框。这是唯一需要手工搬运的部分。
 - 模型侧输出约定（要模型每轮吐 `[状态]` 块）必须写进 `personality`，否则状态栏永远没数据。模板见 `sbk/协议说明.md` 第六节。
 
-### 自动拆条：为什么规则名会变成 `sbk-ui-1/2/3`
+### 自动拆条：为什么会有 `sbk-core-1..4` / `sbk-ui-1..5`
 
-单条规则的 `replaceString` 超过 `splitThreshold`（默认 18000，给编辑器显示上限 20000 留 2000 余量）时，生成器**按文件边界**自动拆成多条，各自拿一个唯一的 slash 标记。跑示例配置的实际结果：
+`splitThreshold` 默认 18000，且**不能调高**。生成器只按连续的完整 IIFE 文件边界装箱，严格保持装载顺序；任一单模块或最终规则超过 18000 都直接 ERROR，必须在源码/配置侧继续拆，不能靠提高阈值或任意切字符串绕过。
 
+当前示例配置的实测布局：
+
+```text
+sbk-core-1  11914  core.js
+sbk-core-2  14449  core-store.js + core-boot.js
+sbk-core-3  18000  theme.js
+sbk-core-4   7029  theme-panel.js
+sbk-ui-1     7671  protocol.js
+sbk-ui-2    17841  hud.js
+sbk-ui-3    12719  hud-render.js + ui.js
+sbk-ui-4    13392  ui-panel.js
+sbk-ui-5     5207  ui-stage.js
 ```
-sbk-core   {{sbk-core}}    14704   core.js + theme.js
-sbk-ui-1   {{sbk-ui-1}}    13818   protocol.js + hud.js
-sbk-ui-2   {{sbk-ui-2}}    16132   ui.js
-sbk-ui-3   {{sbk-ui-3}}     4298   ui-stage.js
-```
 
-拆条**严格保持装载顺序**（`regex_scripts` 数组序即装载顺序，worker 按 `regexSort` 升序跑）。**绝不切开单个文件**——每个文件是完整 IIFE，切一半必然语法错；单文件自身超阈值时它会独占一条并告警。`regexList` 上限 130 条，拆条成本可忽略。
+每条规则有唯一 slash marker，`regex_scripts` 数组序就是装载顺序。13 条完整示例仍远低于 130 条上限。
 
 ## 关键约束速查（最容易踩的几条）
 
@@ -165,14 +177,12 @@ sbk-ui-3   {{sbk-ui-3}}     4298   ui-stage.js
 
 ```bash
 cd assets/sandbox-kit
-python -m unittest test_build_sbk          # 180 项，须全绿
-```
-
-运行时三层各自的分层 harness（内核 / 协议+HUD / 组件）在 `sandbox-foundation/` 工作目录里，未随资产迁入。JS 语法自查：
-
-```bash
+python test_build_sbk.py
+node test_sbk_runtime.mjs
 for f in sbk/*.js; do node --check "$f"; done
 ```
+
+生成器测试守配置、装载顺序、完整 IIFE 和 18000 门禁；runtime harness 执行 state/store/theme/stage/HUD/UI 生命周期。视觉与真实 CSS 层叠仍须走本地浏览器仿真，不拿 fake DOM 充当视觉真值。
 
 ### 🚨 怎么在实机验证自己的卡
 
@@ -202,9 +212,9 @@ for f in sbk/*.js; do node --check "$f"; done
    作耐力用时显式写 `tone:'sp'` 覆盖即可——**显式 `tone` 恒优先于 key 推断**。
    英文短码 `hp|mp|sp|xp|exp|ep` 走**整词匹配**（否则 `temperature` 会被染成 mp、
    `champion` 被染成 hp），长词 `health`/`mana`/`stamina` 等才做子串匹配。
-2. **schema 的 `type` 写错不会报错**。`hud.js` 是 `TYPES[type] || TYPES.text`，表外的名字**静默回落成 `text`**；生成器也不校验 type 白名单。合法值恰十种，见 `sbk/协议说明.md` 第三节与 `sbk.config.example.json` 的 `_schemaTypes`。
-3. `validate.py` 对 `sbk-ui-2` 报 1 个反斜杠 WARN，属 unicode 转义误报，可忽略。
-4. 该校验器的 `beginning`/`name`/`regex`/`content` 上限取创卡页 UI 值，与事实卡 §6 运行时真值（4000/200/4096/100000）不同，属已知冲突。**注意这不只是"数字不同"**：`replaceString` 走**创卡页正则编辑器**手工录入时 20000 是**硬上限，超限直接拒绝保存**（点击无提示、重载后改动全部回滚，不是截断）；走**「导入正则」导入 JSON** 时上限是 100000。生成器默认阈值 18000 按编辑器路径的保守值定，**两条路径都安全**（事实卡 §6.1）。
+2. **未知 schema `type` 会在生成期报错；运行时则告警一次并按 `text` 降级。** 合法值为十二种数据控件加版面项 `section`，见协议说明第三节。
+3. `validate.py` 会把经典 `<script>` 中的正则/字符串反斜杠识别为 JS 语法，不应再报纯 HTML 双重转义假警告；任何剩余反斜杠警告都要实际检查。
+4. `replaceString` 的导入路径上限是 100000，编辑器保存上限是 20000；超限会静默拒绝整次保存，不是截断。SBK 再收紧为不可调高的 18000，导入与手填两条路径都留有余量。
 
 ## 相关文档
 

@@ -47,6 +47,29 @@ except (AttributeError, ValueError):
     pass
 
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SANDBOX_CONTRACT_PATH = os.path.join(_SCRIPT_DIR, "fixtures", "mmdsandbox", "contract.json")
+SANDBOX_SIM_PATH = os.path.join(_SCRIPT_DIR, "mmdsandbox-sim.js")
+SANDBOX_PROFILES = ("chat", "thin-preview")
+_SANDBOX_CACHE = {}
+
+
+def load_sandbox_contract():
+    """读共享契约（fixtures/mmdsandbox/contract.json）。预览与模拟器共用一份真相。"""
+    if "contract" not in _SANDBOX_CACHE:
+        with open(SANDBOX_CONTRACT_PATH, encoding="utf-8") as f:
+            _SANDBOX_CACHE["contract"] = json.load(f)
+    return _SANDBOX_CACHE["contract"]
+
+
+def load_sandbox_sim_source():
+    """读经典脚本模拟器源码，内联进全景（零外部请求，file:// 直开也能跑）。"""
+    if "sim" not in _SANDBOX_CACHE:
+        with open(SANDBOX_SIM_PATH, encoding="utf-8") as f:
+            _SANDBOX_CACHE["sim"] = f.read()
+    return _SANDBOX_CACHE["sim"]
+
+
 def load(path):
     with open(path, "rb") as f:
         rawb = f.read()
@@ -105,9 +128,15 @@ def _escape_for_slash_literal(pattern):
 
 
 def classify_sandbox_pattern(raw):
-    """复刻沙盒模式官方 classifyPattern：返回 (kind, value, reason)。
+    """复刻 worker 源码 classifyPattern：返回 (kind, value, reason)。
     kind 取 empty / literal / regex / bad-regex。
-    literal 时 value 是待字面量替换的串；regex 时 value 是规范化后的 /pattern/flags。"""
+    literal 时 value 是待字面量替换的串；regex 时 value 是规范化后的 /pattern/flags。
+
+    🚨 这是**worker 源码的分类**，不是交付判据。源码确实有 literal 分支
+    （`if(!n)return new RegExp(m(t),'g')`，见事实卡 §5.1），但**实机上裸字面量未生效**：
+    探针最初用 `{{probe}}` 规则完全不触发，改 `/{{probe}}/` 后立即生效（事实卡 §8.21）。
+    说明宿主侧在交给 worker 前另有一层处理。
+    → 本函数只用于解释 worker 行为；交付门禁一律走 sandbox_pattern_delivery_error()。"""
     if not isinstance(raw, str):
         return "bad-regex", "", "findRegex 必须是字符串"
     trimmed = re.sub(r"^`|`$", "", raw.strip())
@@ -126,6 +155,38 @@ def classify_sandbox_pattern(raw):
     if reason:
         return "bad-regex", "", reason
     return "regex", canonical, None
+
+
+SANDBOX_BARE_LITERAL_ERROR = (
+    "沙盒交付必须写 slash 形态 /…/：实机裸字面量未生效（探针 {{probe}} 规则完全不触发，"
+    "改 /{{probe}}/ 后立即生效），与 worker 源码 p() 的字面量分支矛盾"
+    "——说明宿主侧在交给 worker 前另有一层处理。裸字面量在页面上什么都不会发生。"
+)
+
+
+def sandbox_pattern_delivery_error(raw):
+    """沙盒**交付**门禁：返回错误原因，合规返回 None。
+
+    与 classify_sandbox_pattern（worker 源码分类）分开：那个函数解释 worker 怎么想，
+    这个函数决定预览/交付放不放行。实机结论是 slash 严格模式，故裸字面量判 ERROR。"""
+    if not isinstance(raw, str):
+        return "findRegex 必须是字符串"
+    kind, _value, reason = classify_sandbox_pattern(raw)
+    if kind == "empty":
+        return None                      # 空匹配式由 validate 的必填校验管
+    if kind == "literal":
+        return SANDBOX_BARE_LITERAL_ERROR
+    if kind == "bad-regex":
+        return "写成 /…/ 但正则语法错，平台会整条静默丢弃（%s）" % reason
+    return None
+
+
+def sandbox_delivery_regex(raw):
+    """交付形态下用于预览替换的规范化 /pattern/flags；不合规返回 None。"""
+    if sandbox_pattern_delivery_error(raw):
+        return None
+    kind, value, _reason = classify_sandbox_pattern(raw)
+    return value if kind == "regex" else None
 
 
 def _mmd_top_level_error(obj, platform):
@@ -164,12 +225,11 @@ def extract_fragments(obj, platform=None):
             if regex is None or reason:
                 continue
         if platform == "mmdsandbox" and raw_fr not in ("", None):
-            # 字面量是官方首选写法，照常渲染；只有 /…/ 语法错（平台整条静默丢弃）
-            # 和预览器模拟不了的正则才跳过。
-            kind, value, _reason = classify_sandbox_pattern(raw_fr)
-            if kind == "bad-regex":
+            # 交付门禁：裸字面量与语法错的 /…/ 都不渲染（实机上前者不生效、后者被丢弃）。
+            if sandbox_pattern_delivery_error(raw_fr):
                 continue
-            if kind == "regex":
+            value = sandbox_delivery_regex(raw_fr)
+            if value:
                 regex, _flags, reason = _compile_js_regex_for_preview(value)
                 if regex is None or reason:
                     continue
@@ -206,10 +266,9 @@ def find_invalid_findregexes(obj, platform):
         if fr in ("", None):
             continue
         if platform == "mmdsandbox":
-            kind, _value, reason = classify_sandbox_pattern(fr)
-            if kind != "bad-regex":
+            reason = sandbox_pattern_delivery_error(fr)
+            if not reason:
                 continue
-            reason = "写成 /…/ 但正则语法错，平台会整条静默丢弃（%s）" % reason
         else:
             reason = "findRegex 必须是字符串" if not isinstance(fr, str) else _js_regex_structure_error(fr)
         if reason:
@@ -231,8 +290,8 @@ def find_unsupported_preview_regexes(obj, platform):
         if not isinstance(fr, str) or not fr:
             continue
         if platform == "mmdsandbox":
-            kind, value, _reason = classify_sandbox_pattern(fr)
-            if kind != "regex":
+            value = sandbox_delivery_regex(fr)
+            if not value:
                 continue
         else:
             if _js_regex_structure_error(fr):
@@ -302,12 +361,11 @@ def _apply_pipeline_to_text(text, obj, platform=None):
             continue
         if platform == "mmdsandbox":
             _assets, rs = _split_sandbox_assets(rs)
-            # 官方 classifyPattern 语义：字面量按转义后全文替换，/…/ 走正则，
-            # 语法错的 /…/ 被平台整条静默丢弃（不降级字面量）。
-            kind, value, _reason = classify_sandbox_pattern(fr)
-            if kind == "literal":
-                text = text.replace(value, rs)
-            elif kind == "regex":
+            # 🚨 只有 slash 形态才会生效。裸字面量在实机上不触发，预览**绝不能**替换它，
+            # 否则作者在预览里看到内容出现、上真机却什么都没有（最坏的那种谎）。
+            # 语法错的 /…/ 同样不替换（平台整条静默丢弃）。
+            value = sandbox_delivery_regex(fr)
+            if value:
                 regex, js_flags, reason = _compile_js_regex_for_preview(value)
                 if regex is not None and not reason:
                     text = _replace_js_regex(text, regex, js_flags, rs)
@@ -436,40 +494,120 @@ _PLATFORM_DATA_ATTRS = ("data-chat", "data-slot", "data-theme", "data-composer",
 _PREVIEW_DATA_ATTRS = ("data-pano-scaffold", "data-pano-runtime-scaffold",
                        "data-preview-tools", "data-preview-dynamic",
                        "data-mmd-onclick-disabled", "data-message-role",
-                       "data-preview-hoisted", "data-preview-bubble-outline")
+                       "data-preview-hoisted", "data-preview-bubble-outline",
+                       "data-preview-sim", "data-preview-accuracy",
+                       "data-preview-bucket")
+
+
+# SAFE_FOR_XML 危险形态（事实卡 §5.5 逐字判据）：属性值命中即整条属性被删，
+# 且发生在 on* 强留之前 → 连 onclick 都保不住。
+_SANDBOX_SAFE_FOR_XML = re.compile(
+    r"((--!?|\])>)|</(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)",
+    re.I)
+# 非白名单标签会被正则剥壳（文字保留）。
+_SANDBOX_STRIPPED_TAGS = ("iframe", "link", "meta", "form", "object", "embed")
 
 
 def find_sandbox_sanitized_attrs(content):
-    """沙盒模式净化会删两样东西：svg 内的 onclick、作者自写的 data-*。
-    返回 [(种类, 标签片段)]；只做浅层扫描，权威检查在 validate.py。"""
+    """已确证的沙盒净化子集。返回 [(种类, 详情)]；权威检查在 validate.py。
+
+    覆盖：作者自写 data-*、aria-*/role、SVG 内 on*、禁用标签、SAFE_FOR_XML 危险属性值。
+    每项都有实机或源码依据（事实卡 §5.5）；未确证项不进这里。"""
     if not isinstance(content, str):
         return []
     found = []
     svg_ranges = _svg_ranges(content)
     for start, end, tag in _iter_all_tags(content):
         in_svg = any(s <= start < e for s, e in svg_ranges)
-        if in_svg and re.search(r"\bonclick\s*=", tag, re.I):
-            found.append(("svg-onclick", tag))
+        # SVG 内所有 on*（不只 onclick）都被删；HTML 元素上的 on* 全部保留。
+        if in_svg:
+            m_on = re.search(r"\bon[a-z]+\s*=", tag, re.I)
+            if m_on:
+                found.append(("svg-on-attr", "%s（%s）" % (m_on.group(0).rstrip("= "), tag[:80])))
+        name_match = re.match(r"</?\s*([a-zA-Z][a-zA-Z0-9]*)", tag)
+        if name_match and name_match.group(1).lower() in _SANDBOX_STRIPPED_TAGS:
+            found.append(("stripped-tag", "%s（%s）" % (name_match.group(1).lower(), tag[:80])))
         for m in re.finditer(r'\b(data-[a-zA-Z0-9_-]+)\s*=', tag):
             name = m.group(1).lower()
             if name in _PLATFORM_DATA_ATTRS or name in _PREVIEW_DATA_ATTRS:
                 continue
             found.append(("author-data-attr", "%s（%s）" % (m.group(1), tag[:80])))
+        for m in re.finditer(r'\b(aria-[a-zA-Z0-9_-]+|role)\s*=', tag):
+            found.append(("aria-or-role", "%s（%s）" % (m.group(1), tag[:80])))
+        for m in re.finditer(r'\b([a-zA-Z_:][-\w:.]*)\s*=\s*"([^"]*)"', tag):
+            if _SANDBOX_SAFE_FOR_XML.search(html_mod.unescape(m.group(2))):
+                found.append(("safe-for-xml", "%s（%s）" % (m.group(1), tag[:80])))
     return found
+
+
+_SANDBOX_SANITIZE_MESSAGES = {
+    "svg-on-attr": "svg 内的 on* 会被沙盒净化删除（实测 &lt;circle onclick&gt; 被删）"
+                   "——交互改挂 HTML 壳，或用 sdk.on('message:mount') 绑定",
+    "author-data-attr": "作者自写 data-* 会被沙盒净化删除（实测 data_mine=null）"
+                        "——自己的节点改用 class 或 id",
+    "aria-or-role": "aria-* 与 role 会被沙盒净化删除（ALLOW_ARIA_ATTR 为关）"
+                    "——属平台限制而非卡片缺陷，语义靠原生标签承载",
+    "stripped-tag": "该标签不在沙盒白名单内，会被正则剥壳（文字保留、标签消失）",
+    "safe-for-xml": "属性值命中 SAFE_FOR_XML 危险形态（]&gt; / --&gt; / --!&gt; / &lt;/style 等），"
+                    "**整条属性被删**，且发生在 on* 强留之前 → 连 onclick 都保不住。"
+                    "比较运算符两侧留空格即可规避",
+}
 
 
 def _sandbox_sanitize_audit_html(content, label="最终输出"):
     rows = []
     for kind, detail in find_sandbox_sanitized_attrs(content):
-        if kind == "svg-onclick":
-            rows.append('<div class="frag-warn">WARN svg 内的 onclick 会被沙盒净化删除：'
-                        '%s（%s）——改绑到普通标签或用 sdk.on(\'message:mount\') 绑定</div>'
-                        % (html_mod.escape(label), html_mod.escape(detail)))
-        else:
-            rows.append('<div class="frag-warn">WARN 作者自写 data-* 会被沙盒净化删除：'
-                        '%s（%s）——自己的节点改用 class 或 id</div>'
-                        % (html_mod.escape(label), html_mod.escape(detail)))
+        message = _SANDBOX_SANITIZE_MESSAGES.get(kind, "会被沙盒净化处理")
+        rows.append('<div class="frag-warn">WARN %s：%s（%s）</div>'
+                    % (message, html_mod.escape(label), html_mod.escape(detail)))
     return "".join(rows)
+
+
+SANDBOX_OUTPUT_BUDGET_FLOOR = 262144
+SANDBOX_OUTPUT_BUDGET_INPUT_MULTIPLIER = 4
+
+
+def sandbox_output_budget(input_length):
+    """单条规则输出预算：max(262144, 输入长度×4)（事实卡 §5.2 逐字常量）。"""
+    return max(SANDBOX_OUTPUT_BUDGET_FLOOR,
+               int(input_length) * SANDBOX_OUTPUT_BUDGET_INPUT_MULTIPLIER)
+
+
+def find_sandbox_budget_findings(obj, platform):
+    """输出预算与空串匹配。两者都令**整条规则回滚**：页面上这条完全不生效，只留告警。
+    返回 [(规则名, 种类, 说明)]，种类取 replacement-alone / empty-match。"""
+    if platform != "mmdsandbox" or not isinstance(obj, dict):
+        return []
+    input_text = _text_field(obj, "statusbar") + _text_field(obj, "beginning")
+    budget = sandbox_output_budget(len(input_text))
+    out = []
+    for i, sc in enumerate(_script_list(obj)):
+        if not isinstance(sc, dict):
+            continue
+        name = str(sc.get("scriptName", sc.get("name", "#%d" % i)))
+        rs = sc.get("replaceString")
+        fr = sc.get("findRegex")
+        if isinstance(rs, str) and len(rs) > budget:
+            out.append((name, "replacement-alone",
+                        "replaceString 单条 %d 字，超过输出预算 %d（=max(262144, 输入长度×4)）"
+                        % (len(rs), budget)))
+        if not isinstance(fr, str) or sandbox_pattern_delivery_error(fr):
+            continue
+        regex, _flags, reason = _compile_js_regex_for_preview(re.sub(r"^`|`$", "", fr.strip()))
+        if regex is None or reason:
+            continue
+        if regex.search(""):
+            out.append((name, "empty-match",
+                        "匹配式能匹配空串——每个位置都插一次替换内容，瞬间撑爆预算"))
+    return out
+
+
+def _sandbox_budget_audit_html(obj, platform):
+    return "".join(
+        '<div class="frag-warn">ERROR 规则整条回滚（%s）：规则 %s——%s。'
+        '页面上这条<b>完全不生效</b>，只留告警。</div>'
+        % (html_mod.escape(kind), html_mod.escape(name), html_mod.escape(detail))
+        for name, kind, detail in find_sandbox_budget_findings(obj, platform))
 
 
 def _onclick_audit_html(content, platform, label="最终输出"):
@@ -786,12 +924,16 @@ body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;display:f
 .frag{flex:1;margin:12px;display:flex;flex-direction:column;border:1px dashed #30363d;border-radius:8px;overflow:hidden;min-height:0}
 .frag-label{background:#161b22;color:#8b949e;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d;flex:0 0 auto}
 .frag-warn{background:#3a2d00;color:#f0c674;font-size:11px;padding:6px 12px}
+.pano-audit{flex:0 0 auto;margin:0 12px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9}
+.pano-audit>summary{cursor:pointer;padding:7px 12px;font-size:12px;font-weight:600;list-style-position:inside}
+.pano-audit[open]>summary{border-bottom:1px solid #30363d}
+.pano-audit-body{max-height:38vh;overflow:auto}
 .preview-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 12px;background:#161b22;border-bottom:1px solid #30363d;flex:0 0 auto}
 .preview-tools-label{color:#8b949e;font-size:11px;margin-right:2px}
 .preview-tool{border:1px solid #484f58;border-radius:4px;background:#21262d;color:#e6edf3;padding:4px 8px;font-size:11px;cursor:pointer}
 .preview-tool:hover{background:#30363d}
 %(marker_css)s
-.pano-frame{flex:1;width:100%%;border:0;display:block;background:#fff;min-height:480px}
+.pano-frame{flex:1;width:100%%;border:0;display:block;background:#fff;min-height:min(480px,calc(100vh - 150px))}
 </style></head>
 <body>
 %(banner)s
@@ -867,6 +1009,84 @@ PANORAMA_SEND_SCAFFOLD = (
 )
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _sandbox_greeting_text(obj):
+    """冷启动 payload.content 用的开场白**纯文本**。
+    实机 payload.content 是正文字符串（探针：content='测试-第一句话'），不是渲染后 HTML，
+    故这里剥掉标签，避免模拟器把 HTML 当正文喂给作者。"""
+    if not isinstance(obj, dict):
+        return ""
+    raw = _text_field(obj, "beginning")
+    return html_mod.unescape(_TAG_RE.sub("", raw)).strip()
+
+
+def _sandbox_sim_block(profile, greeting):
+    """模拟器注入块。**必须整体位于作者 hoisted assets 之前**：实机上作者脚本执行时
+    window.sdk 已在位，顺序反了作者顶层就拿不到 sdk（与真机不符，会误导作者加兜底）。"""
+    config = {
+        "profile": profile,
+        "greeting": greeting,
+        # 探针实测的真实身份字段形状（role: name/avatarUrl；user: nickname/avatarUrl）。
+        "roleName": "测试", "userNickname": "洛璃",
+        "viewportHeight": 1205,
+    }
+    return ('<script data-preview-sim="config">window.__MMD_SANDBOX_SIM_CONFIG__=%s;</script>'
+            '<script data-preview-sim="1">%s</script>'
+            % (json.dumps(config, ensure_ascii=False), load_sandbox_sim_source()))
+
+
+# 沙盒发送脚手架：经典 <script>，**绝不用 img onerror**。
+# 沙盒 <script> 是一等公民，用 onerror 点火既被官方明令禁止、也完全没必要
+# （事实卡 §8.2）。走 sdk.message.send，让发送这条路也过一遍真实 SDK 表面。
+SANDBOX_SEND_SCAFFOLD = (
+    '<script data-preview-sim="send">'
+    "(function(){"
+    "var D=document;"
+    "D.addEventListener('DOMContentLoaded',function(){"
+    "var ta=D.querySelector('[data-chat=\"input\"]');"
+    "var btn=D.querySelector('[data-chat=\"send\"]');"
+    "if(!ta||!btn)return;"
+    "var send=function(){var v=String(ta.value||'').replace(/^\\s+|\\s+$/g,'');"
+    "if(!v)return;"
+    "var ctl=window.__MMD_SANDBOX_SIM__&&window.__MMD_SANDBOX_SIM__.control;"
+    "if(!ctl)return;"
+    "ta.value='';"
+    # 走 SDK 真实表面；thin profile 下 message.send 是 rejected Promise，
+    # 此时退回控制 API 追加气泡，并把拒绝原因打进诊断（这正是要让作者看到的差异）。
+    "try{var p=window.sdk.message.send(v);"
+    "if(p&&typeof p.then==='function'){p.then(null,function(e){"
+    "ctl.addUser(v);ctl.log.warnings.push('message.send 被拒（'+(e&&e.code)+'）："
+    "瘦预览下写类能力不可用，已退回本地追加气泡。');});}}"
+    "catch(e){ctl.addUser(v);}"
+    "};"
+    "btn.addEventListener('click',function(ev){ev.stopPropagation();send();});"
+    "ta.addEventListener('keydown',function(ev){"
+    "if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();send();}});"
+    "});"
+    "})()"
+    '</script>'
+)
+
+
+SANDBOX_MULTIROUND_RAW = (
+    "AI 追答\n\n[状态]\n体力: 79/100\n灵力: 26/60\n境界: 炼气三层|145/300\n"
+    "银钱: 372\n装备: 头:斗笠|身:麻衣:防御+2|腰:药囊\n"
+    "属性: 攻:12 防:8:破甲 敏:15\n位置: 内城-东市-药铺\n"
+    "好感: 苏九=64, 阿澈=25\n标记: 初来乍到, 中毒\n[/状态]"
+)
+
+
+def _sandbox_multiround_expr(obj):
+    """事件拿原始模型正文，DOM 拿同一离线规则管线的结果；模拟器不自造正则事实。"""
+    rendered = _apply_pipeline_to_text(SANDBOX_MULTIROUND_RAW, obj, "mmdsandbox")
+    rendered = apply_platform_limits(rendered, "mmdsandbox")
+    return "addUser('用户追问');c.addAI(%s,%s)" % (
+        json.dumps(SANDBOX_MULTIROUND_RAW, ensure_ascii=False),
+        json.dumps(rendered, ensure_ascii=False))
+
+
 # 沙盒模式聊天页骨架的稳定钩子（mmd-sandbox.md §5）。挂到全景已有节点上，作者写的
 # [data-chat="root"] 选择器与 var(--chat-accent) 在预览里就能真的解析到。
 _SANDBOX_HOOKS = {
@@ -889,6 +1109,89 @@ _SANDBOX_HOOKS = {
     "input": ' data-chat="input"',
     "send": ' data-chat="send"',
 }
+
+
+# 沙盒全景工具栏按钮：(标签, 传给 iframe 内控制 API 的表达式, 悬浮说明)。
+# 全部走 __MMD_SANDBOX_SIM__.control，不碰被测内容。
+SANDBOX_TOOL_BUTTONS = (
+    ("追加 AI", "addAI()", "追加一条 AI 气泡，派 new/mount/done"),
+    ("流式追加", "stream(['流式','片段'])", "开一条流式气泡并逐块派 message:stream"),
+    ("结束流式", "done()", "给流式气泡派 message:done"),
+    ("多轮对话", None, "连续追加一轮用户+带更新状态块的 AI，检验历史快照与收窄"),
+    ("切深浅色", "theme()", "改 root 的 data-theme 并派 theme:change"),
+    ("切会话", "switchConversation()", "清消息与补发历史并派 conversation:switch"),
+    ("平台关舞台", "stageClose()",
+     "模拟平台侧关闭舞台才派 stage:close（sdk.stage.close 不派）"),
+    ("键盘弹起", "setKeyboardInset(420)", "把 --chat-viewport-height 压到键盘之上"),
+    ("键盘收起", "setKeyboardInset(0)", "恢复 --chat-viewport-height"),
+    ("卸载末条", "unmountLast()", "派 message:unmount 并移除最后一条气泡"),
+    ("返回", "back()", "派 back 事件"),
+    ("dispose", "dispose()", "派 dispose 事件"),
+)
+
+
+def _sandbox_toolbar_html(obj):
+    """沙盒全景工具栏。按钮调 iframe 内的控制 API，模拟平台侧动作。"""
+    rows = []
+    for label, expr, title in SANDBOX_TOOL_BUTTONS:
+        if label == "多轮对话":
+            expr = _sandbox_multiround_expr(obj)
+        call = ("(function(){var c=document.querySelector('.pano-frame').contentWindow"
+                ".__MMD_SANDBOX_SIM__.control;c.%s;})()" % expr)
+        rows.append('<button class="preview-tool" type="button" title="%s" onclick="%s">%s</button>'
+                    % (html_mod.escape(title, quote=True),
+                       html_mod.escape(call, quote=True), html_mod.escape(label)))
+    dump = ("(function(){var s=document.querySelector('.pano-frame').contentWindow"
+            ".__MMD_SANDBOX_SIM__;console.log('[sim] 事件顺序',s.control.eventOrder());"
+            "console.log('[sim] 诊断',s.control.diagnose());console.log('[sim] 调用',s.calls);"
+            "window.alert('事件顺序：'+s.control.eventOrder().join(' > '));})()")
+    rows.append('<button class="preview-tool" type="button" title="%s" onclick="%s">%s</button>'
+                % ("打印事件顺序/调用日志到控制台",
+                   html_mod.escape(dump, quote=True), "事件日志"))
+    return ('<div class="preview-tools" data-preview-tools="1">'
+            '<span class="preview-tools-label">沙盒仿真控制</span>%s</div>' % "".join(rows))
+
+
+def _sandbox_accuracy_html(profile):
+    """能力精度诊断表。每个能力都必须带 accuracy；probe-needed 绝不显示成已精确模拟。"""
+    contract = load_sandbox_contract()
+    caps = contract["capabilities"]
+    thin = profile == "thin-preview"
+    # thin 下 cache 写操作没有任何实测依据，模拟器降级为 probe-needed，诊断表必须同步。
+    downgraded = ("cache.set", "cache.remove") if thin else ()
+    buckets = {"exact": [], "conservative": [], "probe-needed": []}
+    for name in sorted(caps):
+        level = "probe-needed" if name in downgraded else caps[name]["accuracy"]
+        buckets[level].append(name)
+    legend = contract["accuracyLevels"]
+    profile_info = contract["profiles"][profile]
+    rows = [
+        '<div class="frag-warn" data-preview-accuracy="summary">'
+        'PROFILE <b>%s</b>（%s，accuracy=<b>%s</b>）｜契约 v%s｜'
+        '能力 %d 项：exact %d ／ conservative %d ／ probe-needed %d'
+        '</div>' % (html_mod.escape(profile), html_mod.escape(profile_info["label"]),
+                    html_mod.escape(profile_info["accuracy"]),
+                    html_mod.escape(contract["contractVersion"]), len(caps),
+                    len(buckets["exact"]), len(buckets["conservative"]),
+                    len(buckets["probe-needed"]))
+    ]
+    for level in ("exact", "conservative", "probe-needed"):
+        if not buckets[level]:
+            continue
+        # data-preview-bucket 专门标「能力桶」那几行：其它带 accuracy 标签的说明行
+        # （如 Markdown probe-needed 告警）不带这个属性，便于精确定位与断言。
+        rows.append('<div class="frag-warn" data-preview-accuracy="%s" '
+                    'data-preview-bucket="%s"><b>%s</b>（%s）：%s</div>'
+                    % (level, level, html_mod.escape(level),
+                       html_mod.escape(legend[level]),
+                       html_mod.escape("、".join(buckets[level]))))
+    rows.append('<div class="frag-warn" data-preview-accuracy="probe-needed">'
+                'probe-needed 一律<b>不代表已精确模拟</b>：Markdown 管线只做保守预警，'
+                '真实取值必须回真实聊天页验证。</div>')
+    rows.append('<div class="frag-warn" data-preview-accuracy="not-simulated">'
+                'NOT SIMULATED（须真实站验证）：%s</div>'
+                % html_mod.escape("；".join(contract["notSimulated"]["requiresRealSite"])))
+    return "".join(rows)
 
 
 def _panorama_hooks(platform):
@@ -975,11 +1278,17 @@ SANDBOX_CHROME_CSS = """[data-chat="root"]{--chat-bg:#ffffff;--chat-surface:#f5f
 [data-chat="author-stage"][hidden]{display:none}"""
 
 
-def assemble_panorama(obj, platform, src_name):
+def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
     """全景预览：所有组件在同一文档里组合显示，模拟真实 MMD 聊天页。
-    底部固定输入栏（滚动不受影响）+ 发送按钮；发送追加用户气泡 + 占位AI气泡。
-    沙盒模式额外把官方稳定钩子挂到同一套骨架上（见 _panorama_hooks）。"""
+    底部固定输入栏（滚动不受影响）+ 发送按钮。
+
+    沙盒模式额外做三件事：
+      1. 把官方稳定钩子挂到同一套骨架上（见 _panorama_hooks）；
+      2. 在**作者 hoisted assets 之前**内联 mmdsandbox-sim.js，装上 window.sdk；
+      3. 发送脚手架走经典 <script> + sdk.message.send，绝不用 img onerror。
+    sandbox_profile 仅对 mmdsandbox 有效：chat（默认）或 thin-preview。"""
     sandbox = platform == "mmdsandbox"
+    profile = sandbox_profile if sandbox_profile in SANDBOX_PROFILES else "chat"
     statusbar_html = ""
     if isinstance(obj, list):
         # 本地酒馆正则数组（无 beginning）：把各 HTML 片段堆进聊天区一条气泡。
@@ -1006,6 +1315,15 @@ def assemble_panorama(obj, platform, src_name):
         # 角色卡 statusbar 留空 → 平台上这个节点整块不存在，预览照此处理。
         statusbar_node = ('<div data-slot="statusbar" class="pano-statusbar">%s</div>'
                           % apply_platform_limits(statusbar_html, platform))
+    if sandbox:
+        # 🚨 顺序即契约：sim 装 window.sdk → 作者 hoisted assets → 页面骨架。
+        # 沙盒是独立 Vue 应用（非 uni-app 路由页），不注入 MMD 的路由脚手架。
+        # 开场白正文传纯文本：实机 payload.content 是正文字符串，不是渲染后的 HTML。
+        runtime = _sandbox_sim_block(profile, _sandbox_greeting_text(obj))
+        send_scaffold = SANDBOX_SEND_SCAFFOLD
+    else:
+        runtime = PANORAMA_RUNTIME_SCAFFOLD
+        send_scaffold = PANORAMA_SEND_SCAFFOLD
     page = (
         '%(runtime)s'
         '%(hoisted)s'
@@ -1028,9 +1346,9 @@ def assemble_panorama(obj, platform, src_name):
         '</div>'
         '</div>'
         '%(sendscaffold)s'
-    ) % dict(hooks, runtime=PANORAMA_RUNTIME_SCAFFOLD, tested=tested_content,
+    ) % dict(hooks, runtime=runtime, tested=tested_content,
              statusbar=statusbar_node, hoisted=hoisted,
-             sendscaffold=PANORAMA_SEND_SCAFFOLD)
+             sendscaffold=send_scaffold)
 
     chrome_css = SANDBOX_CHROME_CSS if sandbox else ""
     frame_doc = "<style>%s</style><style>%s</style><style>%s</style>%s" % (
@@ -1050,25 +1368,52 @@ def assemble_panorama(obj, platform, src_name):
                   '实测平台气泡三色与页面背景<b>同色</b>（深色都是 #17181a），气泡默认与背景'
                   '无视觉分界。想要卡片感必须自己给底色（比如 var(--chat-surface)），'
                   '别以为平台已经帮你把气泡分出来了。要看真实效果：删掉 root 上的 '
-                  'data-preview-bubble-outline 属性。'
-                  '未模拟：官方 SDK（sdk.on/stage/save/message 等全部不存在）、'
-                  '「消息生成中」占位、净化白名单、Markdown 管线、真实换肤与限频。'
-                  'SDK 相关行为必须回真实聊天页验证。</div>')
+                  'data-preview-bubble-outline 属性。</div>'
+                  '<div class="frag-warn">NOTE 已装 <b>window.sdk 本地仿真</b>'
+                  '（mmdsandbox-sim.js，置于作者脚本之前）：11 个顶层键、30 个能力、'
+                  '12 个事件、冷启动 message:new → message:mount → message:done → ready、'
+                  'mount/done 对晚订阅补发而 ready 不补发、payload 恰 '
+                  '{content,id,role,serverId}、message scope 收窄、stage/theme/switch。'
+                  '这是<b>本地日常仿真，不是完整平台</b>，逐项精度见下表。</div>')
+        audit += _sandbox_budget_audit_html(obj, platform)
+        audit += ('<div class="frag-warn" data-preview-accuracy="probe-needed">'
+                  'WARN Markdown 管线为 <b>probe-needed</b>：替换内容会过一遍 Markdown，'
+                  '但具体边界未确证（已知 4 空格缩进<b>不会</b>变代码块，与手册相反；'
+                  '反引号里的 HTML 会原样留成文本）。预览<b>不模拟</b> Markdown，'
+                  '这里只做保守预警，不声称精确——排版异常请回真实聊天页确认。</div>')
+        audit += _sandbox_accuracy_html(profile)
     if isinstance(obj, dict):
         audit += "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
                          for x in find_dangling_markers(obj, platform))
+    if sandbox:
+        # 沙盒走仿真控制台（模拟平台侧动作）；MMD/ST 保留原路由脚手架工具。
+        tools = _sandbox_toolbar_html(obj)
+        label = ('全景预览（沙盒本地仿真 · profile=%s · window.sdk 已装 · 固定输入框）'
+                 % html_mod.escape(profile))
+    else:
+        tools = (
+            '<div class="preview-tools" data-preview-tools="1">'
+            '<span class="preview-tools-label">预览测试工具</span>'
+            '<button class="preview-tool" type="button" title="追加动态 AI 内容" '
+            'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.addAI()">追加 AI</button>'
+            '<button class="preview-tool" type="button" title="模拟离开聊天页" '
+            'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.leave()">离开聊天页</button>'
+            '<button class="preview-tool" type="button" title="模拟返回聊天页" '
+            'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.returnToChat()">返回聊天页</button>'
+            '</div>')
+        label = '全景预览（所有组件组合 · 固定输入框 · 发送测试）'
+    audit_panel = (
+        '<details class="pano-audit"><summary>诊断与证据说明（默认折叠）</summary>'
+        '<div class="pano-audit-body">%s</div></details>' % audit
+    ) if audit else ""
+    frame_sandbox = (
+        load_sandbox_contract()["environment"]["hostIframeSandbox"]["attribute"]
+        if sandbox else "allow-scripts allow-same-origin"
+    )
     body = (
-        '<div class="frag"><div class="frag-label">全景预览（所有组件组合 · 固定输入框 · 发送测试）</div>'
-        '<div class="preview-tools" data-preview-tools="1"><span class="preview-tools-label">预览测试工具</span>'
-        '<button class="preview-tool" type="button" title="追加动态 AI 内容" '
-        'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.addAI()">追加 AI</button>'
-        '<button class="preview-tool" type="button" title="模拟离开聊天页" '
-        'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.leave()">离开聊天页</button>'
-        '<button class="preview-tool" type="button" title="模拟返回聊天页" '
-        'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.returnToChat()">返回聊天页</button>'
-        '</div>'
-        '<iframe class="pano-frame" srcdoc="%s" sandbox="allow-scripts allow-same-origin"></iframe>'
-        '</div>%s' % (srcdoc, audit)
+        '<div class="frag"><div class="frag-label">%s</div>%s'
+        '<iframe class="pano-frame" srcdoc="%s" sandbox="%s"></iframe>'
+        '</div>%s' % (label, tools, srcdoc, frame_sandbox, audit_panel)
     )
     return PANORAMA_PAGE_TEMPLATE % {"platform": platform, "banner": banner,
                                      "body": body, "marker_css": MARKER_CSS}
@@ -1175,6 +1520,9 @@ def main():
     p.add_argument("--platform", choices=["mmd", "mmdsandbox", "st"], required=True)
     p.add_argument("--mode", choices=["panels", "panorama", "both"], default="both",
                    help="panels=三面板诊断；panorama=单页全景(模拟MMD聊天页)；both=两者都生成(默认)")
+    p.add_argument("--sandbox-profile", choices=list(SANDBOX_PROFILES), default="chat",
+                   help="仅 --platform mmdsandbox 有效：chat=聊天页完整环境（默认）；"
+                        "thin-preview=创卡页瘦预览（save.get/keys 同步抛 SdkError，写类能力被拒）")
     p.add_argument("-o", "--output", help="输出HTML路径。仅单一 mode 时生效；both 模式忽略并按默认名各产一份")
     args = p.parse_args()
 
@@ -1213,12 +1561,17 @@ def main():
                         (frags_count, args.platform)))
 
     if args.mode in ("panorama", "both"):
-        pano_html = assemble_panorama(obj, args.platform, args.file)
+        pano_html = assemble_panorama(obj, args.platform, args.file,
+                                      sandbox_profile=args.sandbox_profile)
         path = args.output if (args.output and args.mode == "panorama") else \
             _default_output_path(args.file, "panorama", args.platform)
-        outputs.append((path, pano_html,
-                        "全景预览  平台: %s  （固定输入框+发送+占位AI气泡，所有组件组合显示）" %
-                        args.platform))
+        if args.platform == "mmdsandbox":
+            summary = ("全景预览  平台: mmdsandbox  profile: %s  "
+                       "（已装 window.sdk 本地仿真；能力精度见页内诊断表）" % args.sandbox_profile)
+        else:
+            summary = ("全景预览  平台: %s  （固定输入框+发送+占位AI气泡，所有组件组合显示）"
+                       % args.platform)
+        outputs.append((path, pano_html, summary))
 
     for path, content, summary in outputs:
         parent = os.path.dirname(os.path.abspath(path))

@@ -1,10 +1,9 @@
 /* SBK ui-stage —— 组件层：舞台面板 stage。
-   由 ui.js 拆出：ui.js 剥注释后 19628 字符，装成一条正则规则后距创卡页编辑器显示上限
-   20000 仅余数百字符（plan.md 已裁决第 7 条：超限就拆条；这里在【源码侧】先拆开）。
-   依据：资料/基座事实卡.md、包分析-CSS与层级契约.md D.2 / C.0 / E5
-   经典脚本 IIFE：§3 内联脚本走 (0,eval)，import 必报错，禁 module；顶层声明会被回挂 window。
-   🚨 装载顺序 protocol.js → hud.js → ui.js → ui-stage.js（build_sbk.py 的 UI_ASSETS）：
-      本文件复用 ui.js 导出的私有工具箱 SBK._uiKit，顺序错了就拿不到。 */
+   依赖 ui.js 提供共享 CSS/延迟队列/DOM 工具；panel/chrome 已独立在 ui-panel.js。
+   依据：资料/基座事实卡.md、包分析-CSS与层级契约.md D.2 / C.0 / E5。
+   经典脚本 IIFE：§3 内联脚本走 (0,eval)，import 必报错，禁 module。
+   🚨 UI 装载顺序 protocol.js → hud.js → hud-render.js → ui.js → ui-panel.js → ui-stage.js；
+      本文件复用 ui.js 导出的 SBK._uiKit，顺序错了就拿不到。 */
 (function (W) {
   'use strict';
   var SBK = W.SBK;
@@ -63,10 +62,35 @@
   function stage(opts) {
     var o = opts || {};
     var mode = o.mode === 'full' ? 'full' : 'content';
-    var BOX_ID = String(o.id || 'sbk-stage-box');
+    var BOX_ID = SBK.dom.hostId ? SBK.dom.hostId(o.id || 'sbk-stage-box') : String(o.id || 'sbk-stage-box');
     var box = null, built = false, open_ = false, dead = false;
     var st = S.stage || null;
     var api;
+
+    /* ---------- 单调 token（审计报告问题 4：stage 延迟竞态） ----------
+       🚨 修的缺陷：DOM 未就绪时 open() 把「开舞台」排进 defer 队列（等首个 mount/done）。
+          旧实现的排队回调只查 dead 哨兵，于是这条序列会翻车：
+            api.open();            // DOM 未就绪 → 入队
+            api.close();           // 用户/作者当即关掉；队列【无法取消】
+            …首个 mount 到达…      // 排队的回调仍然跑 st.open(mode) → 舞台【自己又开了】
+          close() 之后舞台复活是最难查的一类 bug：调用方看到的是「关不掉」或「莫名弹开」。
+          destroy() 同理，且更糟 —— dead 只挡 build，挡不住 st.open。
+       修法 = 单调递增的 epoch token：
+         · open/rebuild/render 入队时【捕获】当时的 token；
+         · close/destroy 一律 ++token → 所有更早入队的回调 token 过期，落地时自行放弃；
+         · 回调在【任何 st.open 之前】先查 dead + token，绝不先开了舞台再发现自己该死。
+       为什么不用「取消队列」：defer 的队列是 ui.js 的共享队列（多个组件共用一对 mount/done
+       排空订阅），从里面摘任务会牵动别的组件；token 是纯本地状态，零耦合。 */
+    var token = 0;
+    function stale(t) { return dead || t !== token; }
+    // 入队 helper：捕获当前 token，落地时校验。所有延迟动作都必须经它，别再直接调 defer。
+    function later(fn) {
+      var t = token;
+      defer(function () {
+        if (stale(t)) return;   // close/destroy 已把 token 推进 → 这条排队动作作废
+        fn();
+      });
+    }
 
     if (!st || typeof st.open !== 'function') SBK.warn('ui.stage: sdk.stage unavailable');
 
@@ -118,9 +142,11 @@
       box: function () { return box; },
       mode: function () { return mode; },
       open: function (m) {
+        if (dead) { SBK.warn('ui.stage: open() on a destroyed stage, ignored'); return api; }
         if (m === 'full' || m === 'content') mode = m;
-        // 硬约束 17：DOM 未就绪时 stage.el() 拿不到可用容器 → 排队到首个 mount/done
-        defer(function () {
+        // 硬约束 17：DOM 未就绪时 stage.el() 拿不到可用容器 → 排队到首个 mount/done。
+        // later() 捕获 token：这中间若 close()/destroy() 过，本回调整体作废（见上方 token 注释）。
+        later(function () {
           if (!st || typeof st.open !== 'function') return;
           try { st.open(mode); } catch (e) { SBK.warn('ui.stage: open failed', e && e.message); return; }
           open_ = true;
@@ -130,6 +156,8 @@
         return api;
       },
       close: function () {
+        // 🚨 先推 token：排队中的 open/rebuild/render 立即作废，不会在 mount 之后把舞台又开回来
+        token++;
         if (st && typeof st.close === 'function') {
           try { st.close(); } catch (e) { SBK.warn('ui.stage: close failed', e && e.message); }
         }
@@ -142,9 +170,26 @@
       },
       // 用 visible() 而非内部标志：平台可能在我们背后关掉（且 close 无事件），visible() 才是真值
       toggle: function (m) { return isVisible() ? api.close() : api.open(m); },
-      rebuild: function () { built = false; defer(build); return api; },
-      render: function () { defer(build); return api; },
+      rebuild: function () { if (dead) return api; built = false; later(build); return api; },
+      render: function () { if (dead) return api; later(build); return api; },
+      /* destroy：不能留下一个空舞台。
+         🚨 旧实现只摘 box 就置 dead —— 若此刻舞台是【可见】的，平台的舞台容器仍然盖在
+            消息区上（content 模式盖消息区、full 盖整屏），而里面已经没有任何内容 →
+            用户看到一块空白面板，且我方已经 dead，再也没有句柄能关掉它。
+         故顺序是：推 token（作废排队）→ 可见就 close 一次 → 退订 → 摘节点。
+         onClose 只回调一次：close() 内部已经回调过（byPlatform=false），
+         这里【不再重复】回调，否则调用方的 onClose 会收到两次同一个关闭。 */
       destroy: function () {
+        if (dead) return null;
+        token++;                       // 先作废排队中的 open/rebuild/render
+        var wasOpen = false;
+        try { wasOpen = isVisible(); } catch (e) { wasOpen = open_; }
+        if (wasOpen && st && typeof st.close === 'function') {
+          // 走 sdk 而非 api.close()：api.close() 会再推一次 token 并二次触发 onClose
+          try { st.close(); } catch (e) { SBK.warn('ui.stage: close during destroy failed', e && e.message); }
+          open_ = false;
+          if (typeof o.onClose === 'function') { try { o.onClose(api, false); } catch (e) {} }
+        }
         SBK.off('stage:close', onPlatformClose);
         if (box && box.parentNode) box.parentNode.removeChild(box);
         box = null; built = false; open_ = false; dead = true;
@@ -156,18 +201,23 @@
        故这里按实例订阅即可，不需要模块级自建桥（那会双份派发）。
        签名 fn(payload, bubbleRoot)：stage:close 的 bubbleRoot 恒为 null，此处不用它。 */
     function onPlatformClose(payload) {
+      if (dead) return;
+      /* 平台关掉了舞台 → 同样要作废排队中的 open：否则「用户按返回关掉」之后，
+         一条更早入队的 open 落地时会把舞台又弹回来（与 close() 同一类竞态）。 */
+      token++;
       open_ = false;
       if (typeof o.onClose === 'function') { try { o.onClose(api, true); } catch (e) {} }
     }
     SBK.on('stage:close', onPlatformClose);
 
-    // 开局对齐一次真实状态：预览重跑或热切会话时舞台可能已经是开着的
-    defer(function () { if (isVisible()) { open_ = true; build(); } });
+    // 开局对齐一次真实状态：预览重跑或热切会话时舞台可能已经是开着的。
+    // 同样走 later()：这条也可能在 destroy() 之后才落地（那时不该再 build 出一个孤儿 box）。
+    later(function () { if (isVisible()) { open_ = true; build(); } });
     return api;
   }
 
-  /* 🚨 合并挂载，不能覆盖：hud.js 已挂 SBK.ui.hud / SBK.ui.snapshot，ui.js 已挂 SBK.ui.panel。
-     写成 SBK.ui = { stage:.. } 会把它们整个踩掉（装载顺序 core → protocol → hud → ui → ui-stage）。 */
+  /* 合并挂载，不能覆盖：hud.js/hud-render.js 已挂 hud/snapshot，ui-panel.js 已挂 panel/chrome。
+     写成 SBK.ui = { stage:.. } 会把前序模块全部踩掉。 */
   SBK.ui = SBK.ui || {};
   SBK.ui.stage = stage;
   SBK.log('ui-stage ready (stage)');

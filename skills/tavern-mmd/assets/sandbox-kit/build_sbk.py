@@ -14,14 +14,12 @@
 产出可再用仓库里的 skill 校验器复核（本脚本**不修改**它）：
     python validate.py dist/sbk.json --type regex --platform mmdsandbox
 
-已知与该校验器的冲突（只记录，不改它）：
-  1. 长度上限取的是**创卡页 UI 显示值**，与事实卡 §6 逐字常量 `var Us={...}` 不同：
-       beginning 10240 vs 真值 4000（UI 也显示 4000 → 校验器偏松，会漏放行超长开场白）
-       name      20    vs 真值 200
-       regex     1000  vs 真值 4096
-       content   20000 vs 真值 100000
-     本脚本双轨处理：运行时真值超出 → ERROR（会被 Ws() 静默截断）；
-     UI 值超出 → WARN（导入不受影响，但作者一进编辑器就被截断）。
+长度证据与保守门禁：
+  1. 沙盒源码归一常量为 beginning/name/regex/content = 4000/200/4096/100000；
+     创卡页 UI 显示 name/regex/content = 20/1000/20000。
+     `replaceString` 的编辑器 20000 拒存与导入 100000 双路径已确证；name/findRegex
+     是否存在同样双路径、超限如何失败仍待验证。本生成器对后两者按 UI 值告警、超过
+     源码观察值保守报错，并始终执行不可调高的 `MAX_SOURCE_RULE=18000` 最终门禁。
   2. 两条对本基座产出的**误报**（均为 WARN，可忽略）：
      - `findRegex 含独立保留字 css`：命中的是标记名 `{{sbk-css}}`。该标记是 plan.md 2.1
        冻结的规则布局，不改。
@@ -39,8 +37,16 @@
   personality   str   人设文本（导入页不读该字段，仅随 JSON 归档）
   chatVersion   int   必须 1（缺省即 1）
   pageDepth     int   固定 2（缺省即 2）
-  theme         obj   主题 token。{dark:{...},light:{...}} 或扁平（两套同值）
+  theme         obj   【作者基线】主题 token。{dark:{...},light:{...}} 或扁平（两套同值）
                       语义名见 theme.js MAP；也可直给 --chat-* / --sbk-*
+                      🚨 2.1 起它【不再】编译进静态 sbk-css，而是经 boot 信封下发给
+                      theme.js 作合成的最底层。理由见「主题所有权」一节。
+  presets       list|obj  六维风格包。路径数组 ["presets/素雅阅读.json", …]（相对本配置
+                      所在目录）或内联映射 {"包名":{六维…}}。六维键恰好
+                      palette/layout/ui/font/cohesion/decoration，每维必须【双侧完整】
+                      给 dark 与 light。生成器编译成 theme.register 可消费的
+                      {tokens, tune} 并放进 boot 信封；只下发本卡列出的包。
+  preset        str   默认风格包名（须在 presets 里）。玩家挑过后存档优先。
   modes         obj   {status:bool, chrome:bool, pinned:bool}，默认 true/true/false。
                       🚨 2.0 语义（设计文档第二节）：三者【职责不同】，不是同一份数据的多个渲染器。
                         status = 气泡内状态面板（唯一的状态数据渲染器，原 snapshot）
@@ -64,15 +70,32 @@
   idBase        int   规则 id 起始负数，默认 -1（依次 -1,-2,…）
   splitThreshold int  脚本自动拆条阈值，默认 18000（编辑器上限 20000 留 2000 余量）
 
-自动拆条（plan.md 已裁决第 7 条）
---------------------------------
-`sbk-core`（core.js+theme.js）与 `sbk-ui`（protocol.js+hud.js+ui.js）超过 splitThreshold
-就按**文件边界**拆成 `sbk-core-1/-2`、`sbk-ui-1/-2`…，各自获得唯一的 slash 形态标记。
-🚨 拆条严格保持装载顺序 protocol.js → hud.js → ui.js：三者都依赖 core.js 已定义，
-且 hud.js/ui.js 用「合并挂载」往 `SBK.ui` 上追加，顺序错了会出现未定义引用。
-`regex_scripts` 数组序即装载顺序（worker 按 regexSort 升序）。
-绝不切开单个文件——每个文件本身是完整 IIFE，切开必然语法错。单文件自身超阈值时
-允许它独占一条并告警（当前 ui.js 剥注释后 19537 字符，距编辑器上限 20000 仅余 444）。
+主题所有权（2.1 / 审计报告高风险 1）
+------------------------------------
+1.0 有**两条**主题通道：本生成器把 `config.theme` 永久编译进静态 `sbk-css`，`theme.js`
+又写 `#sbk-theme-vars`。后果是 `prefs.enabled(false)` 只清得掉动态那条，静态覆写还在 →
+「关闭美化＝完全跟随平台」不成立，`preset` / `reset` / native 的优先级也无法证明。
+
+2.1 起**只有 `theme.js` 写主题**：
+  · `sbk-css` 只装 `base.css` 骨架（无 `[data-theme=…]` 覆写块）；
+  · `config.theme` 经 boot 信封下发，作合成的最底层「作者基线」；
+  · 最终样式 = author base + 选中的 preset + per-mode overrides，一个 `<style>` 承载。
+
+boot 信封形如 `{"v":2, "base":…, "presets":{…}, "preset":"…"}`，走 `o.theme` 这一个键。
+之所以搭这趟车：`core.js` 只有 `if (o.theme) SBK.theme.apply(o.theme)` 一条主题接线，
+而本工作包不改 `core.js`。信封**恒为非空对象**，故 `modes.chrome` 无论真假，boot 都会
+把主题层 start 一次（1.0 关掉 chrome 就没人读偏好存档，玩家上次的字号开局不生效）。
+
+自动拆条与安全门禁
+--------------------
+生成器按固定顺序装载 11 个完整经典脚本模块：
+`core.js → core-store.js → core-boot.js → theme.js → theme-panel.js → protocol.js →
+hud.js → hud-render.js → ui.js → ui-panel.js → ui-stage.js`。
+
+超过 `splitThreshold` 时只按连续的完整 IIFE 文件边界装箱，规则名变为 `sbk-core-N` /
+`sbk-ui-N`，每条拿唯一 slash marker；数组顺序就是运行时装载顺序。绝不从函数或字符串
+中间切脚本。`MAX_SOURCE_RULE=18000` 是不可调高的最终规则门禁：单模块、boot、场景规则
+任何一条超过它都直接 ERROR，必须拆源码/配置，不能让超限文件独占一条或提高阈值绕过。
 
 退出码：0 全绿（可能有 warn）／1 有 error（不写出文件）／2 配置或 IO 错误。
 """
@@ -88,7 +111,7 @@ import tempfile
 from pathlib import Path
 
 # ---------------------------------------------------------------- 事实卡 §6 常量
-# 运行时真值（逐字取自 `var Us={...}`），超出即静默截断 → 视为 ERROR。
+# 源码归一观察值。超过时为防裁切或拒存保守判 ERROR；只有 content 的导入路径已确认到 100000。
 HARD = {
     "beginning": 4000,
     "statusbar": 200,
@@ -98,7 +121,7 @@ HARD = {
     "content": 100000,    # replaceString
     "regexList": 130,
 }
-# 创卡页编辑器 UI 显示值：不影响导入，但作者一进编辑器就被截断 → 视为 WARN。
+# UI 显示/维护安全值。content 超过 20000 的编辑器拒存已确证；name/regex 仅作保守 WARN。
 UI_SOFT = {
     "name": 20,
     "regex": 1000,
@@ -134,14 +157,12 @@ DEFAULT_MARKERS = {
     "hud": "{{hud}}",
     "boot": "{{sbk-boot}}",
 }
-# plan.md 2.1：内核/主题 → sbk-core；协议/HUD/组件 → sbk-ui（已裁决拆两条）。
-# 🚨 元组顺序 = 装载顺序，绝不重排也绝不排序：
-#   core.js 先建 window.SBK，theme.js 才能往上挂；
-#   protocol.js/hud.js/ui.js/ui-stage.js 都依赖 core 已定义，
-#   且 hud.js 与 ui*.js 用「合并挂载」往 SBK.ui 上追加 → 顺序错了会出现未定义引用。
-# 缺失的文件由 load_assets 跳过并告警，所以这里可以预留还没交付的文件名。
-CORE_ASSETS = ("core.js", "theme.js")
-UI_ASSETS = ("protocol.js", "hud.js", "ui.js", "ui-stage.js")
+# 顺序就是运行时装载顺序，装箱只能按该顺序取连续完整 IIFE，绝不重排或切开单文件。
+# core.js 建 SBK；core-store/core-boot 依赖它；theme-panel 依赖 theme 的私有门面。
+# protocol 在 HUD 前；hud-render 复用 hud 的同一 TYPES；ui-panel 复用 ui kit；ui-stage 最后。
+CORE_ASSETS = ("core.js", "core-store.js", "core-boot.js", "theme.js", "theme-panel.js")
+UI_ASSETS = ("protocol.js", "hud.js", "hud-render.js", "ui.js", "ui-panel.js", "ui-stage.js")
+ASSET_ORDER = CORE_ASSETS + UI_ASSETS
 
 
 class Diag:
@@ -172,7 +193,7 @@ class BuildError(Exception):
 
 # ---------------------------------------------------------------- 剥注释
 # plan.md 已裁决第 1 条：生成时剥注释，仓库保留带注释源码。
-# core+theme 带注释已 17969 字符，逼近编辑器显示上限 20000（事实卡 §6 运行时真值 100000）。
+# 最终 18000 门禁独立于平台宽路径，确保生成规则可在编辑器中维护。
 
 _REGEX_OK_AFTER = re.compile(r"[(,=:\[!&|?{};+\-*%~^<>]$")
 _REGEX_OK_KEYWORD = re.compile(r"\b(return|typeof|case|in|of|new|delete|void|instanceof|do|else|yield|await)$")
@@ -555,18 +576,27 @@ def estimate_budget(rule, input_len, expected_matches, diag, where):
 
 
 def check_lengths(rule, diag, where):
-    """事实卡 §6：运行时真值硬限（超出静默截断→ERROR），编辑器 UI 值告警。"""
+    """事实卡 §6：UI 显示值保守告警；源码观察值外保守报错。"""
     pairs = (("scriptName", "name"), ("findRegex", "regex"), ("replaceString", "content"))
     for field, key in pairs:
         v = rule[field]
         n = len(v)
         if n > HARD[key]:
-            diag.err(where, "%s %d 字符 > 运行时上限 %d——超出被 Ws() 静默截断（§6）。"
-                     % (field, n, HARD[key]))
+            if key == "content":
+                diag.err(where, "%s %d 字符 > 已确认导入上限 %d——请拆条（§6）。"
+                         % (field, n, HARD[key]))
+            else:
+                diag.err(where, "%s %d 字符 > 源码归一观察值 %d——录入路径失败语义待验证，"
+                         "为防裁切或拒存保守判 ERROR（§6）。" % (field, n, HARD[key]))
         elif n > UI_SOFT[key]:
-            diag.warn(where, "%s %d 字符 > 创卡页编辑器显示上限 %d（运行时真值 %d）——"
-                      "导入不受影响，但作者一进编辑器就被截断（§6）。"
-                      % (field, n, UI_SOFT[key], HARD[key]))
+            if key == "content":
+                diag.warn(where, "%s %d 字符 > 创卡页编辑器上限 %d（导入已确认可到 %d）——"
+                          "编辑器保存会静默拒绝整次修改，不是截断；建议拆条（§6）。"
+                          % (field, n, UI_SOFT[key], HARD[key]))
+            else:
+                diag.warn(where, "%s %d 字符 > UI 显示值 %d；源码归一观察值为 %d。"
+                          "双路径与超限语义待验证，交付仍建议按 UI 值控制（§6）。"
+                          % (field, n, UI_SOFT[key], HARD[key]))
 
 
 def check_slash_form(rule, diag, where):
@@ -612,8 +642,8 @@ def check_script_close(text, diag, where):
 def load_assets(asset_dir, names, diag, strip):
     """存在则合并，缺失则跳过并告警（WP-2/WP-3 可能还没交付）。
 
-    `names` 的顺序**就是装载顺序**，绝不重排：protocol.js → hud.js → ui.js 都依赖
-    core.js 已定义，且 hud.js/ui.js 用「合并挂载」往 SBK.ui 上追加，顺序错了会出现未定义引用。
+    `names` 的顺序就是装载顺序。每项必须是完整经典脚本模块；本函数只读取、剥注释和
+    记录缺失项，不排序、不切文件。跨模块依赖由 CORE_ASSETS/UI_ASSETS 的唯一清单保证。
     """
     parts, loaded, missing = [], [], []
     for name in names:
@@ -638,7 +668,8 @@ def load_assets(asset_dir, names, diag, strip):
 SCRIPT_WRAPPER = "<script>\n%s\n</script>"
 # 包裹开销："<script>\n" + "\n</script>" —— 打包时必须预留，否则贴着阈值会溢出
 WRAPPER_OVERHEAD = len(SCRIPT_WRAPPER % "")
-DEFAULT_SPLIT_THRESHOLD = 18000     # 20000 UI 上限留 2000 安全余量
+MAX_SOURCE_RULE = 18000          # 不可绕过：所有 SBK 源模块规则含 <script> 包装后的硬预算
+DEFAULT_SPLIT_THRESHOLD = MAX_SOURCE_RULE
 
 
 def pack_by_file(loaded, threshold):
@@ -700,46 +731,482 @@ def emit_script_rules(rid, base_name, base_marker, loaded, threshold, diag, stri
                   % (base_name, sum(len(e["text"]) for e in loaded) + WRAPPER_OVERHEAD,
                      threshold, len(bins), " → ".join(e["name"] for e in loaded)))
     for item in layout:
-        # 单文件超阈值时允许独占一条，但仍要提醒它逼近 UI 上限 20000
-        if item["chars"] > threshold:
+        if item["chars"] > MAX_SOURCE_RULE:
+            diag.err(item["scriptName"],
+                     "%d 字符 > SBK 源模块安全上限 %d，且按完整 IIFE 文件边界已无法再拆（%s）。"
+                     "必须在源码侧拆成新的完整模块；不能提高 splitThreshold、不能任意切字符串，"
+                     "否则创卡页保存会静默拒绝或脚本语法损坏。"
+                     % (item["chars"], MAX_SOURCE_RULE, "/".join(item["files"])))
+        elif item["chars"] > threshold:
+            # 自定义阈值可低于安全上限；完整单模块无法再装箱，只提示，不把低阈值冒充平台硬限。
             diag.warn(item["scriptName"],
-                      "%d 字符 > 拆条阈值 %d，且已无法再拆（%s 单文件即超阈值）。"
-                      "距编辑器显示上限 %d 仅余 %d，请考虑在源码侧拆分该文件。"
-                      % (item["chars"], threshold, "/".join(item["files"]),
-                         UI_SOFT["content"], UI_SOFT["content"] - item["chars"]))
+                      "%d 字符 > 自定义拆条阈值 %d，且 %s 是完整单模块，已独占一条。"
+                      "仍低于固定安全上限 %d。"
+                      % (item["chars"], threshold, "/".join(item["files"]), MAX_SOURCE_RULE))
     return rules, rid, layout
 
 
-def theme_override_css(theme, diag):
-    """把 theme token 编译成 [data-chat=root][data-theme=*] 覆盖块。
+# ==================================================== 主题所有权与风格 bundle
+# 🚨 2.1 单一运行时所有权（审计报告高风险 1）：这里【不再】把 config.theme 编译进静态
+#    sbk-css。1.0 有两条主题通道（静态 sbk-css 覆写 + theme.js 的 #sbk-theme-vars），
+#    于是 prefs.enabled(false) 只清得掉动态那条，「关闭美化＝完全跟随平台」不成立，
+#    preset / reset / native 的优先级也无法证明。
+#    2.1 起 sbk-css 只装 base.css 骨架；config.theme 改由 boot 载荷作为【作者基线】下发，
+#    与 preset、per-mode overrides 在 theme.js 里合成同一个 <style>。
+#    ⚠ 故本文件不再有 theme→CSS 的编译函数。要断言「静态通道已拆除」，测试应检查
+#      sbk-css 规则的 replaceString 里不含 [data-theme= 覆写块。
 
-    事实卡 §7.1 + 硬约束 10：平台令牌定义在 [data-theme=dark]（特异度 (0,1,0)），
-    data-theme 与 data-chat=root 在【同一个 div】上 → 写两个属性选择器得 (0,2,0)，
-    高于平台且【不需要 !important】。写 :root 完全无效（平台无 :root 定义）。
+# 风格 bundle 六维（美化决策「风格 bundle」冻结）。键名恰好这六个，多一个少一个都 ERROR：
+#   palette    配色 → 落 14 个平台 --chat-* 语义令牌 + --sbk-on-accent
+#   layout     骨架节奏 → --sbk-gap / --sbk-pad / --sbk-radius
+#   ui         控件质感 → --sbk-shadow / --sbk-lift / --sbk-ball / --sbk-drw-w
+#   font       字号行距 → --sbk-fs / --sbk-fs-sm + 结构化 tune(fontSize/lineHeight)
+#   cohesion   一致性元信息 → 【只校验、不输出任何 CSS】
+#   decoration 装饰 → --sbk-glow + 四条语义色 --sbk-hp/mp/sp/xp
+BUNDLE_DIMS = ("palette", "layout", "ui", "font", "cohesion", "decoration")
+
+# cohesion 只承载「这套包的设计意图」，供生成期校验与文档用，绝不编译成声明。
+# 未知键只 WARN（元信息不影响运行），但值必须是标量——塞对象进来说明作者误当样式维用了。
+COHESION_KEYS = ("contrast", "density", "motion", "mood", "note", "pairing")
+
+# 可微调项：编译进 tune（结构化数字），不进 tokens。
+# 🚨 这三项是 theme.js FIELDS 里 kind!=color 的那几个，两侧必须一致 ——
+#    值域漂移会让生成期放行的包在运行时被 okField 逐字段丢弃（静默失效）。
+#    test_build_sbk 有一条测试直接从 theme.js 读 FIELDS 比对本表。
+TUNE_FIELDS = {
+    "fontSize": {"kind": "int", "min": 12, "max": 22},      # 2.1 起是 CSS px，不再是 rpx
+    "lineHeight": {"kind": "num", "min": 1.1, "max": 2.6},
+    "opacity": {"kind": "int", "min": 40, "max": 100},
+}
+
+# 包名：与 theme.js 的 NAME_OK 同口径（中日韩汉字 + ASCII 字母数字 空格 _ -，1..32）
+PRESET_NAME_RE = re.compile(
+    r"^[0-9A-Za-z_\-\u3040-\u30ff\u4e00-\u9fa5]"
+    r"[0-9A-Za-z_\- \u3040-\u30ff\u4e00-\u9fa5]{0,31}$")
+
+# 危险值闸门：与 theme.js 的 DANGER 逐条对齐（同样有一条测试比对两侧）。
+# 前两条会截断样式块；url(/@import 是外部资源（§2 CSP 封死且风格包一律零外部依赖）；
+# expression( 是可执行 CSS；`;`/`{` 让单个令牌值凭空多写声明 = 绕过令牌白名单。
+THEME_DANGER_RE = re.compile(
+    r"\}|\{|;|</style|</script|url\s*\(|@import|expression\s*\(|javascript\s*:", re.I)
+
+# palette 必须逐侧显式给全的五个核心键：对比度是【可证明】而非「大概能读」，
+# 缺一个就没有基准可算。其余 palette 键可选，且允许 rgba()（只是不参与严格对比度检查）。
+PALETTE_CORE = ("bg", "surface", "text", "accent", "border")
+
+_HEX_FULL_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_HEX_SHORT_RE = re.compile(r"^#[0-9a-fA-F]{3}$")
+
+
+def norm_hex(v):
+    """#abc → #aabbcc；已是 6 位则小写归一。不是可解析 hex 返回 None。
+
+    归一是对比度检查的前提，也让「等于默认值就删 override」在两侧口径一致
+    （theme.js 的 sameAsDefault 同样做大小写归一）。
     """
-    if not theme:
-        return ""
-    if "dark" in theme or "light" in theme:
-        sets = [("dark", theme.get("dark")), ("light", theme.get("light"))]
-    else:
-        sets = [("dark", theme), ("light", theme)]
-    out = []
-    for mode, tokens in sets:
-        if not tokens:
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    if _HEX_FULL_RE.match(s):
+        return s.lower()
+    if _HEX_SHORT_RE.match(s):
+        return ("#" + s[1] * 2 + s[2] * 2 + s[3] * 2).lower()
+    return None
+
+
+def _lin(c):
+    """sRGB 分量 → 线性值（WCAG 2.x 相对亮度公式）。"""
+    c = c / 255.0
+    return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def luminance(hex6):
+    r = int(hex6[1:3], 16)
+    g = int(hex6[3:5], 16)
+    b = int(hex6[5:7], 16)
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
+def contrast(a, b):
+    """WCAG 对比度 (L1+0.05)/(L2+0.05)，1.0..21.0。入参须是归一后的 #rrggbb。"""
+    la, lb = luminance(a), luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+# WCAG 2.1 阈值。正文 4.5:1（1.4.3 AA 普通文本）；非文本图形与大号/次要前景 3:1（1.4.11）。
+CONTRAST_TEXT = 4.5
+CONTRAST_GRAPHIC = 3.0
+
+
+# theme.js 的 SBK_OK 镜像，【只在读不到 theme.js 时兜底】。
+# 🚨 真源是 theme.js（_sbk_whitelist_from_theme_js 会去读）。这里留一份是为了让「读不到」
+#    走【严格】路径而不是放行一切：放行一切等于生成期不校验私有令牌，作者写错一个名字
+#    （--sbk-wobble）会静默无效，正是本轮要消灭的一类缺陷。
+#    test_build_sbk 有一条测试断言两侧完全相等，漂移立刻红。
+SBK_PRIVATE_FALLBACK = frozenset({
+    "gap", "pad", "radius", "fs", "fs-sm", "lh", "on-accent",
+    "shadow", "lift", "ball", "drw-w", "glow", "hp", "mp", "sp", "xp",
+})
+
+
+def _sbk_whitelist_from_theme_js(asset_dir, diag=None):
+    """从 theme.js 的 SBK_OK 表【读出】私有令牌白名单，不在生成器里写死一份副本。
+
+    真值只有一处（theme.js）。运行时拒绝的令牌，生成期就该拒绝；两边各写一份必然漂移成
+    「生成期放行、运行时静默丢弃」——那正是本轮要消灭的一类缺陷。
+    读不到（文件缺失／写法变了）时返回 None，调用方据此降级为只按平台令牌校验并告警。
+    """
+    p = Path(asset_dir) / "theme.js"
+    src = p.read_text(encoding="utf-8") if p.is_file() else ""
+    m = re.search(r"var SBK_OK = \{(.*?)\};", src, re.S) if src else None
+    if not m:
+        if diag is not None:
+            diag.warn("theme", "没能从 %s 读出 SBK_OK 私有令牌白名单——"
+                               "本次按内置镜像 SBK_PRIVATE_FALLBACK 校验（仍是严格路径，"
+                               "不会放行未知 --sbk-* 名）。若 theme.js 改了写法，"
+                               "请同步 _sbk_whitelist_from_theme_js 与该镜像。" % p)
+        return set(SBK_PRIVATE_FALLBACK)
+    return set(re.findall(r"'([a-z0-9-]+)'\s*:\s*1", m.group(1)))
+
+
+def theme_var(k):
+    """语义名 / 平台后缀 / 直给变量名 → 最终 CSS 变量名。与 theme.js 的 toVar 同口径。"""
+    if k.startswith("--"):
+        return k
+    if k in _THEME_MAP:
+        return "--chat-" + _THEME_MAP[k]
+    if k in _PLATFORM_VARS:
+        return "--chat-" + k
+    return "--sbk-" + re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", k).lower()
+
+
+def ok_token(k, sbk_ok=None):
+    """令牌名白名单。与 theme.js 的 okToken 同口径。
+
+    sbk_ok 省略/None 时用内置镜像 SBK_PRIVATE_FALLBACK ——【始终严格】。
+    🚨 曾经的写法是「读不到白名单就放行一切 --sbk-*」，那等于生成期不校验私有令牌：
+       作者写错一个名字（--sbk-wobble）会静默无效，正是本轮要消灭的一类缺陷。
+    🚨 --chat-* 只认平台真实存在的那 14 个：平台没定义的变量写了不报错也不生效，
+       同样是静默失效，必须生成期拦住。
+    """
+    if not isinstance(k, str) or not k:
+        return False
+    wl = SBK_PRIVATE_FALLBACK if sbk_ok is None else sbk_ok
+    if k in _PAGE_KEYS:
+        return True
+    if k.startswith("--chat-"):
+        return k[len("--chat-"):] in _PLATFORM_VARS
+    if k.startswith("--sbk-"):
+        return k[len("--sbk-"):] in wl
+    if k.startswith("--"):
+        return False
+    if k in _THEME_MAP or k in _PLATFORM_VARS:
+        return True
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", k).lower() in wl
+
+
+# theme.js 的 PAGE 表：需要 !important 的页面级属性名（不是变量）。
+# 风格包里出现它们是合法的，但 url() 会被 THEME_DANGER_RE 拦下（零外部资源）。
+_PAGE_KEYS = ("pageBg", "pageBgImage", "pageBgSize", "pageBgPosition", "pageBgRepeat")
+
+
+def _ok_tune(k, v):
+    """tune 值域校验。与 theme.js 的 okField 同口径（越界即拒，不夹取）。"""
+    spec = TUNE_FIELDS.get(k)
+    if spec is None:
+        return False
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    if spec["kind"] == "int" and int(v) != v:
+        return False
+    return spec["min"] <= v <= spec["max"]
+
+
+def compile_bundle(name, bundle, diag, sbk_ok=None):
+    """六维风格包 → theme.register 可消费的 {dark:{tokens,tune},light:{tokens,tune}}。
+
+    编译规则（美化决策「风格 bundle」）：
+      · 六维键恰好 BUNDLE_DIMS，未知维 ERROR（写错一个字就整维静默不生效）。
+      · 每维必须【同时】给 dark 与 light：平台强制两套主题都存在（玩家随时可能切），
+        单侧包切过去会「整卡失效」或更糟的「浅色下显示深色配色」（盘点 E.3）。
+      · cohesion 是元信息，只校验不输出——它绝不能产出任何声明。
+      · 维内条目里，命中 TUNE_FIELDS 的进 tune（结构化数字），其余进 tokens（CSS 值）。
+    返回 (compiled|None, 是否成功)。失败一律 None，绝不产出半成品包。
+    """
+    where = "presets[%s]" % name
+    if not PRESET_NAME_RE.match(name or ""):
+        diag.err(where, "风格包名 %r 不合法：需 1..32 个汉字/字母/数字/空格/_/-，"
+                        "且首字符不是空格。包名会进 <option>、进存档、进 select.value，"
+                        "放开引号尖括号只会多一个静默失败面。" % (name,))
+        return None, False
+    if not isinstance(bundle, dict):
+        diag.err(where, "风格包必须是对象（六维：%s）。" % list(BUNDLE_DIMS))
+        return None, False
+
+    unknown = sorted(k for k in bundle if not k.startswith("_") and k not in BUNDLE_DIMS)
+    if unknown:
+        diag.err(where, "未知六维键 %s——合法键恰好 %s。写错的维【整维静默不生效】，"
+                        "实机看不出少了什么，故此处报错而非告警。"
+                 % (unknown, list(BUNDLE_DIMS)))
+        return None, False
+
+    missing_dims = [k for k in BUNDLE_DIMS if k not in bundle]
+    if missing_dims:
+        diag.err(where, "缺少六维键 %s——完整风格包必须恰好声明 %s。即使某一维暂不输出令牌，"
+                        "也要显式给 {\"dark\":{},\"light\":{}}，让双侧设计意图可审计。"
+                 % (missing_dims, list(BUNDLE_DIMS)))
+        return None, False
+
+    out = {"dark": {"tokens": {}, "tune": {}}, "light": {"tokens": {}, "tune": {}}}
+    ok = True
+    for dim in BUNDLE_DIMS:
+        side = bundle[dim]
+        if not isinstance(side, dict):
+            diag.err(where, "%s 必须是对象，形如 {\"dark\":{…},\"light\":{…}}。" % dim)
+            ok = False
             continue
-        decls = []
-        for k, v in tokens.items():
-            if v is None or v == "":
+        missing = [m for m in ("dark", "light") if not isinstance(side.get(m), dict)]
+        if missing:
+            diag.err(where, "%s 缺 %s ——风格包必须【双侧完整】。平台强制两套主题都存在，"
+                            "玩家随时可能切；只给一侧时另一侧回落平台原生令牌，"
+                            "实机现象是「切到浅色整卡失效」（盘点 E.3）。"
+                     % (dim, "/".join(missing)))
+            ok = False
+            continue
+        if dim == "cohesion":
+            # 🚨 返回值必须并进 ok：cohesion 只记 diag 不影响成败的话，
+            #    「六维里塞错一维」会在 ERROR 里报出来却仍产出一个包（半成品注册进运行时）。
+            if not _check_cohesion(where, side, diag):
+                ok = False
+            continue
+        for mode in ("dark", "light"):
+            if not _compile_dim(where, dim, mode, side[mode], out[mode], diag, sbk_ok):
+                ok = False
+
+    if not ok:
+        return None, False
+    for mode in ("dark", "light"):
+        if not out[mode]["tokens"]:
+            diag.err(where, "%s 侧编译后没有任何令牌——注册进去也只是个空包，"
+                            "玩家在面板里挑到它等于什么都没发生。" % mode)
+            return None, False
+    return out, True
+
+
+def _check_cohesion(where, side, diag):
+    """cohesion：只校验、绝不输出 CSS。值必须是标量（对象说明作者误当样式维用了）。
+
+    返回是否全部合法 —— 调用方必须把它并进整体成败，否则会「报了 ERROR 还照样产出包」。
+    """
+    ok = True
+    for mode in ("dark", "light"):
+        for k, v in side[mode].items():
+            if k.startswith("_"):
                 continue
-            v = str(v)
-            # 值里出现 } 或 </style 会截断整个样式块
-            if "}" in v or re.search(r"</style", v, re.I):
-                diag.err("theme", "token %s 的值含 } 或 </style，会截断样式块——已拒绝。" % k)
+            if isinstance(v, (dict, list)):
+                diag.err(where, "cohesion.%s.%s 的值是 %s——cohesion 是【一致性元信息】，"
+                                "只参与生成期校验与文档，不产出任何 CSS 声明。"
+                                "想调样式请写 palette/layout/ui/font/decoration。"
+                         % (mode, k, type(v).__name__))
+                ok = False
+            elif k not in COHESION_KEYS:
+                diag.warn(where, "cohesion.%s 不是已知元信息键（已知：%s）——"
+                                 "已保留但不参与校验，也不会输出 CSS。"
+                          % (k, list(COHESION_KEYS)))
+    return ok
+
+
+def _compile_dim(where, dim, mode, src, dst, diag, sbk_ok):
+    """把一维一侧编译进 dst（{tokens,tune}）。返回是否全部合法。"""
+    ok = True
+    for k, v in src.items():
+        if k.startswith("_"):
+            continue
+        if k in TUNE_FIELDS:
+            if not _ok_tune(k, v):
+                spec = TUNE_FIELDS[k]
+                diag.err(where, "%s.%s.%s = %r 越界或类型错——合法区间 %s..%s（%s）。"
+                                "运行时 okField 会逐字段丢弃越界值，生成期放行等于静默失效。"
+                         % (dim, mode, k, v, spec["min"], spec["max"], spec["kind"]))
+                ok = False
+            else:
+                dst["tune"][k] = v
+            continue
+        if not ok_token(k, sbk_ok):
+            diag.err(where, "%s.%s 里的令牌名 %r 不在白名单内——合法范围：平台 14 个语义名/"
+                            "后缀名、--chat-* 里真实存在的那 14 个、theme.js SBK_OK 列出的 "
+                            "--sbk-* 私有名、以及页面级属性 %s。平台没定义的变量写了不报错"
+                            "也不生效，是典型静默失效。" % (dim, mode, k, list(_PAGE_KEYS)))
+            ok = False
+            continue
+        if v is None or v == "":
+            diag.err(where, "%s.%s.%s 是空值——空令牌不会产生任何效果，"
+                            "更可能是配置写漏了。" % (dim, mode, k))
+            ok = False
+            continue
+        sv = str(v)
+        if THEME_DANGER_RE.search(sv):
+            diag.err(where, "%s.%s.%s 的值含危险片段（} { ; </style url( @import expression( "
+                            "javascript:）——已拒绝。前两类会截断整个样式块；url(/@import 是"
+                            "外部资源（§2 CSP 封死，且风格包一律零外部依赖）；`;`/`{` 让单个"
+                            "令牌值凭空多写声明，等于绕过令牌白名单。" % (dim, mode, k))
+            ok = False
+            continue
+        dst["tokens"][k] = sv
+    return ok
+
+
+def check_bundle_contrast(name, compiled, diag):
+    """生成期对比度校验（WCAG 2.1）。只对【可解析 hex】做严格检查，不可解析一律 ERROR。
+
+    🚨 「不可解析就跳过」是假通过：作者把 text 写成 var(--x) 或 rgba(…)，检查静默放行，
+       实机可能是白底白字。故 PALETTE_CORE 五键要求逐侧显式 hex —— 有基准才算得出比值。
+    阈值（WCAG 2.1）：
+      · 正文 text 对 bg / surface ≥ 4.5:1（1.4.3 AA 普通文本）
+      · accent 作前景（链接/强调文字/按钮底色）对 bg / surface ≥ 3:1（1.4.11 非文本对比）
+      · border 作控件边界/焦点环这类关键图形，对 bg ≥ 3:1（1.4.11）
+      · onAccent 对 accent ≥ 4.5:1（按钮上的字是正文级可读性），仅在两者都给了 hex 时查
+    """
+    ok = True
+    where = "presets[%s]" % name
+    for mode in ("dark", "light"):
+        tok = compiled[mode]["tokens"]
+        core = {}
+        for k in PALETTE_CORE:
+            raw = tok.get(k)
+            if raw is None:
+                diag.err(where, "%s 侧缺 palette.%s ——对比度是【可证明】而非「大概能读」，"
+                                "缺基准色就算不出比值。palette 必须逐侧显式给全 %s。"
+                         % (mode, k, list(PALETTE_CORE)))
+                ok = False
                 continue
-            decls.append("%s:%s;" % (_theme_var(k), v))
-        if decls:
-            out.append('[data-chat="root"][data-theme="%s"]{%s}' % (mode, "".join(decls)))
-    return "\n".join(out)
+            h = norm_hex(raw)
+            if h is None:
+                diag.err(where, "%s 侧 palette.%s = %r 不是可解析的 #RGB/#RRGGBB——"
+                                "无法执行对比度检查。这里【不能】跳过：静默放行的后果"
+                                "可能是实机白底白字。核心五键请写 hex 字面量。"
+                         % (mode, k, raw))
+                ok = False
+                continue
+            core[k] = h
+        if len(core) < len(PALETTE_CORE):
+            continue
+
+        pairs = [
+            ("text", "bg", CONTRAST_TEXT, "正文对页面底"),
+            ("text", "surface", CONTRAST_TEXT, "正文对卡片底"),
+            ("accent", "bg", CONTRAST_GRAPHIC, "强调色作前景对页面底"),
+            ("accent", "surface", CONTRAST_GRAPHIC, "强调色作前景对卡片底"),
+            ("border", "bg", CONTRAST_GRAPHIC, "控件边界/焦点环对页面底"),
+        ]
+        for fg, bg, need, label in pairs:
+            r = contrast(core[fg], core[bg])
+            if r < need - 0.005:      # 容差只吸收浮点噪声，不放宽阈值
+                diag.err(where, "%s 侧对比度不足：%s（%s %s vs %s %s）实际 %.2f:1 < %.1f:1。"
+                                "WCAG 2.1 %s。修法：压暗/提亮其中一方。"
+                         % (mode, label, fg, core[fg], bg, core[bg], r, need,
+                            "1.4.3 AA 普通文本" if need == CONTRAST_TEXT else "1.4.11 非文本对比"))
+                ok = False
+
+        on_accent = norm_hex(tok.get("onAccent") or tok.get("--sbk-on-accent") or "")
+        if on_accent:
+            r = contrast(on_accent, core["accent"])
+            if r < CONTRAST_TEXT - 0.005:
+                diag.err(where, "%s 侧对比度不足：accent 上的前景色（onAccent %s vs accent %s）"
+                                "实际 %.2f:1 < %.1f:1。按钮上的字是正文级可读性，按 1.4.3 AA 判。"
+                         % (mode, on_accent, core["accent"], r, CONTRAST_TEXT))
+                ok = False
+    return ok
+
+
+def load_presets(raw, base_dir, diag):
+    """config.presets → {包名: 六维源包}。
+
+    两种写法（选最简单可维护的一组，不再多造语法）：
+      "presets": ["presets/素雅阅读.json", …]   相对 config 所在目录的 JSON 路径数组
+      "presets": {"包名": {六维…}, …}            内联对象（小改动/单元测试用）
+    路径指向的 JSON 可以是：
+      · 单个包：{"name":"素雅阅读","palette":{…},…}（无 name 时取文件名）
+      · 包映射：{"素雅阅读":{六维…}, "密集状态":{…}}
+    """
+    out = {}
+    if raw is None:
+        return out
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if k.startswith("_"):
+                continue
+            if k in out:
+                diag.err("presets", "风格包名 %r 重复。" % k)
+            out[k] = v
+        return out
+    if not isinstance(raw, list):
+        diag.err("config", "presets 必须是路径数组或包映射对象，当前 %s。" % type(raw).__name__)
+        return out
+
+    for i, item in enumerate(raw):
+        if isinstance(item, dict):
+            # 数组里直接内联一个包：必须自带 name（否则没有键可挂）
+            nm = item.get("name")
+            if not isinstance(nm, str) or not nm:
+                diag.err("presets[%d]" % i, "内联风格包必须带 name 字段。")
+                continue
+            out[nm] = {k: v for k, v in item.items() if k != "name"}
+            continue
+        if not isinstance(item, str) or not item.strip():
+            diag.err("presets[%d]" % i, "每项必须是 JSON 路径字符串或内联包对象。")
+            continue
+        p = Path(item)
+        if not p.is_absolute():
+            p = Path(base_dir) / p
+        if not p.is_file():
+            diag.err("presets[%d]" % i, "风格包文件不存在：%s" % p)
+            continue
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            diag.err("presets[%d]" % i, "%s 不是合法 JSON：%s" % (p, exc))
+            continue
+        if not isinstance(doc, dict):
+            diag.err("presets[%d]" % i, "%s 顶层必须是对象。" % p)
+            continue
+        # 判形：含任一六维键 → 单个包；否则视为「包名 → 包」映射
+        if any(k in doc for k in BUNDLE_DIMS):
+            nm = doc.get("name")
+            if not isinstance(nm, str) or not nm:
+                nm = p.stem
+            out[nm] = {k: v for k, v in doc.items() if k != "name"}
+        else:
+            for k, v in doc.items():
+                if k.startswith("_"):
+                    continue
+                if k in out:
+                    diag.err("presets", "风格包名 %r 重复（%s）。" % (k, p))
+                out[k] = v
+    return out
+
+
+def build_presets(cfg, diag):
+    """编译 + 校验全部风格包 → {包名: {dark:{tokens,tune},light:{…}}}。
+
+    只编译【本卡配置里列出的】包。绝不把整个 style-db 打包进产物：
+    每个包都要进 boot 载荷的 replaceString，全量搬运会直接顶到 §6 的长度上限，
+    而玩家一次只用得上一套。
+    """
+    src = cfg.get("presetSources") or {}
+    if not src:
+        return {}
+    sbk_ok = _sbk_whitelist_from_theme_js(cfg["assetDir"], diag)
+    out = {}
+    for name in sorted(src):
+        compiled, ok = compile_bundle(name, src[name], diag, sbk_ok)
+        if not ok:
+            continue
+        if not check_bundle_contrast(name, compiled, diag):
+            continue
+        out[name] = compiled
+    return out
 
 
 # theme.js 的语义名 → 平台 --chat-* 后缀（与 theme.js MAP 保持一致）
@@ -753,6 +1220,113 @@ _THEME_MAP = {
 _PLATFORM_VARS = {"bg", "surface", "text", "text-muted", "border", "accent",
                   "bubble-user-bg", "bubble-ai-bg", "bubble-text", "share-pick-bg",
                   "input-bg", "input-text", "shortcut-text", "more-item-bg"}
+
+_AUTHOR_COLOR_VARS = {
+    "--chat-bg": "bg", "--chat-surface": "surface", "--chat-text": "text",
+    "--chat-accent": "accent", "--chat-border": "border", "--sbk-on-accent": "onAccent",
+}
+
+
+def _check_author_contrast(mode, tokens, diag):
+    """对作者基线实际提供的核心色做可证明的局部对比度检查。"""
+    where = "config.theme.%s" % mode
+    colors = {}
+    for k, v in tokens.items():
+        final = theme_var(k)
+        name = _AUTHOR_COLOR_VARS.get(final)
+        if not name:
+            continue
+        h = norm_hex(v)
+        if h is None:
+            diag.err(where, "%s = %r 不是可解析的 #RGB/#RRGGBB，无法验证作者基线对比度。"
+                            "核心颜色请使用 hex 字面量；其它非颜色 token 仍可使用合法 CSS 值。"
+                     % (k, v))
+            continue
+        colors[name] = h
+    pairs = [
+        ("text", "bg", CONTRAST_TEXT, "正文对页面底"),
+        ("text", "surface", CONTRAST_TEXT, "正文对卡片底"),
+        ("accent", "bg", CONTRAST_GRAPHIC, "强调色对页面底"),
+        ("accent", "surface", CONTRAST_GRAPHIC, "强调色对卡片底"),
+        ("border", "bg", CONTRAST_GRAPHIC, "边界对页面底"),
+        ("onAccent", "accent", CONTRAST_TEXT, "强调底上的正文"),
+    ]
+    for fg, bg, need, label in pairs:
+        if fg not in colors or bg not in colors:
+            continue
+        ratio = contrast(colors[fg], colors[bg])
+        if ratio < need - 0.005:
+            diag.err(where, "对比度不足：%s（%s %s vs %s %s）实际 %.2f:1 < %.1f:1。"
+                     % (label, fg, colors[fg], bg, colors[bg], ratio, need))
+
+
+def normalize_author_theme(raw, asset_dir, diag):
+    """校验并规范化 config.theme 作者基线；局部覆写合法，坏字段构建期报错。"""
+    if raw is None or raw == {}:
+        return {}
+    if not isinstance(raw, dict):
+        diag.err("config.theme", "theme 必须是对象。")
+        return {}
+
+    explicit = "dark" in raw or "light" in raw
+    if explicit:
+        missing = [m for m in ("dark", "light") if not isinstance(raw.get(m), dict)]
+        extra = [k for k in raw if not k.startswith("_") and k not in ("dark", "light")]
+        if missing:
+            diag.err("config.theme", "显式分侧写法必须同时给 dark/light 对象，当前缺 %s。" % missing)
+        if extra:
+            diag.err("config.theme", "分侧写法含未知顶层键 %s；token 应放进 dark/light。" % extra)
+        if missing or extra:
+            return {}
+        sides = {"dark": raw["dark"], "light": raw["light"]}
+    else:
+        sides = {"dark": raw, "light": raw}       # 旧扁平写法：两侧同值
+
+    sbk_ok = _sbk_whitelist_from_theme_js(asset_dir, diag)
+    out = {"dark": {"tokens": {}, "tune": {}}, "light": {"tokens": {}, "tune": {}}}
+    for mode in ("dark", "light"):
+        side = sides[mode]
+        structured = "tokens" in side or "tune" in side
+        if structured:
+            extra = [k for k in side if not k.startswith("_") and k not in ("tokens", "tune")]
+            if extra:
+                diag.err("config.theme.%s" % mode,
+                         "结构化写法含未知键 %s；只允许 tokens/tune。" % extra)
+            tok = side.get("tokens", {})
+            tune = side.get("tune", {})
+            if not isinstance(tok, dict):
+                diag.err("config.theme.%s.tokens" % mode, "必须是对象。")
+                tok = {}
+            if not isinstance(tune, dict):
+                diag.err("config.theme.%s.tune" % mode, "必须是对象。")
+                tune = {}
+        else:
+            tok = {k: v for k, v in side.items() if not k.startswith("_")}
+            tune = {}
+
+        for k, v in tok.items():
+            where = "config.theme.%s.%s" % (mode, k)
+            if not ok_token(k, sbk_ok):
+                diag.err(where, "令牌名不在平台 14 个或 theme.js SBK_OK 白名单内。")
+                continue
+            if v is None or v == "":
+                diag.err(where, "主题令牌不能为空。")
+                continue
+            if isinstance(v, (dict, list)):
+                diag.err(where, "主题令牌值必须是 CSS 标量，不能是 %s。" % type(v).__name__)
+                continue
+            if THEME_DANGER_RE.search(str(v)):
+                diag.err(where, "主题令牌值含危险片段（样式截断、多声明或外部资源）。")
+                continue
+            out[mode]["tokens"][k] = v
+        for k, v in tune.items():
+            if not _ok_tune(k, v):
+                diag.err("config.theme.%s.tune.%s" % (mode, k),
+                         "不是合法可微调项或值越界。")
+                continue
+            out[mode]["tune"][k] = v
+        _check_author_contrast(mode, out[mode]["tokens"], diag)
+    return out
 
 
 def _theme_var(k):
@@ -771,6 +1345,31 @@ def hud_host_html(host_id):
     return '<div id="%s" class="sbk-host"></div>' % host_id
 
 
+def theme_envelope(cfg):
+    """boot 载荷的 theme 字段 = 主题信封 {v:2, base, presets, preset}。
+
+    🚨 为什么是信封而不是三个顶层键：core.js 的 boot 只有
+         if (o.theme) SBK.theme.apply(o.theme)
+       这一条主题接线，而 WP-2 不改 core.js（另包所有）。故作者基线、风格包、默认包名
+       只能搭 o.theme 这趟车进来，由 theme.js 的 apply() 按 v:2 判形拆开。
+       信封自带 v:2 与 base/presets 判别键，与 1.0 的 {dark,light} / 扁平写法不会混淆。
+
+    🚨 【总是】返回非空对象（至少 {v:2,base:null,presets:{},preset:''}）：
+       这正是「theme 初始化与 chrome 解耦」的落点 —— o.theme 恒为真值，于是无论
+       modes.chrome 真假，boot 都会走到 apply() 并把主题层 start 一次。
+       1.0 只有 modes.chrome=true 时 ui.chrome 才调 theme.start，关掉 chrome 就
+       完全没人读偏好存档：玩家上次存的字号/配色开局不生效。
+    """
+    return {
+        "v": 2,
+        # 制作期 config.theme（旧配置照旧可用）→ 运行时的【作者基线】，不再是永久覆写
+        "base": cfg.get("theme") or None,
+        # 只下发本卡配置的包，绝不搬整个 style-db（会顶到 §6 长度上限，且玩家一次只用一套）
+        "presets": cfg.get("presets") or {},
+        "preset": cfg.get("preset") or "",
+    }
+
+
 def boot_script(cfg, diag):
     """启动调用。事实卡 §4.1 硬约束 17：任何 DOM 写入必须在事件回调内
     （作者脚本早于 DOM 执行，顶层 getElementById 返回 null）。
@@ -784,7 +1383,7 @@ def boot_script(cfg, diag):
         # 空数组也无害，且让实机 payload 形状稳定，便于对着 sbk.json 自查。
         "pinnedFields": cfg.get("pinnedFields") or [],
         "protocolTag": cfg["protocolTag"],
-        "theme": cfg.get("theme") or None,
+        "theme": theme_envelope(cfg),
     }
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     # 内联脚本里出现 </script 会【真的】提前闭合 <script>（这与 §6.10 的 JSON 层转义是两件事）。
@@ -934,6 +1533,76 @@ def _check_pins(cfg, modes, pins, diag, aliased=()):
                      % (p, keys))
 
 
+# hostId 是会派生 `-pin` / `-chr` 的配置基名。最终 DOM id 上限 64，后缀各占 4 字符，
+# 因此配置基名总长最多 60；字符集仍取 HTML id、CSS 选择器与 JS 字符串无需转义的交集。
+HOST_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,59}$")
+
+
+def check_host_id(host_id, diag):
+    """hostId 字符集校验。不合法时报错并回落默认，绝不把脏值拼进 HTML/CSS。
+
+    🚨 它同时出现在两个注入面：
+      1) `<div id="…">`（hud_host_html）—— 含引号/尖括号可以闭合属性甚至开新标签；
+      2) core.js / ui.js 的 `#…` 与属性选择器 —— 含空格或 `]` 会让选择器整条失效
+         （静默：宿主找不到，功能栏什么都不出现）。
+    """
+    if not isinstance(host_id, str) or not HOST_ID_RE.match(host_id):
+        diag.err("config", "hostId %r 不合法：需匹配 %s（首字符为字母，其后字母/数字/_/-，"
+                           "配置基名最长 60；基座会追加 -pin/-chr，使最终 DOM id 仍不超过 64）。"
+                           "它会同时进入 <div id=…> 与宿主查找逻辑——含引号尖括号可闭合属性，"
+                           "含空格或 ] 会让选择器失效。已回落默认 \"sbk-hud\"。"
+                 % (host_id, HOST_ID_RE.pattern))
+        return "sbk-hud"
+    return host_id
+
+
+# hud.js 真实支持的 schema type。九个数据类型 + 版面项 section（1.0 十种），
+# 本轮按美化决策「控件范围」补三种纯展示项：time / summary / turn。
+# 🚨 未知 type 在 hud.js 里走 `TYPES[type] || TYPES.text` 静默回落成 text ——
+#    多实体表渲染不出来却不报错，极难排查，故生成期直接 ERROR。
+SCHEMA_TYPES = ("bar", "num", "text", "tags", "entities", "path", "level", "stats",
+                "kvlist", "section", "time", "summary", "turn")
+
+
+def normalize_schema(schema, diag):
+    """schema 校验 + 归一化。
+
+    · 未知 type → ERROR（静默回落 text，是本轮要消灭的一类静默失效）
+    · schema.persist → WARN 并【删除】：审计报告 3 认定它是假契约（协议说明声称走
+      SBK.store，运行时既没有加载也没有保存，更没有作用域定义）。与 runtime 裁决一致：
+      删掉这个键，显式调 SBK.store 的路径不受影响。
+    """
+    if not isinstance(schema, dict):
+        diag.err("config", "schema 必须是对象。")
+        return {}
+    out = {k: v for k, v in schema.items()}
+    if "persist" in out:
+        diag.warn("schema", "schema.persist 是【假契约】，已丢弃（不会进 boot 载荷）。"
+                            "协议说明曾声称它走 SBK.store，但运行时既没有加载也没有保存，"
+                            "更没有定义作用域——留着只会让人以为存档已生效。"
+                            "确实要持久化请显式调 SBK.store.save()/load()。")
+        out.pop("persist", None)
+    fields = out.get("fields")
+    if fields is None:
+        return out
+    if not isinstance(fields, list):
+        diag.err("schema", "schema.fields 必须是数组。")
+        return out
+    for i, f in enumerate(fields):
+        if not isinstance(f, dict):
+            diag.err("schema", "fields[%d] 必须是对象。" % i)
+            continue
+        t = f.get("type")
+        if t is None:
+            continue
+        if t not in SCHEMA_TYPES:
+            diag.err("schema", "fields[%d] 的 type %r 不受支持——hud.js 走 "
+                               "`TYPES[type] || TYPES.text` 会【静默回落成 text】，"
+                               "该项看着像渲染了其实结构全丢。合法 type：%s。"
+                     % (i, t, list(SCHEMA_TYPES)))
+    return out
+
+
 def normalize_config(raw, config_path, diag):
     if not isinstance(raw, dict):
         raise BuildError("配置顶层必须是 JSON 对象。")
@@ -980,24 +1649,26 @@ def normalize_config(raw, config_path, diag):
         "statusbar": _need_str(cfg, "statusbar", diag),
         "personality": cfg.get("personality") or "",
         "assetDir": adir,
-        "theme": cfg.get("theme") or {},
+        # 作者基线走与 theme.js 一致的 token/tune/危险值校验，再进 boot 信封。
+        "theme": normalize_author_theme(cfg.get("theme") or {}, adir, diag),
+        # 六维风格包源（路径数组或内联映射）→ 稍后由 build_presets 编译进 cfg["presets"]
+        "presetSources": load_presets(cfg.get("presets"), base, diag),
+        "preset": cfg.get("preset") or "",
         "modes": modes,
         "pinnedFields": pins,
-        "schema": cfg.get("schema") or {},
+        "schema": normalize_schema(cfg.get("schema") or {}, diag),
         "protocolTag": cfg.get("protocolTag") or "状态",
-        "hostId": cfg.get("hostId") or "sbk-hud",
+        "hostId": check_host_id(cfg.get("hostId") or "sbk-hud", diag),
         "markers": markers,
         "sceneRules": scenes,
         "idBase": cfg.get("idBase", -1),
         "splitThreshold": cfg.get("splitThreshold", DEFAULT_SPLIT_THRESHOLD),
     }
     th = out["splitThreshold"]
-    if not isinstance(th, int) or th < 1000 or th > HARD["content"]:
-        diag.err("config", "splitThreshold 必须是 1000..%d 的整数，当前 %r。" % (HARD["content"], th))
+    if not isinstance(th, int) or th < 1000 or th > MAX_SOURCE_RULE:
+        diag.err("config", "splitThreshold 必须是 1000..%d 的整数（固定安全上限不可调高），当前 %r。"
+                 % (MAX_SOURCE_RULE, th))
         out["splitThreshold"] = DEFAULT_SPLIT_THRESHOLD
-    elif th > UI_SOFT["content"]:
-        diag.warn("config", "splitThreshold %d > 编辑器显示上限 %d——拆出的规则仍会在编辑器里被截断（§6）。"
-                  % (th, UI_SOFT["content"]))
     if not isinstance(out["personality"], str):
         diag.err("config", "personality 必须是字符串。")
         out["personality"] = ""
@@ -1040,29 +1711,28 @@ def _rule(rid, name, marker, body):
 # 两样都缺时反而无害（气泡面板干脆没开），所以必须做【双向】一致性校验。
 
 HYDRATE_CLASS_FALLBACK = "sbk-snap--raw"
-# hud.js 里 hydrate 的选择器写法：SBK.dom.all(root, '.sbk-snap--raw')
+# hud-render.js（新拆分）或 hud.js（旧单文件兼容）里的升级选择器。
 _HYDRATE_SELECTOR_RE = re.compile(
     r"""dom\.all\(\s*root\s*,\s*['"]\.([A-Za-z0-9_-]+)['"]""")
 
 
 def hydrate_class(asset_dir, diag=None):
-    """从 hud.js 的 hydrate() 里【读出】升级选择器的类名，不在生成器里写死一份副本。
-
-    真值只有一处：hud.js 的 `SBK.dom.all(root, '.sbk-snap--raw')`。若哪天 WP-2 改了
-    这个类名，生成器的校验会跟着改，不会漂移成「校验通过但实机仍不升级」。
-    读不到（文件缺失／写法变了）时回落到常量并告警——此时校验仍有价值，只是可能失准。
-    """
-    p = Path(asset_dir) / "hud.js"
-    if p.is_file():
+    """从 HUD 渲染模块读出升级选择器类名，不在生成器里复制真值。"""
+    tried = []
+    for name in ("hud-render.js", "hud.js"):
+        p = Path(asset_dir) / name
+        tried.append(str(p))
+        if not p.is_file():
+            continue
         m = _HYDRATE_SELECTOR_RE.search(p.read_text(encoding="utf-8"))
         if m:
             return m.group(1), True
     if diag is not None:
         diag.warn("双模一致性",
-                  "没能从 %s 的 hydrate() 里读出升级选择器（期望形如 "
-                  "SBK.dom.all(root, '.%s')）——本次按常量 %r 校验，"
-                  "若 hud.js 已改类名请同步 _HYDRATE_SELECTOR_RE。"
-                  % (p, HYDRATE_CLASS_FALLBACK, HYDRATE_CLASS_FALLBACK))
+                  "没能从 HUD 渲染模块 %s 读出升级选择器（期望形如 "
+                  "SBK.dom.all(root, '.%s')）——本次按常量 %r 校验；若类名已改，"
+                  "请同步 _HYDRATE_SELECTOR_RE。"
+                  % (" / ".join(tried), HYDRATE_CLASS_FALLBACK, HYDRATE_CLASS_FALLBACK))
     return HYDRATE_CLASS_FALLBACK, False
 
 
@@ -1221,19 +1891,29 @@ def build(cfg, diag, strip=True):
     rules, assets_report = [], {}
     rid = cfg["idBase"]
 
-    # ---- 1. sbk-css：base.css + theme 覆盖 ----
+    # ---- 1. sbk-css：【只装】base.css 骨架 ----
+    # 🚨 2.1 单一运行时所有权（审计报告高风险 1）：这里【不再】拼 config.theme 的永久覆写。
+    #    1.0 把作者主题编译进这条静态规则，导致 prefs.enabled(false) 只清得掉 theme.js 的
+    #    动态 <style>，静态覆写还在 → 「关闭美化＝完全跟随平台」不成立。
+    #    作者基线现在走 boot 信封（theme_envelope）交给 theme.js，与 preset/overrides
+    #    合成同一个 #sbk-theme-vars。整卡的主题【只有一个写入者】。
     css_src, loaded, _ = load_assets(adir, ("base.css",), diag, strip)
     assets_report["sbk-css"] = loaded
-    override = theme_override_css(cfg["theme"], diag)
-    css_body = "\n".join([x for x in (css_src, override) if x])
-    rules.append(_rule(rid, "sbk-css", mk["css"], "<style>\n%s\n</style>" % css_body))
+    rules.append(_rule(rid, "sbk-css", mk["css"], "<style>\n%s\n</style>" % css_src))
     rid -= 1
+
+    # ---- 1b. 风格包编译（进 boot 信封，不进 CSS）----
+    cfg["presets"] = build_presets(cfg, diag)
+    if cfg.get("preset") and cfg["preset"] not in cfg["presets"]:
+        diag.err("config", "preset 默认包名 %r 不在已注册的风格包里（现有：%s）——"
+                           "theme.js 的 apply() 只接受已注册的包名，实机会静默用「默认」"
+                           "（即只有 author base，风格包等于没生效）。"
+                 % (cfg["preset"], sorted(cfg["presets"])))
 
     threshold = cfg["splitThreshold"]
     layouts = []
 
-    # ---- 2. sbk-core：core.js + theme.js（超阈值自动拆条）----
-    # 也纳入拆条：目前剥注释约 14.6K 尚在阈值内，但 WP-1 再加代码就会爆。
+    # ---- 2. sbk-core：内核/存储/编排/主题/设置，按完整模块边界自动装箱 ----
     _, loaded, _ = load_assets(adir, CORE_ASSETS, diag, strip)
     assets_report["sbk-core"] = loaded
     core_rules, rid, core_layout = emit_script_rules(
@@ -1241,8 +1921,7 @@ def build(cfg, diag, strip=True):
     rules.extend(core_rules)
     layouts.extend(core_layout)
 
-    # ---- 3. sbk-ui：protocol.js + hud.js + ui.js（WP-2/WP-3，缺失跳过并告警）----
-    # 顺序必须是 protocol → hud → ui：hud/ui 往 SBK.ui 合并挂载，且都依赖 core 已定义。
+    # ---- 3. sbk-ui：协议/HUD 渲染/UI kit/panel/stage，顺序不可变 ----
     _, loaded, missing = load_assets(adir, UI_ASSETS, diag, strip)
     assets_report["sbk-ui"] = loaded
     if loaded:
@@ -1333,6 +2012,10 @@ def validate_rules(rules, cfg, diag):
         seen_names.add(r["scriptName"])
 
         check_lengths(r, diag, where)
+        if len(r["replaceString"]) > MAX_SOURCE_RULE:
+            diag.err(where, "replaceString %d 字符 > SBK 交付安全上限 %d。所有最终规则都必须留足"
+                            "编辑器保存余量；资源脚本请拆完整 IIFE，boot/场景规则请拆配置或规则。"
+                     % (len(r["replaceString"]), MAX_SOURCE_RULE))
         check_slash_form(r, diag, where)
         check_module_syntax(r["replaceString"], diag, where)
         check_csp(r["replaceString"], diag, where)
@@ -1359,8 +2042,8 @@ def validate_top_level(doc, diag):
     if keys != want:
         diag.err("top", "顶层必须恰好 6 键 %s，当前 %s。" % (sorted(want), sorted(keys)))
     if len(doc["beginning"]) > HARD["beginning"]:
-        diag.err("top", "beginning %d 字符 > 4000（§6 运行时真值，创卡页 UI 同样显示 4000）——"
-                 "超出被静默截断。" % len(doc["beginning"]))
+        diag.err("top", "beginning %d 字符 > 4000（§6；源码归一常量与 UI 计数器一致）。"
+                 % len(doc["beginning"]))
     if len(doc["statusbar"]) > HARD["statusbar"]:
         diag.err("top", "statusbar %d 字符 > 200（§6）——超出被静默截断。" % len(doc["statusbar"]))
     # imageUrl 不是 6 键之一，但配置里若出现 URL 字段仍按 2048 硬限（§6）
@@ -1461,8 +2144,22 @@ def render_report(doc, metrics, assets_report, diag, verbose=False):
         L.append("  x " + e)
     L.append("")
     L.append("复核建议：python validate.py <out.json> --type regex --platform mmdsandbox")
-    L.append("（该校验器部分长度上限取创卡页 UI 值，与事实卡 §6 运行时真值不同，属已知冲突）")
+    L.append("（长度门禁：name/regex 按 UI 显示值保守维护，content 按已确认编辑器 20000；"
+             "所有生成脚本另受不可调高的 18000 最终门禁）")
     return "\n".join(L)
+
+
+def check_split_base_markers(cfg, layouts, diag):
+    """多箱时原始基名 marker 不再对应任何规则；残留在可见字段会原样泄漏。"""
+    sources = [cfg.get("statusbar", ""), cfg.get("beginning", ""), cfg.get("personality", "")]
+    sources.extend(sc.get("replaceString", "") for sc in cfg.get("sceneRules", []) if isinstance(sc, dict))
+    for group, base in (("sbk-core", cfg["markers"]["core"]), ("sbk-ui", cfg["markers"]["ui"])):
+        boxes = [it for it in layouts if it["scriptName"].startswith(group + "-")]
+        if len(boxes) < 2 or not any(base in text for text in sources):
+            continue
+        diag.warn(group, "资源已拆成 %d 条，原始基名 marker %r 不再对应任何规则，却仍残留在"
+                         "statusbar/beginning/personality/场景替换内容中，会原样显示。删除它；脚本/样式"
+                         "模块装卡即抽出，不需要把生成后的 -N marker 写进正文。" % (len(boxes), base))
 
 
 # ---------------------------------------------------------------- 编排
@@ -1481,6 +2178,7 @@ def build_document(config_path, strip=True, diag=None):
     cfg = normalize_config(raw, p, diag)
     rules, assets_report, layouts = build(cfg, diag, strip=strip)
     assets_report["__layout__"] = layouts
+    check_split_base_markers(cfg, layouts, diag)
     doc = assemble(cfg, rules)
     metrics = validate_rules(rules, cfg, diag)
     validate_top_level(doc, diag)
@@ -1503,8 +2201,8 @@ def main(argv=None):
         description="SBK 生成器：声明式 sbk.config.json → 可导入 MMD 创卡页的 6 键正则 JSON。",
         epilog="产出可再用 skill 校验器复核："
                "python validate.py <out.json> --type regex --platform mmdsandbox 。"
-               "注意该校验器的 beginning/name/regex/content 上限取创卡页 UI 值，"
-               "与事实卡 §6 运行时真值（4000/200/4096/100000）不同，属已知冲突，本脚本双轨处理。",
+               "常规交付按 UI 显示值 name<=20 / regex<=1000 与已确认的 content<=20000 维护；"
+               "生成脚本另受不可调高的 18000 最终门禁。",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("config", help="sbk.config.json 路径")
     ap.add_argument("--out", required=True, help="输出 JSON 路径")

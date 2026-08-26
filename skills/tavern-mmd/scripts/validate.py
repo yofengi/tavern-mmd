@@ -54,18 +54,15 @@ SANDBOX_FORBIDDEN_TOP_LEVEL_KEYS = (
 )
 # 长度上限（mmd-sandbox.md §8 + 基座事实卡 §6）。
 #
-# 【双阈值设计，勿「修正」】沙盒应用源码里的草稿校验常量是逐字真值（事实卡 §6）：
+# 【双阈值设计，勿「修正」】沙盒应用源码里可见的归一常量（事实卡 §6）：
 #   var Us={beginning:4e3,statusbar:200,imageUrl:2048,name:200,regex:4096,
 #           content:1e5,regexList:130};
-#   function Ws(e,t){...e.length>t?e.slice(0,t)...}   // 静默截断，不报错
-# 但该常量位于**创卡预览草稿校验路径**，聊天页吃服务端数据是否同限**未能确证**
-# （事实卡 §6 末尾的未确证标注）。而创卡页编辑器 UI 显示的计数器又更严
-# （name 20 / regex 1000 / content 20000）。
-# 于是分级：
-#   *_HARD = 源码真值 → 超出即 ERROR（宽，安全：确定会被平台静默截断）
-#   *_SOFT = 编辑器 UI 值 → 超出即 WARN（严，实用：提醒作者一进编辑器就被截断）
-# 唯一例外是 beginning：官方 validate.mjs 写 10240，**比真值 4000 松**，
-# 会放行超长开场白后被平台静默截断 → 直接改成 4000，单阈值 ERROR。
+#   function Ws(e,t){...e.length>t?e.slice(0,t)...}   // 该源码路径会静默裁切
+# 创卡页 UI 显示值更严（name 20 / regex 1000 / content 20000）。证据分级：
+#   name 20/200 与 regex 1000/4096 是否构成 editor/import 双路径、超限如何失败仍未确证；
+#   校验器在源码归一观察值外继续报 ERROR，是防损坏的保守交付门禁，不声称真实站必然如何失败；
+#   content 例外：编辑器 20000 静默拒绝整次保存、导入 100000 已实测确认；
+#   beginning=4000 与 UI 计数器一致，官方 validate.mjs 的 10240 会放行坏产物，故按 4000 ERROR。
 SANDBOX_MAX_STATUSBAR = 200
 SANDBOX_MAX_BEGINNING = 4000
 SANDBOX_MAX_PERSONALITY = 10000
@@ -98,8 +95,15 @@ SANDBOX_SDK_EVENTS = frozenset((
 # sdk.role.get() / sdk.user.get() 的返回字段（mmd-sandbox.md §4.7）
 SANDBOX_ROLE_FIELDS = frozenset(("name", "avatarUrl"))
 SANDBOX_USER_FIELDS = frozenset(("nickname", "avatarUrl"))
-# contract.json 里只有 on，没有 once/off；ready 会补发给晚订阅者，不需要 once。
+# contract.json 里只有 on，没有 once/off（实测两者均 undefined）。
+# 🚨 补发规则与手册相反：有 late replay 的是 message:mount / message:done，**ready 没有**
+# （事实卡 §4.1）。订阅不可撤销，唯一退订是内部 Ac()，它会清掉所有脚本的全部订阅。
 SANDBOX_SDK_MISSING_CAPABILITIES = ("once", "off")
+# 规则输出预算（事实卡 §5.2，手册与三份包分析都未提，对状态栏致命）：
+#   let a=Math.max(262144, e.length*4)
+# 按条规则累计所有匹配的输出，超预算 → **整条规则回滚**，页面上完全不生效只留告警。
+SANDBOX_OUTPUT_BUDGET_FLOOR = 262144
+SANDBOX_OUTPUT_BUDGET_INPUT_MULTIPLIER = 4
 
 # 命名空间首段集合，供「sdk.input」这类只写首段的引用放行。
 SANDBOX_SDK_NAMESPACES = frozenset(
@@ -358,8 +362,10 @@ def check_sandbox_sdk_names(s, where):
             if first in seen:
                 continue
             seen.add(first)
-            err("%s 用了 sdk.%s——contract.json 里只有 sdk.on，没有 %s。"
-                "不需要 once：ready 这类只发一次的事件会**补发给后来的订阅者**，晚订阅不会漏。"
+            err("%s 用了 sdk.%s——contract.json 里只有 sdk.on，没有 %s（实测两者均为 undefined）。"
+                "🚨 注意补发规则与手册相反：**有 late replay 的是 message:mount 与 "
+                "message:done，ready 没有**（事实卡 §4.1 实测）。冷启动首屏请挂 mount/done，"
+                "挂 ready 会晚一整轮；订阅不可撤销，请自带「已初始化」哨兵做单例幂等。"
                 % (where, first, first))
             continue
         dotted = "%s.%s" % (first, second) if second else first
@@ -499,6 +505,10 @@ def check_sandbox_content_warnings(s, where):
     if mount and re.search(r"sdk\.on\s*\(", s[mount.end():mount.end() + 1200]):
         warn("%s 在 sdk.on('message:mount') 之后不远处又出现 sdk.on(——"
              "订阅要写在**脚本体**里，写进 mount 回调会每挂一条气泡就重复订阅一次。" % where)
+    if re.search(r"sdk\.on\s*\(\s*['\"]ready['\"]", s):
+        warn("%s 订阅 ready——ready **没有 late replay**，且冷启动排在 message:new → "
+             "message:mount → message:done 之后。它只适合时序/诊断信号；首屏渲染请订 "
+             "message:mount 或 message:done。" % where)
     # message:done + message.send 同条 = 自问自答死循环
     if "message:done" in s and re.search(r"sdk\.message\.send\s*\(", s):
         warn("%s 同一条规则里既有 message:done 又有 sdk.message.send(——"
@@ -510,6 +520,113 @@ def check_sandbox_content_warnings(s, where):
              "空 AI 气泡刚挂上时那里是平台占位「消息生成中」，**不是模型回的字**。"
              "跟字用 message:stream 的 msg.content，收尾用 message:done 的 msg.content；"
              "content 空时也不要退回去读 DOM。" % where)
+
+
+# SAFE_FOR_XML 危险形态（事实卡 §5.5，逐字照抄源码判据）：属性值命中即**整条属性被删**，
+# 且发生在 forceKeepAttr 之前 —— 所以连 on* 都保不住。
+_SANDBOX_SAFE_FOR_XML = re.compile(
+    r"((--!?|\])>)|</(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)",
+    re.I)
+
+
+def _svg_spans(s):
+    """返回 [(start, end)] 覆盖每个 <svg>…</svg>。用于区分 SVG 内外的 on*。"""
+    spans = []
+    for m in re.finditer(r"<svg\b", s, re.I):
+        close = re.search(r"</svg\s*>", s[m.start():], re.I)
+        spans.append((m.start(), m.start() + (close.end() if close else len(s) - m.start())))
+    return spans
+
+
+def check_sandbox_sanitization(s, where):
+    """已确证的净化子集（事实卡 §5.5）。逐项都有实机或源码依据，不含推测项。"""
+    # aria-* 与 role 被删（ALLOW_ARIA_ATTR:!1）。属平台限制，不是作者写错 → WARN。
+    aria = []
+    for _tag, attrs in _extract_tags_with_attrs(s):
+        for name, _value in attrs:
+            if (name.startswith("aria-") or name == "role") and name not in aria:
+                aria.append(name)
+    if aria:
+        warn("%s 用了 %s——沙盒净化 ALLOW_ARIA_ATTR 为关，**aria-* 与 role 会被删掉**。"
+             "无障碍在此平台受限（属平台限制，非卡片缺陷）；语义靠原生标签承载。"
+             % (where, "、".join(sorted(aria))))
+    # SVG 内 on* 被删；HTML 元素上所有 on* 保留（实测 onclick/onmouseenter 均 KEPT）。
+    spans = _svg_spans(s)
+    if spans:
+        for m in re.finditer(r"\bon[a-z]+\s*=", s, re.I):
+            if any(a <= m.start() < b for a, b in spans):
+                warn("%s 在 <svg> 内写了 %s——SVG 内的 on* 会被净化删除（实测 "
+                     "<circle onclick> 被删）。交互请挂到 HTML 壳上。"
+                     % (where, m.group(0).rstrip("= ").strip()))
+                break
+    # SAFE_FOR_XML：属性值里出现 ]> / --> / --!> 或闭合标签片段 → 整条属性被删。
+    for _tag, attrs in _extract_tags_with_attrs(s):
+        for name, value in attrs:
+            if value and _SANDBOX_SAFE_FOR_XML.search(value):
+                warn("%s 属性 %s 的值命中 SAFE_FOR_XML 危险形态（]> / --> / --!> / "
+                     "</style 等）——**整条属性会被删掉**，且发生在 on* 强留之前，"
+                     "所以连 onclick 都保不住。比较运算符两侧留空格（写 `a[0] > 1` 而非 "
+                     "`a[0]>1`）即可规避。" % (where, name))
+                return
+
+
+def _sandbox_pipeline_input_text(obj):
+    """规则管线的输入文本估计值：statusbar + beginning。
+
+    真机输入是整条消息正文（通常更长 → 预算更宽），所以这个估计**偏严不偏松**：
+    这里报预算超限的，真机一定也超；这里放行的，真机可能仍然安全。"""
+    if not isinstance(obj, dict):
+        return ""
+    parts = []
+    for field in ("statusbar", "beginning"):
+        value = obj.get(field)
+        if isinstance(value, str):
+            parts.append(value)
+    return "".join(parts)
+
+
+def sandbox_output_budget(input_length):
+    """单条规则的输出预算：max(262144, 输入长度×4)（事实卡 §5.2 逐字常量）。"""
+    return max(SANDBOX_OUTPUT_BUDGET_FLOOR,
+               int(input_length) * SANDBOX_OUTPUT_BUDGET_INPUT_MULTIPLIER)
+
+
+def check_sandbox_output_budget(fr, rs, input_text, where):
+    """输出预算与空串匹配。两者都导致**整条规则回滚**（页面上完全不生效，只留告警）。
+
+    input_text 是本地可见的 statusbar + beginning 样本。真实消息通常更长，故结果只对
+    当前样本作保守诊断，绝不把未知的真实消息长度伪装成精确模拟。"""
+    source = input_text if isinstance(input_text, str) else ""
+    budget = sandbox_output_budget(len(source))
+    if isinstance(rs, str) and len(rs) > budget:
+        err("%s replaceString 单条 %d 字，超过输出预算 %d（=max(262144, 输入长度×4)）"
+            "——命中 `replacement-alone`，**整条规则回滚**，页面上这条完全不生效。"
+            % (where, len(rs), budget))
+    if not isinstance(fr, str):
+        return
+    if sandbox_pattern_delivery_error(fr):
+        return                            # 形态本身已判错，不叠加预算判罚
+    parsed = _split_findregex_literal(re.sub(r"^`|`$", "", fr.strip()))
+    if parsed is None:
+        return
+    pattern, flags = parsed
+    if "g" not in flags:
+        flags += "g"                    # worker 会自动补 g，预算必须统计所有命中
+    regex, _flags, reason = _compile_js_regex_for_preview("/%s/%s" % (pattern, flags))
+    if regex is None or reason:
+        return                            # 预览器模拟不了这条正则，不猜它是否匹配空串
+    if regex.search(""):
+        err("%s findRegex 能匹配**空串**——每个位置都会插一次替换内容，瞬间撑爆输出预算，"
+            "命中 `empty-match` 后**整条规则回滚**。请把 `*` 改 `+`、去掉可全空的分支，"
+            "确保匹配式至少吃掉一个字符。" % where)
+        return
+    total = 0
+    for match in regex.finditer(source):
+        total += len(_expand_js_replacement(rs, match, source))
+        if total > budget:
+            err("%s 所有命中的替换内容累计 %d 字，超过输出预算 %d——命中 `volume`，"
+                "**整条规则回滚**，页面上这条完全不生效。" % (where, total, budget))
+            return
 
 
 def check_sandbox_find_regex_content(fr, where):
@@ -584,12 +701,11 @@ def check_double_escape(s, where):
     if bs == 0:
         ok("%s 无残留反斜杠（无双重转义）" % where)
         return
-    # 含 onerror/onclick = JS 载体：内部字符串/正则字面量的 \" \' \d \s \/ 均为合法
-    # JS 转义，不是 HTML 属性引号双重转义。须先于 quote_bs 判断（否则 JS 载体里 >5 个
-    # 合法 \' 会被误判为双重转义）。
-    has_js = bool(re.search(r"on(error|click)\s*=", s, re.I))
+    # 经典 <script> 与 onerror/onclick 都是 JS 载体：内部字符串/正则字面量的
+    # \" \' \d \s \/ 均为合法 JS 转义，不是 HTML 属性引号双重转义。
+    has_js = bool(re.search(r"<script\b|on(error|click)\s*=", s, re.I))
     if has_js:
-        ok("%s 含 %d 个反斜杠，但为 JS 载体（onerror/onclick）的字符串/正则字面量，正常" % (where, bs))
+        ok("%s 含 %d 个反斜杠，但位于 JS 载体（script/onerror/onclick）的字符串或正则中，正常" % (where, bs))
         return
     # 非 JS 载体（纯美化 HTML）：反斜杠后紧跟引号 = 属性引号被多转义（真双重转义）
     quote_bs = len(re.findall(r'\\[\"\']', s))
@@ -891,14 +1007,17 @@ _SANDBOX_SLASH_FORM = re.compile(r"^/([\s\S]+)/([gimsuy]*)$")
 
 
 def classify_sandbox_pattern(raw):
-    """沙盒模式匹配式形态判定。逐字对齐官方 classifyPattern
-    （packages/chat-render/src/transforms.ts，validate.mjs:51-66 等价实现）。
+    """沙盒 worker 源码的匹配式形态判定，逐字对齐 worker 的 p()（事实卡 §5.1）。
 
     返回 (kind, payload)：
       ("empty", None) / ("literal", 字面量) / ("regex", None) / ("bad-regex", 错误信息)
 
-    锁定决策 D7：**沙盒模式不强制 slash literal**。纯字面量标记（{{hud}}）是官方
-    首选写法，绝不能当成非法。当前 MMD 那条「必须写 /…/」的实测铁律只适用于 /mmd。"""
+    🚨 **这是 worker 怎么想，不是交付判据。** worker 源码确有 literal 分支
+    （`if(!n)return new RegExp(m(t),'g')`），但实机上裸字面量**未生效**：探针用
+    `{{probe}}` 规则完全不触发，改 `/{{probe}}/` 立即生效（事实卡 §8.21）→ 宿主侧
+    在交给 worker 前另有一层处理。
+    → 交付门禁一律走 sandbox_pattern_delivery_error()（slash 严格模式，与 /mmd 一致）。
+    原「锁定决策 D7：不强制 slash、字面量是官方首选」**已被实机推翻**。"""
     trimmed = (raw if isinstance(raw, str) else "").strip()
     trimmed = re.sub(r"^`|`$", "", trimmed)      # 先 trim 再剥掉首尾反引号
     if not trimmed:
@@ -913,6 +1032,30 @@ def classify_sandbox_pattern(raw):
     if error:
         return "bad-regex", error
     return "regex", None
+
+
+SANDBOX_BARE_LITERAL_ERROR = (
+    "沙盒交付必须写 slash 形态 /…/：实机裸字面量未生效（探针 {{probe}} 规则完全不触发，"
+    "改 /{{probe}}/ 后立即生效），与 worker 源码 p() 的字面量分支矛盾"
+    "——说明宿主侧在交给 worker 前另有一层处理。裸字面量在页面上什么都不会发生。"
+)
+
+
+def sandbox_pattern_delivery_error(raw):
+    """沙盒**交付**门禁：返回错误原因，合规返回 None。
+
+    与 classify_sandbox_pattern 分工：那个解释 worker 源码，这个决定放不放行。"""
+    if not isinstance(raw, str):
+        return "findRegex 必须是字符串"
+    kind, payload = classify_sandbox_pattern(raw)
+    if kind == "empty":
+        return None                       # 空值由必填校验管
+    if kind == "literal":
+        return SANDBOX_BARE_LITERAL_ERROR
+    if kind == "bad-regex":
+        return ("写成 /…/ 但正则语法错（%s）——**整条规则会被静默丢弃**，"
+                "不降级成字面量，页面上看不出异常。" % payload)
+    return None
 
 
 def _translate_js_named_groups(pattern):
@@ -1319,16 +1462,14 @@ def _validate_sandbox_rules(obj, scripts):
             if not isinstance(name, str) or not name.strip():
                 err("%s scriptName 必须为非空字符串，当前为 %r。" % (label, name))
             elif len(name) > SANDBOX_MAX_SCRIPT_NAME_HARD:
-                # 双阈值见文件头 SANDBOX_MAX_* 注释（基座事实卡 §6）：
-                # 200 是源码真值 name:200，超出必被 Ws() 静默截断 → ERROR。
-                err("%s scriptName 共 %d 字，超过平台硬上限 %d 字，会被静默截断。"
+                # 200 是源码归一观察值；录入路径实际失败语义仍未确证。
+                err("%s scriptName 共 %d 字，超过源码归一观察值 %d；为防平台裁切或拒存，保守判 ERROR。"
                     % (label, len(name), SANDBOX_MAX_SCRIPT_NAME_HARD))
             else:
                 if len(name) > SANDBOX_MAX_SCRIPT_NAME:
-                    # 20 是创卡页编辑器 UI 的计数器上限：导入能绕过，但作者一进
-                    # 编辑器改这条就被截断 → 只 WARN，不拦。
-                    warn("%s scriptName 共 %d 字，超过编辑器上限 %d 字（导入能绕过，"
-                         "但作者一进创卡页编辑器就会被截断）。平台硬上限是 %d 字。"
+                    # 20 是编辑器 UI 显示值；是否与导入形成和 replaceString 相同的双轨尚未确证。
+                    warn("%s scriptName 共 %d 字，超过编辑器显示值 %d；导入源码上限是 %d。"
+                         "该字段的编辑器超限行为尚未实测，建议仍按 20 控制。"
                          % (label, len(name), SANDBOX_MAX_SCRIPT_NAME,
                             SANDBOX_MAX_SCRIPT_NAME_HARD))
                 if name in seen_names:
@@ -1342,15 +1483,14 @@ def _validate_sandbox_rules(obj, scripts):
             if not isinstance(fr, str) or not fr.strip():
                 err("%s findRegex 必须为非空字符串，当前为 %r。" % (label, fr))
             elif len(fr) > SANDBOX_MAX_FIND_REGEX_HARD:
-                # 双阈值见文件头 SANDBOX_MAX_* 注释（基座事实卡 §6）：
-                # 4096 是源码真值 regex:4096，超出必被 Ws() 静默截断成废匹配式 → ERROR。
-                err("%s findRegex 共 %d 字，超过平台硬上限 %d 字，会被静默截断。"
+                # 4096 是源码归一观察值；录入路径实际失败语义仍未确证。
+                err("%s findRegex 共 %d 字，超过源码归一观察值 %d；为防平台裁切或拒存，保守判 ERROR。"
                     % (label, len(fr), SANDBOX_MAX_FIND_REGEX_HARD))
             else:
                 if len(fr) > SANDBOX_MAX_FIND_REGEX:
-                    # 1000 是创卡页编辑器 UI 的计数器上限 → 只 WARN，不拦。
-                    warn("%s findRegex 共 %d 字，超过编辑器上限 %d 字（导入能绕过，"
-                         "但作者一进创卡页编辑器就会被截断）。平台硬上限是 %d 字。"
+                    # 1000 是编辑器 UI 显示值；双轨及超限行为尚未实测，保守 WARN。
+                    warn("%s findRegex 共 %d 字，超过编辑器显示值 %d；导入源码上限是 %d。"
+                         "该字段是否同样双轨尚未确证，建议仍按 1000 控制。"
                          % (label, len(fr), SANDBOX_MAX_FIND_REGEX,
                             SANDBOX_MAX_FIND_REGEX_HARD))
                 _validate_sandbox_pattern(fr, label, i, seen_literals, soup_parts, sc)
@@ -1367,26 +1507,37 @@ def _validate_sandbox_rules(obj, scripts):
             elif len(rs) > SANDBOX_MAX_REPLACE_STRING:
                 # 20000 是创卡页编辑器 UI 的计数器上限 → 只 WARN，不拦。
                 warn("%s replaceString 共 %d 字，超过编辑器上限 %d 字（导入能绕过），"
-                     "但超了作者一进编辑器就被截断，建议拆条。平台硬上限是 %d 字。"
+                     "规则编辑器保存会静默拒绝整次修改，不是截断；建议拆条。导入源码上限是 %d 字。"
                      % (label, len(rs), SANDBOX_MAX_REPLACE_STRING,
                         SANDBOX_MAX_REPLACE_STRING_HARD))
 
 
+# 判断 /…/ 的正则体是否其实是个「普通触发词」（不含正则元字符）。
+# 用途：这种形态才适合做「触发串接不接得上」与重复判罚，含元字符的真正则不适用。
+# 刻意不把 {} 当元字符：触发标记常写 /{{hud}}/，那对花括号是标记的一部分。
+_SANDBOX_REGEX_METACHARS = re.compile(r"[.*+?^$()|\[\]\\]")
+
+
 def _validate_sandbox_pattern(fr, label, index, seen_literals, soup_parts, sc):
-    """匹配式形态判定 + 字面量去重 + 触发串接得上检查。"""
+    """交付门禁（slash 严格模式）+ 触发串接得上检查 + 重复判罚。"""
     check_sandbox_find_regex_content(fr, label)
-    kind, payload = classify_sandbox_pattern(fr)
-    if kind == "bad-regex":
-        err("%s findRegex 写成 /…/ 但正则语法错（%s）——"
-            "**整条规则会被静默丢弃**，不降级成字面量，页面上看不出异常。"
-            "不确定就改用纯字面量标记（如 {{hud}}），那是官方首选写法。" % (label, payload))
+    delivery_error = sandbox_pattern_delivery_error(fr)
+    if delivery_error:
+        err("%s findRegex %s" % (label, delivery_error))
         return
-    if kind != "literal":
+    kind, _payload = classify_sandbox_pattern(fr)
+    if kind != "regex":
         return
-    literal = payload
-    # 字面量按顺序跑：前一条把全文换完，后一条同串永远匹配不到
+    # 取 /…/ 里的正则体；只有「纯触发词」形态才继续做可达性与重复检查。
+    body = _SANDBOX_SLASH_FORM.match(re.sub(r"^`|`$", "", fr.strip()))
+    if not body:
+        return
+    literal = body.group(1)
+    if _SANDBOX_REGEX_METACHARS.search(literal):
+        return                       # 真正则：匹配目标是文本模式，不做字面串可达性判断
+    # 规则按顺序跑且自动补 g（全文替换）：前一条把全文换完，后一条同触发词永远匹配不到。
     if literal in seen_literals:
-        err("%s 字面量匹配式 %r 与第 %d 条重复——规则按顺序跑，"
+        err("%s 触发词 %r 与第 %d 条重复——规则按顺序跑且匹配式自动补 g，"
             "前一条会把全文都换掉，这条**永远匹配不到**。" % (label, literal, seen_literals[literal]))
         return
     seen_literals[literal] = index
@@ -1395,7 +1546,7 @@ def _validate_sandbox_pattern(fr, label, index, seen_literals, soup_parts, sc):
     if not isinstance(rs, str) or not _strip_style_and_script(rs):
         return   # 只放 <style>/<script> 的规则，匹配式故意谁都不引用
     if not any(literal in text for src, text in soup_parts if src != index):
-        warn("%s 字面量匹配式 %r 会产出可见内容，但它在 statusbar / beginning / "
+        warn("%s 触发词 %r 会产出可见内容，但它在 statusbar / beginning / "
              "其他规则的 replaceString 里都找不到——**页面上永远不会出现**。"
              "把触发串写进 statusbar 或 beginning（人设的输出约定也要对得上）。"
              % (label, literal))
@@ -1426,6 +1577,12 @@ def validate_regex(obj, platform):
             check_sandbox_redlines(rs, tag)
             check_sandbox_sdk_names(rs, tag)
             check_sandbox_content_warnings(rs, tag)
+            check_sandbox_sanitization(rs, tag)
+            # 输出预算按「本条输入文本」算。规则输入是正文，取 statusbar+beginning
+            # 作为保守样本（真实输入通常更长 → 预算更宽；本地只对样本判定）。
+            check_sandbox_output_budget(
+                sc.get("findRegex"), rs,
+                _sandbox_pipeline_input_text(obj), tag)
             check_platform_redlines(rs, platform, tag)
             # `<\/script>` 是官方**要求**的写法（防宿主页面提前截断），先还原再查双重转义，
             # 否则每条正确的脚本规则都会被误报成"残留反斜杠"。

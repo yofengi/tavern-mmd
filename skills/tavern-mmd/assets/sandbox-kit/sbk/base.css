@@ -47,6 +47,16 @@
   /* 进度条同色发光的模糊半径（盘点 C.3）。旧资产 5px；本文件基准是 bar 高
      calc(10 * var(--rpx))（对位旧 8px），故 px→rpx 约 1:2，5px ≈ 10rpx。 */
   --sbk-glow: calc(10 * var(--rpx));
+
+  /* 🚨 color-scheme：告诉内核「这棵子树是深色的」，浏览器【原生控件】才会跟着变深 ——
+     设置面板用的是原生 <input type=color|range|number>，它们的滑轨、数字步进按钮、
+     取色器色板都由内核绘制，CSS 管不到。不声明的话深色主题下会出现一条白色滑轨。
+     基线跟平台深色基线一致（本文件其余令牌同口径），浅色在下方 [data-theme="light"] 块里翻。
+     ⚠ 只声明在 [data-chat="root"] 这棵子树上，不写 :root —— 与本文件的作用域化纪律一致，
+       不去改沙盒内平台自己 chrome 的配色行为。
+     ⚠ 这条【不需要 theme.js 接线】：它按 data-theme 属性走，而 data-theme 是平台自己
+       写在 root 上的（硬约束 10 / §7.1），故深浅跟随天然成立，无需 JS 参与。 */
+  color-scheme: dark;
 }
 
 /* 🚨 硬约束 10 / §7.1：换肤必须写 [data-chat="root"][data-theme="…"]。
@@ -66,6 +76,8 @@
   /* 🚨 浅色下发光【必须关掉】：亮色光晕打在白底上不像发光，像脏边/失焦。
      置 0 即可让 box-shadow 整体消失，不必再写一条覆盖规则。 */
   --sbk-glow: 0;
+  /* 原生控件跟着翻浅（见上方基线块的说明）：滑轨/步进器/取色器由内核绘制，只认这个属性 */
+  color-scheme: light;
 }
 
 /* 🚨 §7.3 / 硬约束 13：平台给 header 与 composer 都写了 flex-shrink:0，
@@ -77,17 +89,43 @@
   min-height: 0;
 }
 
-/* 宿主容器。id 由 SBK.dom.mountHost 按固定约定生成（§3 currentScript 恒 null，无法自定位）。 */
+/* 宿主容器。id 由 SBK.dom.mountHost 按固定约定生成（§3 currentScript 恒 null，无法自定位）。
+   运行时 id 规范 /^[A-Za-z][A-Za-z0-9_-]{0,63}$/，非法值告警并回落 sbk-host（core.js 的 normHostId）。 */
 .sbk-host {
   box-sizing: border-box;
   /* 系统字体栈：CSP 封死外部字体（§2） */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  font-size: var(--sbk-fs, 14px);
-  line-height: 1.5;
-  color: var(--chat-text);
 }
 .sbk-host, .sbk-host * { box-sizing: border-box; }
+
+/* 🚨 字号/行距的【两个出口必须都消费同一对令牌】（审计报告问题 8 / 美化决策「尺寸」：
+   「气泡状态面板与功能栏 chrome 必须消费同一字号/行距 token」）。
+   修的缺陷：字号原先只写在 .sbk-host 上。而两条渲染出口挂在【不同的祖先链】上：
+     · 功能栏 chrome / pinned  → 在 .sbk-host 里    ✅ 跟随
+     · 气泡内状态面板 .sbk-snap → 在 message-body 里，【根本不是 .sbk-host 的后代】 ❌ 不跟随
+   于是玩家在设置里调字号，只有功能栏变，气泡面板完全不动 —— 实机表现是「设置像半失灵」。
+   → 两个选择器都在这里显式消费 --sbk-fs 与 --sbk-lh，缺一不可。
+   ⚠ 值的单位【不做任何假设】：base.css 的默认是 rpx 表达式，而主题层的玩家偏好会把它
+     改成绝对 px（美化决策：字号属可读性绝对尺度，不随宽屏无限增长）。这里只 var() 消费，
+     两种形态都成立；回落 14px / 1.5 是令牌整体缺失时的保底（自定义属性替换失败会让
+     整条声明变 unset，故回落必须写在 var() 第二参里）。
+   ⚠ 与 theme.js 的 BRIDGE 规则（[data-chat="root"] .sbk-host,[data-chat="root"] .sbk-snap
+     {line-height:var(--sbk-lh,1.5)}）指向同一对令牌与同两个选择器，是有意的冗余：
+     theme 层未装载时本文件仍然生效，装载后 (0,2,0) 覆盖 (0,1,0)，结果一致。 */
+.sbk-host,
+.sbk-snap {
+  font-size: var(--sbk-fs, 14px);
+  line-height: var(--sbk-lh, 1.5);
+  color: var(--chat-text);
+}
+/* 面板内部也要跟随：气泡里的后代会继承上面 .sbk-snap 的 font-size，
+   但 .sbk-snap 自己若被平台某条规则命中 font-size，内部就会失同步 →
+   显式给内部一条 inherit，把继承链钉死在 .sbk-snap 上。
+   ⚠ 不写 font-size:var(--sbk-fs)：那会让 .sbk-label / .sbk-chip 的 --sbk-fs-sm 小字失效。 */
+.sbk-snap .sbk-row,
+.sbk-snap .sbk-col,
+.sbk-snap .sbk-val { font-size: inherit; }
 
 /* statusbar 槽位不存在时 mountHost 回落到 [data-slot="left"]（空 div、无样式、
    祖先链无 opacity/transform/overflow 陷阱）→ 需要自己定位成浮层。 */
@@ -321,7 +359,17 @@
 /* 触发词：虚线下划线 + help 光标，明示「这里还有内容」（盘点 C.5）。
    触屏无 cursor，虚线下划线才是移动端唯一的可发现性线索，两者都留。 */
 .sbk-tt__hit {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-bottom: 1px dashed var(--chat-text-muted);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
   cursor: help;
 }
 .sbk-tt__box {
@@ -382,5 +430,98 @@
   font-variant-numeric: tabular-nums;   /* 等宽数字：数值跳动时不左右抖 */
 }
 
-.sbk-hide { display: none !important; }
-.sbk-sep { height: 1px; background: var(--chat-border); }
+/* ---- 三种纯展示控件（hud.js 的 time / summary / turn）----
+   共同约束：零业务状态、双出口同构（toHtml 与 toDom 产出同一份结构）→
+   样式里不能有任何「只在 DOM 出口成立」的东西（无 :hover 依赖的功能、无 JS 注入的内联值）。 */
+
+/* time：紧凑时间/日期行。两段（首段 + 其余）由 hud.js 按空白切分，不做语义解析。
+   等宽数字是关键：时间在每轮都会变，比例数字会让整行左右抖。 */
+.sbk-time {
+  display: inline-flex;
+  align-items: baseline;
+  gap: calc(8 * var(--rpx));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 首段（通常是日期/天数）弱化成次要色：一行里两段同色会读不出主次 */
+.sbk-time__d { color: var(--chat-text-muted); font-size: var(--sbk-fs-sm); }
+/* 其余段（通常是时刻/时段）是这一行的主信息，用正文色 + 略重 */
+.sbk-time__t { color: var(--chat-text); font-weight: 600; }
+
+/* summary：可折行摘要块。与 text 的差别是整块独立成段，不挤在标签行右侧。
+   🚨 必须显式 white-space:pre-wrap + word-break —— 上方 .sbk-snap * 已把气泡的
+      pre-line 重置成 normal，摘要里模型写的换行若不在这里声明就会被吃掉；
+      而长英文/URL 不给 break-word 会撑破窄屏（§9 实测视口 323px）。 */
+.sbk-sum-w { gap: calc(6 * var(--rpx)); }
+.sbk-sum {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  color: var(--chat-text);
+  font-size: var(--sbk-fs-sm);
+  line-height: 1.6;                      /* 成段文字比单行行距略松，可读性优先 */
+  /* 第三层明度（与 chip/tooltip 同档）+ 左侧强调条：把它与普通字段行区分开，
+     一眼看出「这是一段叙述」而不是某项属性的值。 */
+  background: var(--chat-more-item-bg);
+  border-left: calc(6 * var(--rpx)) solid var(--sbk-tone, var(--chat-accent));
+  border-radius: calc(4 * var(--rpx));
+  padding: calc(8 * var(--rpx)) calc(12 * var(--rpx));
+}
+
+/* turn：「当前轮次/阶段」紧凑角标。刻意做成小角标而非普通值行 ——
+   轮次是元信息不是业务数值，与 bar/num 同形会让读者误读成一项属性。
+   描边而非实底：与 .sbk-stat（实底+竖条=属性）、.sbk-crumb（描边=位置）再拉开一档，
+   三种 chip 变体各有明确语义归属。 */
+.sbk-turn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;                     /* 靠右：父级是 .sbk-row（flex），角标贴行尾 */
+  padding: calc(2 * var(--rpx)) calc(10 * var(--rpx));
+  border: 1px solid var(--chat-accent);
+  border-radius: calc(999 * var(--rpx));
+  color: var(--chat-accent);
+  background: transparent;
+  font-size: var(--sbk-fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;    /* 轮次是数字，跳动时不左右抖 */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ---- 可达性与响应式（旧资产迁入项，见审计报告「值得迁入的旧资产能力」）----
+   ⚠ 浮层/抽屉/悬浮球的对应规则在 ui.js 的注入样式里（那层是组件私有 CSS）；
+     本文件只管【气泡内面板与功能栏】这两个出口上的元素。 */
+
+/* 🚨 :focus-visible 而非 :focus：鼠标点击也会 :focus，给它描边会让每次点完都留一圈框。
+   :focus-visible 只在键盘导航时命中，正是要补的那条可达性线索。
+   不写 outline:none 兜底 —— 那会让不支持 :focus-visible 的内核彻底没有焦点提示。
+   ⚠ 平台把 aria 属性与 role 全删（§5.5），所以可达性只能靠原生元素 + 真实焦点表现，
+     这条规则与 hud.js 的 tooltip 触发词、ui.js 的原生 button 是同一套补偿思路。 */
+.sbk-btn:focus-visible,
+.sbk-tt__hit:focus-visible {
+  outline: 2px solid var(--chat-accent);
+  outline-offset: 2px;
+}
+
+/* prefers-reduced-motion：唯一的动效是进度条的 width 过渡（.sbk-bar__fill）。
+   对前庭敏感用户，一排条子同时滑动是明确的负担 → 直接关掉过渡，数值仍然正确显示。
+   🚨 用 transition:none 而不是把时长改成 0.01ms：本文件没有 keyframe 动画，
+      关过渡最干净，且不会留下「几乎为零但仍在跑」的合成层。 */
+@media (prefers-reduced-motion: reduce) {
+  .sbk-bar__fill { transition: none; }
+}
+
+/* 横屏矮屏：竖屏的间距在横屏上会把面板顶出可视区（§9 实测视口很窄，横屏后高度更矮）。
+   只收间距不改结构 —— 换布局会让同一张卡在两个方向上读起来像两个东西。 */
+@media (orientation: landscape) and (max-height: 520px) {
+  .sbk-card { padding: var(--sbk-gap); }
+  .sbk-col { gap: calc(8 * var(--rpx)); }
+  .sbk-pin { padding: calc(4 * var(--rpx)) var(--sbk-pad); }
+}
+
+/* safe-area：功能栏宿主回落成浮层时（.sbk-host--float）会贴到屏幕左右边缘，
+   刘海屏/圆角屏上内容会被切掉。env() 不支持时整条声明作废 → 回到无内距，几何不受影响。 */
+.sbk-host--float {
+  padding-left: calc(var(--sbk-pad) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--sbk-pad) + env(safe-area-inset-right, 0px));
+}
