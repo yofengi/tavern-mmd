@@ -14,14 +14,12 @@ tavern-mmd 预览脚本 build-preview.py
                findRegex 强制 /pattern/flags，裸字面量按结构错误处理
                inline onclick 按当前MMD净化 allowlist 过滤
   mmdsandbox : MMD沙盒模式（新聊天页，chatVersion:1）。<script> 一等公民 + 官方 SDK
-               findRegex 走官方 classifyPattern：/pattern/flags 为正则，其余非空串为字面量
-               （字面量是官方首选写法）；写成 /…/ 但语法错 → 平台整条静默丢弃，预览判 ERROR
+               交付 findRegex 强制 /pattern/flags；worker 裸字面量分支只作逆向事实，实机不生效
+               写成 /…/ 但语法错 → 平台整条静默丢弃，预览判 ERROR
                不施加当前MMD 的 onclick 净化；改为提示 svg 内 onclick 与自写 data-* 会被净化删除
-               <style>/<script> 装卡即抽出，不论规则有没有匹配到都装上（官方首选写法
-               「专开一条只放 script/style、匹配式谁都不引用」在预览里照样生效）
-               全景模式额外注入 [data-chat]/[data-slot] 钩子与 14 个 --chat-* 设计令牌
-               （实测确证，官方手册只记 10 个；见 SANDBOX_DESIGN_TOKENS），另注入
-               --rpx 尺寸基准与 --chat-viewport-height 静态值（这两个不计入 14 个）
+               <style>/<script> 装卡即抽出，不论规则有没有匹配到都装上
+               全景模式复刻真实 dark chat flex 外壳、稳定槽位与 14 个 --chat-* 设计令牌，
+               注入 --rpx，并以 root 内联 --chat-viewport-height 跟随 iframe resize
 
 退出码: 0=生成成功  1=致命审计失败（不写文件）  2=用法/读取错误
 """
@@ -919,16 +917,20 @@ PANORAMA_PAGE_TEMPLATE = """<!DOCTYPE html>
 <style>
 html,body{height:100%%;margin:0}
 body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;display:flex;flex-direction:column}
-.banner{padding:10px 16px;font-size:13px;font-weight:600;flex:0 0 auto}
+.banner{padding:8px 14px;font-size:12px;font-weight:600;flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .banner-st{background:#1f6feb}.banner-mmd{background:#9e6a03}.banner-mmdsandbox{background:#1a7f5a}
-.frag{flex:1;margin:12px;display:flex;flex-direction:column;border:1px dashed #30363d;border-radius:8px;overflow:hidden;min-height:0}
+.frag{flex:1;margin:8px 12px;display:flex;flex-direction:column;border:1px dashed #30363d;border-radius:8px;overflow:hidden;min-height:0}
 .frag-label{background:#161b22;color:#8b949e;font-size:11px;padding:6px 12px;border-bottom:1px solid #30363d;flex:0 0 auto}
 .frag-warn{background:#3a2d00;color:#f0c674;font-size:11px;padding:6px 12px}
 .pano-audit{flex:0 0 auto;margin:0 12px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9}
 .pano-audit>summary{cursor:pointer;padding:7px 12px;font-size:12px;font-weight:600;list-style-position:inside}
 .pano-audit[open]>summary{border-bottom:1px solid #30363d}
 .pano-audit-body{max-height:38vh;overflow:auto}
-.preview-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 12px;background:#161b22;border-bottom:1px solid #30363d;flex:0 0 auto}
+.preview-tools{display:block;padding:0;background:#161b22;border-bottom:1px solid #30363d;flex:0 0 auto}
+.preview-tools>summary{cursor:pointer;color:#c9d1d9;font-size:11px;font-weight:600;list-style-position:inside;padding:6px 12px}
+.preview-tools[open]>summary{border-bottom:1px solid #30363d}
+.preview-tools:not([open])>.preview-tools-body{display:none}
+.preview-tools-body{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 12px}
 .preview-tools-label{color:#8b949e;font-size:11px;margin-right:2px}
 .preview-tool{border:1px solid #484f58;border-radius:4px;background:#21262d;color:#e6edf3;padding:4px 8px;font-size:11px;cursor:pointer}
 .preview-tool:hover{background:#30363d}
@@ -1030,7 +1032,8 @@ def _sandbox_sim_block(profile, greeting):
         "greeting": greeting,
         # 探针实测的真实身份字段形状（role: name/avatarUrl；user: nickname/avatarUrl）。
         "roleName": "测试", "userNickname": "洛璃",
-        "viewportHeight": 1205,
+        # viewportHeight 不写死：浏览器端按 iframe 当前 innerHeight 初始化，
+        # 键盘控制再从该实时基线扣除 inset。
     }
     return ('<script data-preview-sim="config">window.__MMD_SANDBOX_SIM_CONFIG__=%s;</script>'
             '<script data-preview-sim="1">%s</script>'
@@ -1090,13 +1093,17 @@ def _sandbox_multiround_expr(obj):
 # 沙盒模式聊天页骨架的稳定钩子（mmd-sandbox.md §5）。挂到全景已有节点上，作者写的
 # [data-chat="root"] 选择器与 var(--chat-accent) 在预览里就能真的解析到。
 _SANDBOX_HOOKS = {
-    # data-preview-bubble-outline 是预览专属辅助标记（真机无此属性、无那圈描边），
-    # 挂在 root 上让所有气泡（含脚手架动态追加的）都吃到，作者可随手在开发者工具里
-    # 删掉它看真实的"气泡与背景同色"效果。样式见 SANDBOX_CHROME_CSS 末尾。
-    "root": (' data-chat="root" data-theme="light" data-composer="open"'
-             ' data-preview-bubble-outline="1"'),
+    # data-preview-bubble-outline 是预览专属辅助标记（真机无此属性、无那圈描边）。
+    # 默认不挂，保持真实外观；外层「气泡辅助线」按钮可临时切换，样式见 SANDBOX_CHROME_CSS。
+    # 默认用已实测的 dark 真值；light 令牌仍保留为可切换的 probe-needed 占位。
+    "root": (' data-chat="root" data-theme="dark" data-composer="visible"'
+             ' style="--chat-viewport-height:100vh;'
+             'background-image:url(\'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22/%3E\');'
+             'background-position:center center;background-size:auto 100%;background-repeat:no-repeat"'),
     "header": ' data-chat="header"',
+    "header_back": ' data-chat="header-back"',
     "header_title": ' data-chat="header-title"',
+    "header_actions": ' data-chat="header-actions"',
     "header_extra": '<span data-slot="header-extra"></span>',
     "messages": ' data-chat="messages"',
     "list": ' data-chat="list"',
@@ -1104,8 +1111,11 @@ _SANDBOX_HOOKS = {
     "msg_user": ' data-chat="message" data-from="user" data-state="done" data-msg-id="pano-1"',
     "msg_ai": ' data-chat="message" data-from="ai" data-state="done" data-msg-id="pano-2"',
     "body": ' data-chat="message-body"',
+    "message_extra": '<div data-slot="message-extra"></div>',
+    "message_actions": '<div data-chat="message-actions"></div>',
     "stage": '<div data-chat="author-stage" class="pano-stage" hidden></div>',
     "composer": ' data-chat="composer"',
+    "toolbar": '<div data-slot="toolbar"></div>',
     "input": ' data-chat="input"',
     "send": ' data-chat="send"',
 }
@@ -1141,6 +1151,16 @@ def _sandbox_toolbar_html(obj):
         rows.append('<button class="preview-tool" type="button" title="%s" onclick="%s">%s</button>'
                     % (html_mod.escape(title, quote=True),
                        html_mod.escape(call, quote=True), html_mod.escape(label)))
+    rows.append('<button class="preview-tool" type="button" title="%s" onclick="%s">%s</button>'
+                % ("切换预览辅助线（真机默认无描边）",
+                   html_mod.escape(
+                       "(function(){var r=document.querySelector('.pano-frame').contentWindow."
+                       "document.querySelector('[data-chat=\"root\"]');if(!r)return;"
+                       "if(r.hasAttribute('data-preview-bubble-outline'))"
+                       "r.removeAttribute('data-preview-bubble-outline');"
+                       "else r.setAttribute('data-preview-bubble-outline','1');})()",
+                       quote=True),
+                   "气泡辅助线"))
     dump = ("(function(){var s=document.querySelector('.pano-frame').contentWindow"
             ".__MMD_SANDBOX_SIM__;console.log('[sim] 事件顺序',s.control.eventOrder());"
             "console.log('[sim] 诊断',s.control.diagnose());console.log('[sim] 调用',s.calls);"
@@ -1148,8 +1168,9 @@ def _sandbox_toolbar_html(obj):
     rows.append('<button class="preview-tool" type="button" title="%s" onclick="%s">%s</button>'
                 % ("打印事件顺序/调用日志到控制台",
                    html_mod.escape(dump, quote=True), "事件日志"))
-    return ('<div class="preview-tools" data-preview-tools="1">'
-            '<span class="preview-tools-label">沙盒仿真控制</span>%s</div>' % "".join(rows))
+    return ('<details class="preview-tools" data-preview-tools="1">'
+            '<summary>沙盒仿真控制（默认折叠）</summary><div class="preview-tools-body">'
+            '<span class="preview-tools-label">平台侧动作</span>%s</div></details>' % "".join(rows))
 
 
 def _sandbox_accuracy_html(profile):
@@ -1196,8 +1217,10 @@ def _sandbox_accuracy_html(profile):
 
 def _panorama_hooks(platform):
     """沙盒模式返回官方 data-* 钩子；其余平台全为空串（骨架一字不变）。"""
-    keys = ("root", "header", "header_title", "header_extra", "messages", "list", "frame",
-            "msg_user", "msg_ai", "body", "stage", "composer", "input", "send")
+    keys = ("root", "header", "header_back", "header_title", "header_actions",
+            "header_extra", "messages", "list", "frame", "msg_user", "msg_ai",
+            "body", "message_extra", "message_actions", "stage", "composer",
+            "toolbar", "input", "send")
     if platform != "mmdsandbox":
         return {k: "" for k in keys}
     return dict(_SANDBOX_HOOKS)
@@ -1251,36 +1274,97 @@ SANDBOX_DARK_TOKEN_VALUES = {
     "--chat-more-item-bg": "#2c2e32", "--chat-share-pick-bg": "#2c2e32",
 }
 
-SANDBOX_CHROME_CSS = """[data-chat="root"]{--chat-bg:#ffffff;--chat-surface:#f5f6f8;--chat-text:#1f2328;
+SANDBOX_CHROME_CSS = """.pano-sandbox-host{height:100%;min-height:0;overflow:hidden;background:#17181a}
+[data-chat="root"]{--chat-bg:#ffffff;--chat-surface:#f5f6f8;--chat-text:#1f2328;
   --chat-text-muted:#6b7280;--chat-border:#d8dbe0;--chat-accent:#1a7f5a;
   --chat-bubble-user-bg:#ffffff;--chat-bubble-ai-bg:#ffffff;--chat-bubble-text:#1f2328;
   --chat-input-bg:#ffffff;--chat-input-text:#1f2328;--chat-shortcut-text:#1f2328;
   --chat-more-item-bg:#f5f6f8;--chat-share-pick-bg:#f5f6f8;
   --chat-viewport-height:100vh;--rpx:calc(100vw / 750);
-  background:var(--chat-bg);color:var(--chat-text)}
+  position:relative;display:flex;flex-direction:column;width:100%;height:var(--chat-viewport-height);
+  min-height:0;max-width:100%;overflow:hidden auto;background-color:var(--chat-bg);color:var(--chat-text);
+  background-position:center center;background-size:auto 100%;background-repeat:no-repeat;
+  font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;box-sizing:border-box}
+[data-chat="root"] *,[data-chat="root"] *:before,[data-chat="root"] *:after{box-sizing:border-box}
 [data-chat="root"][data-theme="dark"]{--chat-bg:#17181a;--chat-surface:#1e1f24;--chat-text:#fff;
   --chat-text-muted:#c5c5c5;--chat-border:#333;--chat-accent:#ff6d97;
   --chat-bubble-user-bg:#17181a;--chat-bubble-ai-bg:#17181a;--chat-bubble-text:#fff;
   --chat-input-bg:#1e1f24;--chat-input-text:#fff;--chat-shortcut-text:#fff;
   --chat-more-item-bg:#2c2e32;--chat-share-pick-bg:#2c2e32}
-[data-chat="messages"]{background:var(--chat-bg)}
+[data-chat="header"]{flex:0 0 calc(90 * var(--rpx));min-height:calc(90 * var(--rpx));height:calc(90 * var(--rpx));display:flex;
+  align-items:center;justify-content:space-between;padding:0;background:var(--chat-bg);border:0;color:var(--chat-text)}
+[data-chat="header-back"]{flex:0 0 auto;width:calc(76 * var(--rpx));height:100%;display:flex;align-items:center;
+  justify-content:center;padding:0 calc(20 * var(--rpx));border:0;background:transparent;color:var(--chat-text);
+  font:inherit;font-size:calc(50 * var(--rpx));cursor:pointer}
+[data-chat="header-title"]{flex:1 1 0;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  font-size:calc(30 * var(--rpx));line-height:1.25;font-weight:500}
+[data-chat="header-actions"]{flex:0 0 auto;display:flex;align-items:center;gap:calc(8 * var(--rpx));
+  margin-right:calc(16 * var(--rpx))}
+.pano-head-action{width:calc(52 * var(--rpx));height:calc(52 * var(--rpx));display:flex;align-items:center;
+  justify-content:center;padding:0;border:0;background:transparent;color:var(--chat-text);font:inherit;
+  font-size:calc(30 * var(--rpx));cursor:pointer}
+[data-slot="header-extra"]{display:none}
+[data-slot="statusbar"]{flex:0 1 auto;min-height:0}
+[data-chat="messages"]{flex:1 1 auto;min-height:0;overflow:hidden auto;padding:0;background:transparent;
+  -webkit-overflow-scrolling:touch}
+[data-chat="messages"] [data-chat="list"]{display:block;min-height:100%;padding:0 0 calc(18 * var(--rpx))}
+[data-chat="message-frame"]{display:flow-root;margin:0}
+[data-chat="message"]{display:flex;flex-direction:column;width:100%;max-width:100%;padding:calc(23 * var(--rpx)) calc(30 * var(--rpx));
+  margin:0;align-items:flex-start;background:transparent;color:var(--chat-text)}
+[data-chat="message"][data-from="user"]{align-items:flex-end}
+[data-chat="message"] [data-chat="message-body"]{max-width:90%;padding:calc(24 * var(--rpx));margin:0;border:0;
+  border-radius:calc(32 * var(--rpx)) calc(32 * var(--rpx)) calc(32 * var(--rpx)) 0;
+  background:var(--chat-bubble-ai-bg);color:var(--chat-bubble-text);font-size:15px;line-height:1.55;
+  white-space:pre-line;opacity:.9;word-break:break-word}
+[data-chat="message"][data-from="user"] [data-chat="message-body"]{border-radius:calc(32 * var(--rpx)) calc(32 * var(--rpx)) 0 calc(32 * var(--rpx));
+  background:var(--chat-bubble-user-bg)}
+[data-slot="message-extra"],[data-chat="message-actions"]{display:block;width:0;height:0;overflow:hidden}
+[data-slot="left"],[data-slot="right"]{position:relative;flex:0 1 auto;min-height:0}
+[data-chat="composer"]{position:static;left:auto;right:auto;bottom:auto;flex:0 0 auto;display:flex;
+  flex-direction:column;align-items:stretch;gap:0;padding:0;background:var(--chat-bg);border:0;
+  color:var(--chat-text);z-index:auto}
+[data-slot="toolbar"]{display:block;height:0}
+.pano-shortcuts{display:flex;align-items:center;gap:calc(6 * var(--rpx));padding:calc(10 * var(--rpx)) calc(8 * var(--rpx));
+  overflow:hidden auto;scrollbar-width:none}
+.pano-shortcut{flex:0 0 auto;display:flex;align-items:center;gap:calc(6 * var(--rpx));height:calc(56 * var(--rpx));
+  padding:0 calc(16 * var(--rpx));border:0;border-radius:calc(28 * var(--rpx));background:var(--chat-more-item-bg);
+  color:var(--chat-shortcut-text);font:inherit;font-size:calc(24 * var(--rpx));white-space:nowrap}
+.pano-compose-row{display:flex;align-items:center;gap:calc(16 * var(--rpx));padding:calc(16 * var(--rpx)) calc(30 * var(--rpx));
+  min-height:calc(114 * var(--rpx))}
+.pano-compose-icon,.pano-send{flex:0 0 auto;width:calc(60 * var(--rpx));min-width:0;height:calc(60 * var(--rpx));
+  display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:0;background:transparent;color:var(--chat-text);
+  font:inherit;font-size:calc(38 * var(--rpx));cursor:pointer}
+.pano-input-shell{flex:1 1 auto;min-width:0;display:flex;align-items:center;border:1px solid var(--chat-accent);
+  border-radius:calc(32 * var(--rpx));background:var(--chat-input-bg);padding:0 calc(16 * var(--rpx))}
+[data-chat="input"]{flex:1 1 auto;width:auto;height:auto;min-width:0;min-height:calc(60 * var(--rpx));max-height:calc(192 * var(--rpx));
+  resize:none;padding:calc(10 * var(--rpx)) 0;border:0;outline:0;border-radius:0;background:transparent;color:var(--chat-input-text);
+  font:inherit;font-size:16px;line-height:1.4}
+[data-chat="input"]::placeholder{color:var(--chat-text-muted)}
+[data-chat="send"]{color:var(--chat-accent)}
+[data-chat="messages"]{background:transparent}
 [data-chat="message"][data-from="ai"] [data-chat="message-body"]{background:var(--chat-bubble-ai-bg);color:var(--chat-bubble-text)}
 [data-chat="message"][data-from="user"] [data-chat="message-body"]{background:var(--chat-bubble-user-bg)}
-/* 预览专属辅助线，真机没有这条描边。实测气泡三色 = 页面背景（同为 #17181a），
-   气泡默认与背景无视觉分界；预览若不给任何提示，作者看不出气泡边界在哪。
-   这里用 var(--chat-border) 画一圈 inset 描边，只借用平台已有的边框令牌，
-   **不冒充任何平台底色** —— 一眼能看出是辅助线，而不是配色主张。
-   刻意挂在独立的 data-preview-bubble-outline 标记上，不混进令牌定义块，
-   便于作者用开发者工具直接关掉看真实效果。 */
+/* 预览专属辅助线，默认关闭；外层工具可临时在 root 挂此标记。 */
 [data-preview-bubble-outline] [data-chat="message-body"]{box-shadow:inset 0 0 0 1px var(--chat-border)}
-[data-slot="statusbar"]{position:sticky;top:0;z-index:800}
 [data-chat="author-stage"]{position:fixed;inset:0;z-index:2000;background:var(--chat-bg)}
-[data-chat="author-stage"][hidden]{display:none}"""
+[data-chat="author-stage"][hidden]{display:none}
+@media (min-width:750px){[data-chat="root"]{--rpx:1px}[data-chat="header"]{flex-basis:45px;min-height:45px;height:45px}
+  [data-chat="header-back"]{width:38px;padding:0 10px;font-size:25px}[data-chat="header-title"]{font-size:16px;font-weight:500}
+  [data-chat="header-actions"]{gap:4px;margin-right:8px}.pano-head-action{width:34px;height:34px;font-size:18px}
+  [data-chat="message"]{padding:11.5px 15px}[data-chat="message"] [data-chat="message-body"]{padding:12px;border-radius:16px 16px 16px 0}
+  [data-chat="message"][data-from="user"] [data-chat="message-body"]{border-radius:16px 16px 0 16px}
+  .pano-shortcuts{gap:3px;padding:4px 6px}.pano-shortcut{height:28px;padding:0 8px;border-radius:14px;font-size:12px}
+  .pano-compose-row{gap:8px;padding:8px 15px;min-height:57px}.pano-compose-icon,.pano-send{width:30px;height:30px;font-size:19px}
+  .pano-input-shell{border-radius:16px;padding:0 8px}[data-chat="input"]{min-height:30px;max-height:96px;padding:5px 0}}
+@media (max-height:520px) and (orientation:landscape){.pano-shortcuts{display:none}}
+"""
 
 
 def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
-    """全景预览：所有组件在同一文档里组合显示，模拟真实 MMD 聊天页。
-    底部固定输入栏（滚动不受影响）+ 发送按钮。
+    """全景预览：所有组件在同一文档里组合显示，模拟 MMD 聊天页。
+
+    mmd/st 保留通用 fixed composer；mmdsandbox 复刻真实 root flex 外壳，composer 是静态
+    flex item，消息区独立滚动，root 高度由内联 --chat-viewport-height 驱动。
 
     沙盒模式额外做三件事：
       1. 把官方稳定钩子挂到同一套骨架上（见 _panorama_hooks）；
@@ -1309,7 +1393,7 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
         assets = collect_sandbox_assets(obj)
         if assets:
             hoisted = ('<div data-preview-hoisted="1">%s</div>'
-                       % apply_platform_limits(assets, platform))
+                       % apply_platform_limits(assets, platform, script_badges=False))
     statusbar_node = ""
     if sandbox and statusbar_html.strip():
         # 角色卡 statusbar 留空 → 平台上这个节点整块不存在，预览照此处理。
@@ -1324,31 +1408,83 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
     else:
         runtime = PANORAMA_RUNTIME_SCAFFOLD
         send_scaffold = PANORAMA_SEND_SCAFFOLD
-    page = (
-        '%(runtime)s'
-        '%(hoisted)s'
-        '<div class="page"%(root)s>'
-        '<div class="topTabbar"%(header)s><span%(header_title)s>MMD Chat Preview</span>'
-        '<span class="pano-route-label">chat/chat</span>%(header_extra)s</div>'
-        '%(statusbar)s'
-        '<div class="chat chat-bg pano-chat" id="pano-chat"%(messages)s>'
-        '<div class="chat-body"%(list)s>'
-        '<div class="item" data-message-role="user"%(frame)s><div class="touch-scope"%(msg_user)s>'
-        '<div class="content right"%(body)s>用户示例消息</div></div></div>'
-        '<div class="item" data-message-role="ai"%(frame)s><div class="touch-scope"%(msg_ai)s>'
-        '<div class="content left"%(body)s>%(tested)s</div></div></div>'
-        '</div></div>'
-        '%(stage)s'
-        '<div class="chat-bottom chat-input-scope pano-input-bar"%(composer)s>'
-        '<textarea class="uni-textarea-textarea" rows="1" '
-        'placeholder="输入消息（Enter 发送，Shift+Enter 换行）"%(input)s></textarea>'
-        '<button class="pano-send send-msg" type="button"%(send)s>发送</button>'
-        '</div>'
-        '</div>'
-        '%(sendscaffold)s'
-    ) % dict(hooks, runtime=runtime, tested=tested_content,
-             statusbar=statusbar_node, hoisted=hoisted,
-             sendscaffold=send_scaffold)
+    if sandbox:
+        page = (
+            '%(runtime)s'
+            '%(hoisted)s'
+            '<div class="pano-sandbox-host">'
+            '<div class="page"%(root)s>'
+            '<header class="topTabbar"%(header)s>'
+            '<button class="pano-head-back" type="button" title="返回"%(header_back)s>‹</button>'
+            '<div%(header_title)s>SBK 沙盒预览</div>'
+            '<div%(header_actions)s>'
+            '<button class="pano-head-action" type="button" title="评论">▣</button>'
+            '<button class="pano-head-action" type="button" title="分享">⌯</button>'
+            '<button class="pano-head-action" type="button" title="收藏">☆</button>'
+            '<button class="pano-head-action" type="button" title="刷新">↻</button>'
+            '</div>%(header_extra)s</header>'
+            '%(statusbar)s'
+            '<main class="chat chat-bg pano-chat" id="pano-chat"%(messages)s>'
+            '<div class="chat-body"%(list)s>'
+            '<div class="item" data-message-role="ai"%(frame)s><article class="touch-scope"%(msg_ai)s>'
+            '<div class="content left"%(body)s>%(tested)s</div>%(message_extra)s%(message_actions)s'
+            '</article></div>'
+            '<div class="item" data-message-role="user"%(frame)s><article class="touch-scope"%(msg_user)s>'
+            '<div class="content right"%(body)s>用户示例消息</div>%(message_extra)s%(message_actions)s'
+            '</article></div>'
+            '</div></main>'
+            '<div data-slot="left"></div><div data-slot="right"></div>'
+            '%(stage)s'
+            '<footer class="chat-bottom chat-input-scope pano-input-bar"%(composer)s>'
+            '%(toolbar)s'
+            '<div class="pano-shortcuts">'
+            '<button class="pano-shortcut" type="button">模型设置</button>'
+            '<button class="pano-shortcut" type="button">对话设置</button>'
+            '<button class="pano-shortcut" type="button">选择指令</button>'
+            '<button class="pano-shortcut" type="button">总结剧情</button>'
+            '<button class="pano-shortcut" type="button">新的聊天</button>'
+            '<button class="pano-shortcut" type="button">用户人设</button>'
+            '</div>'
+            '<div class="pano-compose-row">'
+            '<button class="pano-compose-icon" type="button" title="指令">8</button>'
+            '<div class="pano-input-shell">'
+            '<textarea class="uni-textarea-textarea" rows="1" placeholder="快来聊天吧~"%(input)s></textarea>'
+            '<button class="pano-send send-msg" type="button" title="发送"%(send)s>➤</button>'
+            '</div>'
+            '<button class="pano-compose-icon" type="button" title="更多">＋</button>'
+            '</div>'
+            '</footer>'
+            '</div></div>'
+            '%(sendscaffold)s'
+        ) % dict(hooks, runtime=runtime, tested=tested_content,
+                 statusbar=statusbar_node, hoisted=hoisted,
+                 sendscaffold=send_scaffold)
+    else:
+        page = (
+            '%(runtime)s'
+            '%(hoisted)s'
+            '<div class="page"%(root)s>'
+            '<div class="topTabbar"%(header)s><span%(header_title)s>MMD Chat Preview</span>'
+            '<span class="pano-route-label">chat/chat</span>%(header_extra)s</div>'
+            '%(statusbar)s'
+            '<div class="chat chat-bg pano-chat" id="pano-chat"%(messages)s>'
+            '<div class="chat-body"%(list)s>'
+            '<div class="item" data-message-role="user"%(frame)s><div class="touch-scope"%(msg_user)s>'
+            '<div class="content right"%(body)s>用户示例消息</div></div></div>'
+            '<div class="item" data-message-role="ai"%(frame)s><div class="touch-scope"%(msg_ai)s>'
+            '<div class="content left"%(body)s>%(tested)s</div></div></div>'
+            '</div></div>'
+            '%(stage)s'
+            '<div class="chat-bottom chat-input-scope pano-input-bar"%(composer)s>'
+            '<textarea class="uni-textarea-textarea" rows="1" '
+            'placeholder="输入消息（Enter 发送，Shift+Enter 换行）"%(input)s></textarea>'
+            '<button class="pano-send send-msg" type="button"%(send)s>发送</button>'
+            '</div>'
+            '</div>'
+            '%(sendscaffold)s'
+        ) % dict(hooks, runtime=runtime, tested=tested_content,
+                 statusbar=statusbar_node, hoisted=hoisted,
+                 sendscaffold=send_scaffold)
 
     chrome_css = SANDBOX_CHROME_CSS if sandbox else ""
     frame_doc = "<style>%s</style><style>%s</style><style>%s</style>%s" % (
@@ -1361,14 +1497,13 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
     if sandbox:
         audit += ('<div class="frag-warn">NOTE 已模拟：[data-chat]/[data-slot] 钩子结构与 14 个 '
                   '--chat-* 设计令牌默认值（深色一套为实测真值；官方手册只记 10 个），另注入 '
-                  '--rpx 尺寸基准与 --chat-viewport-height 静态值（后者真机是 JS 内联 style，'
-                  '不属那 14 个），作者的平台选择器与 var() 在此可解析。'
+                  '--rpx 尺寸基准；--chat-viewport-height 由模拟宿主写在 root 内联 style，'
+                  '并随 iframe resize/键盘 inset 更新（后者不属那 14 个）。'
                   '</div>'
-                  '<div class="frag-warn">NOTE 气泡那圈淡描边是<b>预览辅助线，真机上没有</b>：'
-                  '实测平台气泡三色与页面背景<b>同色</b>（深色都是 #17181a），气泡默认与背景'
-                  '无视觉分界。想要卡片感必须自己给底色（比如 var(--chat-surface)），'
-                  '别以为平台已经帮你把气泡分出来了。要看真实效果：删掉 root 上的 '
-                  'data-preview-bubble-outline 属性。</div>'
+                  '<div class="frag-warn">NOTE 气泡那圈淡描边是<b>默认关闭的预览辅助线，'
+                  '真机上没有</b>：实测平台气泡三色与页面背景<b>同色</b>（深色都是 #17181a），'
+                  '气泡默认与背景无视觉分界。想临时看边界，可在 root 上添加 '
+                  'data-preview-bubble-outline 属性；正式效果仍以不带辅助线为准。</div>'
                   '<div class="frag-warn">NOTE 已装 <b>window.sdk 本地仿真</b>'
                   '（mmdsandbox-sim.js，置于作者脚本之前）：11 个顶层键、30 个能力、'
                   '12 个事件、冷启动 message:new → message:mount → message:done → ready、'
@@ -1388,7 +1523,7 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
     if sandbox:
         # 沙盒走仿真控制台（模拟平台侧动作）；MMD/ST 保留原路由脚手架工具。
         tools = _sandbox_toolbar_html(obj)
-        label = ('全景预览（沙盒本地仿真 · profile=%s · window.sdk 已装 · 固定输入框）'
+        label = ('沙盒聊天页仿真 · profile=%s · 深色实测外壳 · window.sdk 已装'
                  % html_mod.escape(profile))
     else:
         tools = (
@@ -1446,9 +1581,9 @@ def assemble_html(frags, platform, src_name, audit=""):
                             "body": body, "marker_css": MARKER_CSS}
 
 
-def apply_platform_limits(rs, platform):
+def apply_platform_limits(rs, platform, script_badges=True):
     """按平台改写 HTML；当前 MMD 额外禁用 allowlist 外的真实 inline onclick。
-    沙盒模式不净化 onclick（普通标签 onclick 合法），<script> 同样保留并标角标。"""
+    沙盒模式不净化 onclick，script_badges 只控制预览角标，不影响脚本执行。"""
     if platform == "st":
         return rs
 
@@ -1463,7 +1598,7 @@ def apply_platform_limits(rs, platform):
     def script_repl(m):
         return ('<div class="mmd-warn-badge" title="%s">✓script</div>'
                 % html_mod.escape(badge_title, quote=True)) + m.group(0)
-    out = re.sub(r"<script\b[\s\S]*?</script>", script_repl, out, flags=re.I)
+    out = re.sub(r"<script\b[\s\S]*?</script>", script_repl, out, flags=re.I) if script_badges else out
     return out
 
 

@@ -844,18 +844,114 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
     def test_panorama_carries_data_chat_hooks(self):
         """断言属性形态（前导空格），避免被 SANDBOX_CHROME_CSS 里的选择器文本蒙过。"""
         html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
-        for hook in ("root", "header", "header-title", "messages", "list",
-                     "message-frame", "message", "message-body",
-                     "author-stage", "composer", "input", "send"):
+        for hook in ("root", "header", "header-back", "header-title", "header-actions",
+                     "messages", "list", "message-frame", "message", "message-body",
+                     "message-actions", "author-stage", "composer", "input", "send"):
             with self.subTest(hook=hook):
                 self.assertIn(" data-chat=&quot;%s&quot;" % hook, html)
-        for slot in ("statusbar", "header-extra"):
+        for slot in ("statusbar", "header-extra", "message-extra", "left", "right", "toolbar"):
             with self.subTest(slot=slot):
                 self.assertIn(" data-slot=&quot;%s&quot;" % slot, html)
         self.assertIn(" data-from=&quot;ai&quot;", html)
         self.assertIn(" data-from=&quot;user&quot;", html)
-        self.assertIn(" data-theme=&quot;light&quot;", html)
+        self.assertIn(" data-theme=&quot;dark&quot;", html)
+        self.assertIn(" data-composer=&quot;visible&quot;", html)
         self.assertIn(" data-msg-id=&quot;pano-", html)
+
+    def test_sandbox_host_matches_measured_chat_shell(self):
+        """锁定 2026-08-27 真实聊天页的宿主边界，避免退回通用 fixed-input 预览。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn('<div class="pano-sandbox-host"><div class="page" data-chat="root"', chrome)
+        self.assertIn('style="--chat-viewport-height:100vh;', chrome)
+        self.assertIn("background-image:url('data:image/svg+xml", chrome)
+        self.assertIn('<header class="topTabbar" data-chat="header">', chrome)
+        self.assertIn('<main class="chat chat-bg pano-chat" id="pano-chat" data-chat="messages">', chrome)
+        self.assertIn('<footer class="chat-bottom chat-input-scope pano-input-bar" data-chat="composer">', chrome)
+        self.assertIn('placeholder="快来聊天吧~" data-chat="input"', chrome)
+        self.assertIn("模型设置", chrome)
+        self.assertIn("用户人设", chrome)
+        self.assertIn("气泡辅助线", chrome)
+        # 真机 default：辅助线不开；工具按钮才按需挂标记。
+        root_open = chrome.split('<div class="pano-sandbox-host">', 1)[1].split(">", 1)[0]
+        self.assertNotIn("data-preview-bubble-outline", root_open)
+
+    def test_sandbox_dom_slots_are_direct_root_children(self):
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        left = chrome.index('<div data-slot="left"></div>')
+        right = chrome.index('<div data-slot="right"></div>')
+        stage = chrome.index('<div data-chat="author-stage"')
+        composer = chrome.index('<footer class="chat-bottom')
+        self.assertLess(left, right)
+        self.assertLess(right, stage)
+        self.assertLess(stage, composer)
+        # 只计实际节点开标签，不能把 CSS 选择器文本算进去。
+        self.assertEqual(chrome.count('<div data-slot="left"></div>'), 1)
+        self.assertEqual(chrome.count('<div data-slot="right"></div>'), 1)
+
+    def test_sandbox_author_scripts_execute_without_inframe_audit_badges(self):
+        """角标属于诊断层；放进 iframe 会挤掉真实 header/composer 几何。"""
+        card = dict(self.CARD, regex_scripts=list(self.CARD["regex_scripts"]) + [
+            {"id": -3, "scriptName": "kit", "findRegex": "/{{kit}}/",
+             "replaceString": "<script>window.__author_ran=1;</script>"}])
+        chrome = html_mod.unescape(bp.assemble_panorama(card, "mmdsandbox", "t.json"))
+        self.assertIn("window.__author_ran=1", chrome)
+        frame_doc = html_mod.unescape(
+            chrome.split('<iframe class="pano-frame" srcdoc="', 1)[1].split('" sandbox=', 1)[0])
+        # marker CSS 可包含类名；禁止的是实际可见角标节点。
+        self.assertNotIn('<div class="mmd-warn-badge"', frame_doc)
+        self.assertNotIn(">✓script</div>", frame_doc)
+        # 三面板诊断仍保留角标，脚本可执行性证据没有被删除。
+        panels = bp.assemble_preview(card, "mmdsandbox", "t.json")
+        self.assertIn("✓script", panels)
+
+    def test_sandbox_controls_and_diagnostics_are_collapsed(self):
+        html = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn('<details class="preview-tools" data-preview-tools="1">', html)
+        self.assertNotIn('<details class="preview-tools" data-preview-tools="1" open', html)
+        self.assertIn('<div class="preview-tools-body">', html)
+        self.assertIn('.preview-tools:not([open])>.preview-tools-body{display:none}',
+                      bp.PANORAMA_PAGE_TEMPLATE)
+        self.assertNotIn('.preview-tools{display:flex', bp.PANORAMA_PAGE_TEMPLATE)
+        self.assertIn("沙盒仿真控制（默认折叠）", html)
+        self.assertIn('<details class="pano-audit">', html)
+        self.assertIn("white-space:nowrap;overflow:hidden;text-overflow:ellipsis", bp.PANORAMA_PAGE_TEMPLATE)
+        # 映射模板里的裸 % 会直到最终格式化才爆，必须直接锁定整页可生成。
+        rendered = bp.PANORAMA_PAGE_TEMPLATE % {
+            "platform": "mmdsandbox", "banner": "b", "body": "x", "marker_css": "m"
+        }
+        self.assertIn("width:100%", rendered)
+
+    def test_sandbox_css_preserves_platform_defaults_for_sbk_to_fix(self):
+        css = bp.SANDBOX_CHROME_CSS
+        self.assertIn('height:var(--chat-viewport-height)', css)
+        self.assertIn('max-width:100%;overflow:hidden auto;background-color:var(--chat-bg)', css)
+        self.assertIn('[data-chat="composer"]{position:static;', css)
+        self.assertIn('left:auto;right:auto;bottom:auto', css)
+        self.assertNotIn('[data-slot="statusbar"]{position:sticky', css)
+        self.assertNotIn('[data-slot="statusbar"]{flex-shrink:0', css)
+        self.assertIn('white-space:pre-line;opacity:.9', css)
+        self.assertIn('.pano-compose-icon,.pano-send{flex:0 0 auto;', css)
+        self.assertIn('min-width:0;height:calc(60 * var(--rpx));', css)
+        self.assertIn('padding:0;border:0;border-radius:0;background:transparent', css)
+        self.assertIn('[data-preview-bubble-outline] [data-chat="message-body"]', css)
+        # 真实消息附加槽必须存在，动态消息也由模拟器构造同样的子节点。
+        self.assertIn('data-slot="message-extra"', html_mod.unescape(
+            bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")))
+        sim = bp.load_sandbox_sim_source()
+        self.assertIn("extra.setAttribute('data-slot', 'message-extra')", sim)
+        self.assertIn("actions.setAttribute('data-chat', 'message-actions')", sim)
+
+    def test_contract_records_real_chat_visual_shell(self):
+        shell = bp.load_sandbox_contract()["cssContract"]["visualShell"]
+        self.assertEqual(shell["accuracy"], "exact")
+        self.assertEqual(shell["defaultObservedTheme"], "dark")
+        self.assertEqual(shell["header"]["desktopHeightPx"], 45)
+        self.assertEqual(shell["composer"]["position"], "static")
+        self.assertEqual(shell["message"]["bodyOpacity"], 0.9)
+        self.assertEqual(shell["message"]["bodyWhiteSpace"], "pre-line")
+        self.assertEqual(shell["directRootSlots"], ["statusbar", "left", "right"])
+        self.assertEqual(shell["messageChildren"],
+                         ["message-body", "message-extra", "message-actions"])
 
     def test_panorama_defines_all_sandbox_design_tokens(self):
         """防回归：14 个实测设计令牌必须全部注入产物。
@@ -902,10 +998,11 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertEqual(set(parsed), set(bp.SANDBOX_DESIGN_TOKENS))
 
     def test_bubble_outline_is_preview_aid_not_a_color_claim(self):
-        """描边必须是独立标记承载 + 只用 --chat-border，且 NOTE 里说清真机没有。"""
+        """描边必须独立、默认关闭、只用 --chat-border，且 NOTE 说清真机没有。"""
         html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
         chrome = html_mod.unescape(html)
-        self.assertIn('data-preview-bubble-outline="1"', chrome)
+        root_open = chrome.split('<div class="pano-sandbox-host">', 1)[1].split(">", 1)[0]
+        self.assertNotIn('data-preview-bubble-outline', root_open)
         self.assertIn("[data-preview-bubble-outline] [data-chat=\"message-body\"]"
                       "{box-shadow:inset 0 0 0 1px var(--chat-border)}", chrome)
         # 描边不得混进令牌定义块（那里只放平台真值）。

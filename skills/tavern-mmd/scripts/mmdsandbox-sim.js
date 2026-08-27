@@ -21,7 +21,7 @@
   if (W.__MMD_SANDBOX_SIM__) { return; }
 
   var CFG = W.__MMD_SANDBOX_SIM_CONFIG__ || {};
-  var CONTRACT_VERSION = '1.0.1';
+  var CONTRACT_VERSION = '1.1.0';
   var PROFILE = CFG.profile === 'thin-preview' ? 'thin-preview' : 'chat';
   var THIN = PROFILE === 'thin-preview';
 
@@ -288,12 +288,18 @@
     var body = D.createElement('div');
     body.className = 'content ' + (role === 'user' ? 'right' : 'left');
     body.setAttribute('data-chat', 'message-body');
+    var extra = D.createElement('div');
+    extra.setAttribute('data-slot', 'message-extra');
+    var actions = D.createElement('div');
+    actions.setAttribute('data-chat', 'message-actions');
     if (role === 'ai' && typeof renderedHtml === 'string' && renderedHtml) {
       body.innerHTML = renderedHtml;              // 仅预览器传入的离线规则结果；事件 payload 仍保留原文
     } else {
       body.textContent = String(text);
     }
     touch.appendChild(body);
+    touch.appendChild(extra);
+    touch.appendChild(actions);
     item.appendChild(touch);
     list.appendChild(item);
     var pane = nq('[data-chat="messages"]');
@@ -588,6 +594,8 @@
     boot: function () {
       if (booted) { return false; }
       booted = true;
+      // 真机由宿主按当前 visualViewport 把该值写成 root 内联变量。
+      control.setViewportHeight(CFG.viewportHeight || W.innerHeight || 1205);
       var bubble = nq('[data-chat="message"][data-from="ai"]');
       var content = CFG.greeting !== undefined ? String(CFG.greeting)
         : (bubble ? String(bubble.textContent || '') : '');
@@ -708,7 +716,7 @@
       return v;
     },
     setKeyboardInset: function (inset) {
-      var base = CFG.viewportHeight || 1205;
+      var base = CFG.viewportHeight || W.innerHeight || 1205;
       return control.setViewportHeight(Math.max(0, base - (inset || 0)));
     },
     setScope: function (enabled) { scopeOn = enabled !== false; return scopeOn; },
@@ -762,6 +770,14 @@
   } else if (D) {
     // 已完成（例如脚本被后置注入）：仍保持异步，避免作者顶层同步就拿到 mount。
     if (typeof W.setTimeout === 'function') { W.setTimeout(function () { control.boot(); }, 0); }
+  }
+
+  // 本地 iframe 尺寸变化时同步宿主内联高度。真机由 visualViewport 驱动；
+  // 预览页 setViewportSize 会触发 iframe window.resize，不能沿用冷启动旧值。
+  if (!CFG.viewportHeight && W && typeof W.addEventListener === 'function') {
+    W.addEventListener('resize', function () {
+      control.setViewportHeight(W.innerHeight || 1205);
+    });
   }
 
   // 输入框变化 → input:change。载荷形状未确证，这里给当前文本。

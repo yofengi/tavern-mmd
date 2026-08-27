@@ -96,10 +96,10 @@ MMD 导入 json（含 `statusbar`/`beginning`/`regex_scripts`）走**真实替�
 ### 两种产出：三面板诊断 + 全景预览（`--mode`）
 
 - `--mode panels`：只产**三面板诊断**（上述），逐组件隔离，定位单组件 CSS/ID 冲突。
-- `--mode panorama`：只产**全景预览**——所有组件组合进**一个模拟 MMD 聊天页**的单文档：可滚动聊天区（第一句话整合渲染，全局美化/状态栏/侧边栏/悬浮球同场运行）+ **底部固定主输入框**（上下滑动不受影响）+ 右侧发送按钮。发送会在聊天区追加用户气泡（`.content.right`）和一条占位 AI 气泡（`.content.left`，文案标明"预览模式，真实回复需实机生成"）。输入框用 `.uni-textarea-textarea` 类名，与状态栏选项按钮的回填选择器一致，所以选项点击→回填输入框这条链在全景里也通。
+- `--mode panorama`：只产**全景预览**。`mmd`/`st` 保留通用聊天骨架（滚动聊天区 + fixed 输入栏 + 发送占位气泡）；`mmdsandbox` 使用真实新聊天页的 root flex 外壳：header/statusbar/messages/left/right/stage/composer 都是同一列的稳定节点，只有 messages 滚动，composer 是静态 `flex-shrink:0` 子项。沙盒发送走本地 `sdk.message.send` 表面，动态消息与静态开场白使用同一 `message-body/message-extra/message-actions` 结构。
 - `--mode both`（默认）：两份都产，`<文件>-preview-<平台>.html`（三面板）+ `<文件>-panorama-<平台>.html`（全景）。`-o` 仅在单一 mode 时生效，both 模式按默认命名输出两份文件。
 
-> 全景发送逻辑是预览工具自带的脚手架，在所有平台下都执行，与被测美化产物无关 —— 它不代表被测产物可以这么写（沙盒模式禁 `img onerror` 点火器，脚手架的写法不要抄进产物）。
+> 全景发送逻辑是预览工具脚手架，不代表被测产物可以照抄。沙盒脚手架用经典 `<script>` + `sdk.message.send`，不使用被官方禁用的 `img onerror`；`mmd`/`st` 仍走各自旧脚手架。
 
 ```bash
 python build-preview.py <文件> --platform mmd|mmdsandbox|st [--mode panels|panorama|both] [-o 输出.html]
@@ -110,7 +110,7 @@ python build-preview.py <文件> --platform mmd|mmdsandbox|st [--mode panels|pan
 平台渲染差异：
 - `st`：原样渲染，script/ES6 全执行
 - `mmd`：script/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行；inline onclick 按已实测的净化规则处理
-- `mmdsandbox`：复刻真实 DOM 契约 —— `[data-chat="root"]`、顶栏、`[data-slot="statusbar"]`、messages / list / message-frame / message / message-body、composer / input / send、author-stage，以及 **14 个 `--chat-*` 设计令牌**（实测确证，官方手册只记 10 个；清单见脚本里的 `SANDBOX_DESIGN_TOKENS`），深浅两套各一份。另注入 `--rpx`（= `calc(100vw / 750)`，平台尺寸基准，作者写 `calc(24 * var(--rpx))` 才算得出来）与 `--chat-viewport-height` 静态值 —— 后两个**不属于**那 14 个令牌（`--chat-viewport-height` 在真机是 JS 写的内联 style）。并按平台的做法把**未被匹配命中**规则里的 `<style>` / `<script>` 也抽出装上（沙盒模式装卡即抽出，不需要命中）
+- `mmdsandbox`：复刻 2026-08-27 只读实测的新聊天页外壳与稳定 DOM 契约：dark root flex 列、45px desktop header、statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、静态 composer/toolbar/input/send、author-stage，以及 **14 个 `--chat-*` 设计令牌**（官方手册只记 10 个）。另注入 `--rpx=calc(100vw / 750)`；`--chat-viewport-height` 不属于 14 个令牌，由模拟宿主写在 root 内联 style，并随 iframe resize 与键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍按平台装卡即抽出执行，但 script 审计角标只留在三面板诊断，不挤进实际全景 iframe。仿真控制、证据说明和气泡边界辅助线默认关闭/折叠。
 
 > **沙盒预览带能力精度诊断**：已装零依赖本地 SDK 模拟器，提供 `chat` / `thin-preview` profile、30 能力、12 事件、message scope、stage/theme/switch 与已确证净化/预算子集。每项标 `exact` / `conservative` / `probe-needed`；宿主握手、真实 AI 流式、完整 Markdown/净化、跨设备 save、CSP、触控/软键盘仍由真实站承担。
 
@@ -134,10 +134,13 @@ python make_card_image.py <卡JSON> [--bg 底图路径] [-o 输出路径]
 
 ## 工作流（详见各指令文件）
 
-产出物完成 → 子代理跑 validate.py（结果写 `工作/审核记录.md`；悬空标记必须 0 错）→ 有错则主AI/子代理修复复审 → 主AI 跑 build-preview.py（默认 `--mode both`）→ **先用 Preview 工具看三面板诊断**审核单组件（第一句话剩余、状态栏单独、悬浮组件）并测交互 → **再看全景预览二次审核**组合效果（所有组件同场无串台、输入框固定、发送/选项回填正常）→ 全景预览不默认关闭，留给用户自查是否要改（子代理做不了 Preview 这步）。
+产出物完成 → 子代理跑 validate.py（结果写 `工作/审核记录.md`；悬空标记必须 0 错）→ 有错则主AI/子代理修复复审 → 主AI 跑 build-preview.py（默认 `--mode both`）→ **先看三面板诊断**审核单组件并测交互 → **再看全景预览**审核组合效果。沙盒还须分别跑 `chat`/`thin-preview`，检查桌面、竖屏、横屏/键盘高度、主题、舞台与多轮；外层仿真控制和诊断默认折叠，用户首屏直接看到实际聊天页。截图判结构，颜色/间距/字号用 computed style 复核。
 
 ## 测试
 
 ```bash
 python -m unittest test_validate test_build_preview test_make_card_image test_worldbook_tool -v
+node --test test_mmdsandbox_sim.mjs
 ```
+
+当前沙盒模拟器回归为 **49 项**；契约版本以 `fixtures/mmdsandbox/contract.json` 为准，不在代码外另抄行为真值。

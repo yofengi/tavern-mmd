@@ -210,7 +210,7 @@ python <skill>/scripts/validate.py output/文件.json --platform mmd
 - `innerHTML`/`cssText` → 易被平台净化，按报告改写（两个 MMD 平台都只是 WARN）
 - `悬空标记` → `statusbar`/`beginning` 里有 `<标记>` 但 `regex_scripts` 没有对应 `findRegex` 消费；会在页面裸露，必须补正则或删标记
 
-可选预览（状态栏/美化必做）：`python <skill>/scripts/build-preview.py output/文件.json --platform <mmd|mmdsandbox|st>`（`--platform` 必填无默认；默认 `--mode both`）。MMD 导入 json 会生成两份：**三面板沙箱**（①第一句话剩余预览，显示扣除单独抽检的状态栏/悬浮组件后的正文、选项菜单/图片/特殊美化；②状态栏单独预览；③悬浮组件预览，侧边栏/悬浮球）用于逐组件审核；**全景预览**（`-panorama-` 文件）把所有组件组合进一个模拟 MMD 聊天页，底部固定主输入框+发送按钮，发送出现用户气泡+占位AI气泡，用于二次审核组合效果。主AI 用 Preview 工具先看三面板、再看全景，全景不默认关闭留给用户自查。
+可选预览（状态栏/美化必做）：`python <skill>/scripts/build-preview.py output/文件.json --platform <mmd|mmdsandbox|st>`（`--platform` 必填无默认；默认 `--mode both`）。MMD 导入 json 会生成三面板诊断与全景：三面板用于逐组件审核；全景把组件组合进一个聊天页。`mmd`/`st` 的通用全景使用 fixed 输入栏与占位 AI；`mmdsandbox` 使用真实新聊天页的 root flex 外壳、静态 composer 和本地 SDK profile，仿真控制/证据说明默认折叠。主AI 先看三面板，再按平台检查全景；沙盒还要分别生成 `chat`/`thin-preview` 并验桌面、竖屏、横屏/键盘高度。
 
 > `--platform mmd`（当前 MMD，validate.py 的默认值）下，`<script>`/ES6/onerror 多行均按实测能力放行；inline `onclick` 只认证平台已实测的 canonical 形式，代码字符串、赋值和未认证形式均记为 ERROR，并在 preview 中禁用。`--platform mmdsandbox` 换一整套检查（6 键顶层白名单、`chatVersion` 必须为 1、`id` 必须负数、SDK 能力/事件名核对、禁 `img onerror` 点火器等），见第三节 3.6。
 
@@ -376,7 +376,7 @@ python <skill>/scripts/build-preview.py output/文件-regex.json --platform mmds
 - 世界书条目标题 20 字在沙盒模式是 **WARN**（当前 MMD 仍是 ERROR），理由见 `worldbook-json.md` 与 `../platforms/mmd-sandbox.md` §10.1。
 - 若误把 chara_card_v2 卡传进来审沙盒，会 WARN 提示沙盒真正的交付物是本节的导入 JSON。
 
-`build-preview.py --platform mmdsandbox` 复刻真实 DOM 契约（`[data-chat="root"]`、顶栏、`[data-slot="statusbar"]`、messages/list/message-frame/message/message-body、composer/input/send、author-stage）与 **14 个 `--chat-*` 设计令牌**（实测确证，官方手册只记 10 个），深浅两套各一份；另注入 `--rpx` 尺寸基准与 `--chat-viewport-height` 静态值，这两个不计入那 14 个（`--chat-viewport-height` 真机是 JS 内联 style）。并按平台的做法把未命中规则里的 `<style>` / `<script>` 抽出装上。预览带一条 NOTE 列明**没有**模拟的东西：SDK、「消息生成中」占位、净化白名单、Markdown 管线 —— 这四类只能回实机验。
+`build-preview.py --platform mmdsandbox` 使用共享契约 v1.1.0 复刻真实新聊天页：dark root flex 外壳、header/statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、author-stage、静态 composer/toolbar/input/send，以及 **14 个 `--chat-*` 设计令牌**。另注入 `--rpx`；`--chat-viewport-height` 由模拟宿主以内联 style 写入并随 iframe resize/键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍装卡即抽出执行，但 script 审计角标只在诊断页展示，不挤占全景 iframe。预览自带 `chat`/`thin-preview` SDK profile、能力精度表、默认折叠的仿真控制与证据说明；真实宿主握手、AI 分块节奏、完整 Markdown/净化、跨设备 save、CSP 与最终人工验收仍需真实站。
 
 ## 第四节：MMD 手填清单（Markdown 交付物，备选）
 

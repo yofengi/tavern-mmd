@@ -33,6 +33,15 @@ function boot({ profile = "chat", config = {}, authorScript = null,
     Promise,
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
     __MMD_SANDBOX_SIM_CONFIG__: { profile, greeting, ...config },
+    innerHeight: config.viewportHeight || 844,
+    _listeners: new Map(),
+    addEventListener(type, fn) {
+      if (!this._listeners.has(type)) this._listeners.set(type, []);
+      this._listeners.get(type).push(fn);
+    },
+    _fire(type, ev = {}) {
+      (this._listeners.get(type) || []).slice().forEach((fn) => fn(ev));
+    },
   };
   win.window = win;
   win.globalThis = win;
@@ -54,6 +63,64 @@ function boot({ profile = "chat", config = {}, authorScript = null,
            sim: win.__MMD_SANDBOX_SIM__, sdk: win.sdk, authorView,
            control: win.__MMD_SANDBOX_SIM__.control };
 }
+
+test("假 DOM 与真实聊天宿主的稳定槽位同构", () => {
+  const { doc, dom } = boot();
+  assert.equal(dom.host.parentNode, doc.body);
+  assert.equal(dom.root.parentNode, dom.host);
+  assert.equal(dom.root.getAttribute("data-theme"), "dark");
+  assert.equal(dom.root.getAttribute("data-composer"), "visible");
+  assert.equal(dom.header.tagName, "HEADER");
+  assert.equal(dom.messages.tagName, "MAIN");
+  assert.equal(dom.bubble.tagName, "ARTICLE");
+  assert.equal(dom.composer.tagName, "FOOTER");
+  assert.equal(dom.leftSlot.parentNode, dom.root);
+  assert.equal(dom.rightSlot.parentNode, dom.root);
+  assert.equal(dom.statusbar.parentNode, dom.root);
+  assert.equal(dom.messageExtra.parentNode, dom.bubble);
+  assert.equal(dom.messageActions.parentNode, dom.bubble);
+  assert.equal(dom.toolbar.parentNode, dom.composer);
+});
+
+test("动态消息也生成 message-extra 与 message-actions", () => {
+  const { doc, control } = boot();
+  control.addAI("第二条");
+  control.addUser("第三条");
+  control.setScope(false);
+  const messages = doc.querySelectorAll('[data-chat="message"]');
+  assert.equal(messages.length, 3);
+  for (const message of messages) {
+    assert.ok(message.querySelector('[data-slot="message-extra"]'));
+    assert.ok(message.querySelector('[data-chat="message-actions"]'));
+  }
+});
+
+test("动态 AI 的事件保留原文，DOM 使用离线渲染 HTML", () => {
+  const seen = [];
+  const { control, doc } = boot({
+    authorScript(win) { win.sdk.on("message:done", (p) => seen.push(p.content)); },
+  });
+  control.addAI("AI 原始正文", '<div class="sbk-snap">已渲染状态</div>');
+  control.setScope(false);
+  const messages = doc.querySelectorAll('[data-chat="message"]');
+  const body = messages.at(-1).querySelector('[data-chat="message-body"]');
+  assert.equal(seen.at(-1), "AI 原始正文");
+  assert.equal(body.innerHTML, '<div class="sbk-snap">已渲染状态</div>');
+  assert.equal(body.textContent, "已渲染状态");
+  assert.ok(body.innerHTML.includes("sbk-snap"));
+});
+
+test("契约记录真实聊天页视觉外壳边界", () => {
+  const shell = CONTRACT.cssContract.visualShell;
+  assert.equal(shell.accuracy, "exact");
+  assert.equal(shell.defaultObservedTheme, "dark");
+  assert.equal(shell.header.desktopHeightPx, 45);
+  assert.equal(shell.statusbar.flexShrink, 1);
+  assert.equal(shell.composer.position, "static");
+  assert.deepEqual(shell.directRootSlots, ["statusbar", "left", "right"]);
+  assert.deepEqual(shell.messageChildren,
+                   ["message-body", "message-extra", "message-actions"]);
+});
 
 test("sdk 在作者脚本执行时已就位，顶层恰 11 键且无 once/off", () => {
   let keys = null;
@@ -456,13 +523,13 @@ test("theme 改 root data-theme 并派 theme:change", () => {
   const { dom, control } = boot({
     authorScript(win) { win.sdk.on("theme:change", (p) => payloads.push(p)); },
   });
-  assert.equal(dom.root.getAttribute("data-theme"), "light");
-  assert.equal(control.theme("dark"), "dark");
   assert.equal(dom.root.getAttribute("data-theme"), "dark");
-  assert.deepEqual(payloads, ["dark"]);
-  control.theme();                       // 不传参 = 切换
+  assert.equal(control.theme("light"), "light");
   assert.equal(dom.root.getAttribute("data-theme"), "light");
-  assert.deepEqual(payloads, ["dark", "light"]);
+  assert.deepEqual(payloads, ["light"]);
+  control.theme();                       // 不传参 = 切换
+  assert.equal(dom.root.getAttribute("data-theme"), "dark");
+  assert.deepEqual(payloads, ["light", "dark"]);
 });
 
 test("switch 清消息与 replay 历史，但订阅仍在", () => {
@@ -484,6 +551,25 @@ test("switch 清消息与 replay 历史，但订阅仍在", () => {
   // 旧订阅仍在（无 off）：新消息照样送达。
   control.addAI("新会话第一句");
   assert.ok(hits.some(([k]) => k === "mount" && hits.length > 2));
+});
+
+test("冷启动把当前 iframe 高度写入 --chat-viewport-height", () => {
+  const { dom } = boot({ config: {} });
+  assert.equal(dom.root.style.getPropertyValue("--chat-viewport-height"), "844px");
+});
+
+test("iframe resize 跟随更新 --chat-viewport-height", () => {
+  const { win, dom } = boot();
+  win.innerHeight = 390;
+  win._fire("resize");
+  assert.equal(dom.root.style.getPropertyValue("--chat-viewport-height"), "390px");
+});
+
+test("显式 viewportHeight 配置不被窗口 resize 覆写", () => {
+  const { win, dom } = boot({ config: { viewportHeight: 1205 } });
+  win.innerHeight = 390;
+  win._fire("resize");
+  assert.equal(dom.root.style.getPropertyValue("--chat-viewport-height"), "1205px");
 });
 
 test("键盘/视口控制改 --chat-viewport-height", () => {

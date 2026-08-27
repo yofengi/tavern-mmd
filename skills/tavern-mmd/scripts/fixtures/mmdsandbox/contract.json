@@ -1,5 +1,5 @@
 {
-  "contractVersion": "1.0.1",
+  "contractVersion": "1.1.0",
   "title": "MMD 沙盒模式（chatVersion:1）本地仿真契约",
   "purpose": "build-preview 沙盒全景与 mmdsandbox-sim.js 共用的事实清单。仿真页是回归工具，不是事实来源。",
   "sourceOfTruth": {
@@ -289,7 +289,44 @@
     },
     "chromeHasNoZIndex": true,
     "authorOverlayRange": "3500-7999",
-    "viewport": {"width": 323, "height": 1205, "dpr": 1}
+    "viewport": {"width": 323, "height": 1205, "dpr": 1},
+    "visualShell": {
+      "accuracy": "exact",
+      "observedDate": "2026-08-27",
+      "environment": "真实 MMD 沙盒聊天页 https://h5.aitchat.org/#/pages/chat/host 内可见 iframe.chat-iframe（roleId=64304），全程只读",
+      "defaultObservedTheme": "dark",
+      "root": {
+        "display": "flex",
+        "direction": "column",
+        "position": "relative",
+        "overflow": "hidden auto",
+        "background": "#17181a",
+        "inlineStyle": ["--chat-viewport-height", "background-image", "background-position", "background-size", "background-repeat"]
+      },
+      "header": {"desktopHeightPx": 45, "flexShrink": 0, "background": "#17181a"},
+      "statusbar": {"isRootFlexItem": true, "flexShrink": 1, "position": "static"},
+      "messages": {"flexesIntoRemainingSpace": true, "overflow": "hidden auto"},
+      "message": {
+        "fullWidth": true,
+        "desktopPaddingPx": [11.5, 15],
+        "bodyMaxWidth": "90%",
+        "bodyFontSizePx": 15,
+        "bodyOpacity": 0.9,
+        "bodyWhiteSpace": "pre-line",
+        "aiBottomLeftRadiusPx": 0
+      },
+      "composer": {
+        "position": "static",
+        "flexShrink": 0,
+        "desktopObservedHeightPx": 95,
+        "rows": ["shortcut-strip", "compose-row"],
+        "inputBorderColor": "--chat-accent",
+        "inputPlaceholder": "快来聊天吧~"
+      },
+      "directRootSlots": ["statusbar", "left", "right"],
+      "messageChildren": ["message-body", "message-extra", "message-actions"],
+      "note": "桌面几何取 1232×1248；窄页由平台 --rpx=100vw/750 缩放外壳，正文仍保持约 15px。light 外壳未在本次只读观测中量化。"
+    }
   },
   "environment": {
     "architecture": "部署在 c<卡片ID>.sbx.aitchat.org 的独立 Vue 应用，跨源 iframe 嵌入 h5.aitchat.org",

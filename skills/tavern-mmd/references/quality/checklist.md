@@ -153,8 +153,9 @@
 
 ### 审核与验证
 - [ ] **已跑 `scripts/validate.py 文件 --platform mmdsandbox` 且 0 错误**，WARN 逐条看过并确认是有意保留
-- [ ] 已跑 `scripts/build-preview.py 文件 --platform mmdsandbox --mode both`，本地仿真的 `chat` 与 `thin-preview` profile 都通过；事件顺序、历史补发、消息 scope、主题、舞台、存储降级和多轮更新的诊断无失败
-- [ ] 已在本地浏览器验桌面、窄屏竖向、横屏/软键盘：真实点击、输入、拖动、菜单、设置、stage、深浅色与截图结构无重叠；字号/颜色/间距用 computed style 复核，不凭压缩截图猜值
+- [ ] 已跑 `scripts/build-preview.py 文件 --platform mmdsandbox --mode panorama --sandbox-profile chat` 与 `--sandbox-profile thin-preview`；事件顺序、历史补发、消息 scope、主题、舞台、存储降级和多轮更新的诊断无失败
+- [ ] 沙盒全景首屏是实际聊天页：仿真控制/证据说明默认折叠，iframe 内无 `✓script` 审计角标，气泡辅助线默认关闭；header/messages/composer 与 left/right/message-extra/actions 槽位均存在
+- [ ] 已在本地浏览器验桌面、窄屏竖向、横屏/软键盘：真实点击、输入、拖动、菜单、设置、stage、深浅色与截图结构无重叠；`--chat-viewport-height` 随 iframe resize/键盘 inset 更新，composer/input 始终可见；字号/颜色/间距用 computed style 复核，不凭压缩截图猜值
 - [ ] 预览能力矩阵已看过：`exact` 可作日常回归，`conservative` 只作保守门禁，`probe-needed` 不当成平台事实
 - [ ] **真实 MMD 不是日常默认回归环境**：AI 不自行登录账号、不把正式卡/公开卡当夹具。只有出现 `probe-needed` 平台边界，或用户授权最终人工验收时才回真实站；任何「保存编辑」/公开提交先确认对外影响
 - [ ] 若做最终实站验收，已区分瘦预览真实行为：`save.get/save.keys` 会同步抛 `SdkError`，`cache.get` 返回 `undefined`，`composer.visible()` 与 stage 读能力仍可用；不能概括成“一律 NOT_SUPPORTED”

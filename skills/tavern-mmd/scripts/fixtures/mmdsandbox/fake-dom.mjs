@@ -40,6 +40,7 @@ export class FakeElement {
     this.style = new FakeStyle();
     this._attrs = new Map();
     this._text = "";
+    this._html = "";
     this._listeners = new Map();
     this.scrollTop = 0;
     this.scrollHeight = 100;
@@ -76,7 +77,17 @@ export class FakeElement {
   set textContent(v) {
     this.childNodes.forEach((c) => { c.parentNode = null; });
     this.childNodes = [];
+    this._html = "";
     this._text = String(v);
+  }
+
+  get innerHTML() { return this._html; }
+  set innerHTML(v) {
+    this.childNodes.forEach((c) => { c.parentNode = null; });
+    this.childNodes = [];
+    this._html = String(v);
+    // 测试夹具不实现 HTML parser，但 textContent 至少反映可见文本，且保留原 HTML 可断言。
+    this._text = this._html.replace(/<[^>]*>/g, "");
   }
 
   matches(sel) {
@@ -172,39 +183,68 @@ export function buildPanoramaDom(doc, greeting = "开场白正文") {
     for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
     return n;
   };
-  const root = el("div", { "data-chat": "root", "data-theme": "light",
+  const host = el("div", {}, "pano-sandbox-host");
+  const root = el("div", { "data-chat": "root", "data-theme": "dark",
                            "data-composer": "visible" }, "page");
-  const header = el("div", { "data-chat": "header" }, "topTabbar");
+  root.style.setProperty("--chat-viewport-height", "1205px");
+  const header = el("header", { "data-chat": "header" }, "topTabbar");
+  const headerBack = el("button", { "data-chat": "header-back" }, "pano-head-back");
+  const headerTitle = el("div", { "data-chat": "header-title" });
+  const headerActions = el("div", { "data-chat": "header-actions" });
+  const headerExtra = el("span", { "data-slot": "header-extra" });
+  header.appendChild(headerBack);
+  header.appendChild(headerTitle);
+  header.appendChild(headerActions);
+  header.appendChild(headerExtra);
   const statusbar = el("div", { "data-slot": "statusbar" }, "pano-statusbar");
-  const messages = el("div", { "data-chat": "messages" }, "chat pano-chat");
+  const messages = el("main", { "data-chat": "messages" }, "chat pano-chat");
   const list = el("div", { "data-chat": "list" }, "chat-body");
 
   const frame = el("div", { "data-chat": "message-frame" }, "item");
-  const bubble = el("div", { "data-chat": "message", "data-from": "ai",
-                            "data-state": "done", "data-msg-id": "pano-2" }, "touch-scope");
+  const bubble = el("article", { "data-chat": "message", "data-from": "ai",
+                                "data-state": "done", "data-msg-id": "pano-2" }, "touch-scope");
   const body = el("div", { "data-chat": "message-body" }, "content left");
   body.textContent = greeting;
   const inner = el("span", { id: "author-node" }, "author-inner");
   inner.textContent = "作者节点";
   body.appendChild(inner);
+  const messageExtra = el("div", { "data-slot": "message-extra" });
+  const messageActions = el("div", { "data-chat": "message-actions" });
   bubble.appendChild(body);
+  bubble.appendChild(messageExtra);
+  bubble.appendChild(messageActions);
   frame.appendChild(bubble);
   list.appendChild(frame);
   messages.appendChild(list);
 
+  const leftSlot = el("div", { "data-slot": "left" });
+  const rightSlot = el("div", { "data-slot": "right" });
   const stage = el("div", { "data-chat": "author-stage", hidden: "" }, "pano-stage");
-  const composer = el("div", { "data-chat": "composer" }, "pano-input-bar");
+  const composer = el("footer", { "data-chat": "composer" }, "pano-input-bar");
+  const toolbar = el("div", { "data-slot": "toolbar" });
+  const shortcuts = el("div", {}, "pano-shortcuts");
+  const composeRow = el("div", {}, "pano-compose-row");
+  const inputShell = el("div", {}, "pano-input-shell");
   const textarea = el("textarea", { "data-chat": "input" }, "uni-textarea-textarea");
   const send = el("button", { "data-chat": "send" }, "pano-send");
-  composer.appendChild(textarea);
-  composer.appendChild(send);
+  inputShell.appendChild(textarea);
+  inputShell.appendChild(send);
+  composeRow.appendChild(inputShell);
+  composer.appendChild(toolbar);
+  composer.appendChild(shortcuts);
+  composer.appendChild(composeRow);
 
   root.appendChild(header);
   root.appendChild(statusbar);
   root.appendChild(messages);
+  root.appendChild(leftSlot);
+  root.appendChild(rightSlot);
   root.appendChild(stage);
   root.appendChild(composer);
-  doc.body.appendChild(root);
-  return { root, header, statusbar, messages, list, frame, bubble, body, inner,
-           stage, composer, textarea, send };
+  host.appendChild(root);
+  doc.body.appendChild(host);
+  return { host, root, header, headerBack, headerTitle, headerActions, headerExtra,
+           statusbar, messages, list, frame, bubble, body, inner, messageExtra,
+           messageActions, leftSlot, rightSlot, stage, composer, toolbar, shortcuts,
+           composeRow, inputShell, textarea, send };
 }

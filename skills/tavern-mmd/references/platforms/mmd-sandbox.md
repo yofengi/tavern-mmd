@@ -607,6 +607,18 @@ div  <  [data-slot="statusbar"]  <  [data-chat="root"]  <  div  <  body  <  html
 
 `【源码确证】`可安全挂浮层的槽位是 **`[data-slot="left"]` / `[data-slot="right"]`** —— 它们是 root 的直接子节点，祖先链上没有 `opacity` / `transform` / `overflow` 陷阱。挂在 `[data-chat="message-body"]` 里的浮层会被它的 `opacity:.9` 囚禁在层叠上下文内（§6.3）。
 
+### 5.0 真实聊天页外壳测量（`【实机只读 2026-08-27】`）
+
+对 `https://h5.aitchat.org/#/pages/chat/host?roleId=64304` 内可见 `iframe.chat-iframe` 作只读 DOM、几何与计算样式采集；未保存、未提交、未修改卡片数据。
+
+- 当前观测主题为 dark：root `display:flex; flex-direction:column; position:relative`，背景 `#17181a`；内联 style 同时写 `--chat-viewport-height` 与 `background-image/position/size/repeat`。
+- 1232×1248 下 header **45px**、`flex-shrink:0`；messages 吃剩余空间并独立滚动；composer 是静态 flex item、约 **95px**、`flex-shrink:0`，由快捷工具条和输入行构成。
+- message 全宽，桌面 padding **11.5px 15px**；message-body `max-width:90%`、正文 **15px**、`white-space:pre-line`、`opacity:.9`，AI 气泡左下角为 0。
+- `statusbar/left/right` 是 root 直接槽位；每条 message 含 `message-body/message-extra/message-actions`。外壳尺寸用 `--rpx=100vw/750` 缩放，正文仍保持约 15px。
+- light 外壳本次未量化；不能把 dark 几何外推成 light exact。
+
+本地 `build-preview.py --platform mmdsandbox` 以共享契约 v1.1.0 复刻以上外壳，并让内联 `--chat-viewport-height` 随 iframe resize/键盘 inset 更新。仿真器是回归工具，不反向定义平台事实。
+
 ### 5.1 可读属性
 
 `[data-chat="message"]` 上：`data-from`（`user` 或 `ai`）、`data-state`（如 `done`、`streaming`）、`data-msg-id`（**服务端认得这条时才有**，刚插入未落库的没有 → `message.edit` 前必须判空）。
