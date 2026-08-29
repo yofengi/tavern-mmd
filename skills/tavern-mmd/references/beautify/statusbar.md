@@ -453,7 +453,7 @@ var opt = findData('div[data-opt]', true);
 | 点击无反应 | 伪元素阻挡 | 添加pointer-events:none |
 | 继承失效 | box/data 配对或属性级回溯被改坏 | 检查 `dataBoxFor` 与 `findData(selector,currentOnly,attrName)`，不要退回 `box.querySelector('.z-status-data')` |
 | 标签页切换失效 | handler 未绑定或点火器中途失败 | 确认规则3仍为 `img onerror`，并检查动态 `onclick` 赋值代码是否完整执行 |
-| 面板内横向空白条（预览正常，导入MMD才有） | 三段模板的HTML字符串内含换行，被markdown管线补成空`<p>`段落撑出空条；内容少的页更明显 | 三段replaceString的HTML压成单行无换行；防御CSS加 `.z-status-box p:empty{display:none!important}` + `.z-status-box p{margin:0!important}` + `.z-status-box br{display:none!important}`；详见 statusbar-radar.md「MMD换行空白条陷阱」 |
+| 面板内横向空白条 | 气泡容器 `.content` 带 `white-space:pre-line`，三段模板HTML字符串内的换行被保留成真实换行，每个撑一行行高（**不是**markdown补空`<p>`，实测`p:empty`=0） | `.z-status-box{white-space:normal}`（一行治本，首选）；或三段replaceString的HTML压成单行无换行。~~`p:empty`/`br{display:none}`~~ 无效已废弃。详见 statusbar-radar.md「MMD换行空白条陷阱」与 ../platforms/mmd.md §13 |
 
 ### 快速验证方法
 

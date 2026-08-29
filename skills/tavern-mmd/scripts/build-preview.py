@@ -667,8 +667,37 @@ def _default_output_path(input_path, kind, platform):
 def _html_to_srcdoc(content, platform, assets=""):
     processed = apply_platform_limits(content, platform)
     extra = apply_platform_limits(assets, platform) if assets else ""
-    frame_doc = "<style>%s</style>%s%s" % (MARKER_CSS, extra, processed)
+    if platform == "mmd":
+        # 三面板也要有平台底子：否则单组件诊断阶段查不出空白条、var(--*) 解析为空、
+        # rem 尺寸按 16px 算而非随宽缩放 —— 而 checklist 的工作流是"先三面板审单组件"，
+        # 第一步没有平台底子等于白审。用扁平壳（无顶栏/底栏/弹窗，见 §面板壳）。
+        frame_doc = "<style>%s</style><style>%s</style>%s%s" % (
+            MARKER_CSS, _mmd_panel_shell_css(), extra,
+            _wrap_in_mmd_bubble(processed))
+    else:
+        frame_doc = "<style>%s</style>%s%s" % (MARKER_CSS, extra, processed)
     return html_mod.escape(frame_doc, quote=True)
+
+
+def _wrap_in_mmd_bubble(inner):
+    """把被测片段裹进真实气泡容器链，让作者写的深选择器在三面板里也能命中。
+
+    真机链是 `.chat > .chat-scope-box > .scroll-view > .uni-scroll-view-content >
+    .chat-body > .item.Ai > .touch-scope > .content.left`。三面板是自动撑高的诊断
+    iframe，所以壳 CSS 里把 `.chat-scope-box/.scroll-view` 改成静态流（见
+    `_mmd_panel_shell_css`），层级与类名保持一致。"""
+    return (
+        '<uni-view class="chat"><uni-view class="chat-scope-box">'
+        '<uni-scroll-view class="scroll-view dark">'
+        '<div class="uni-scroll-view"><div class="uni-scroll-view-content">'
+        '<uni-view class="chat-body" id="msglistview">'
+        '<uni-view><uni-view class="item Ai">'
+        '<uni-view class="touch-scope"><uni-view class="content left">'
+        '%s'
+        '</uni-view></uni-view></uni-view></uni-view>'
+        '</uni-view></div></div></uni-scroll-view>'
+        '</uni-view></uni-view>' % inner
+    )
 
 
 def _panel(title, content, platform, badge="", assets=""):
@@ -885,8 +914,482 @@ def assemble_preview(obj, platform, src_name):
                             "body": body, "marker_css": MARKER_CSS}
 
 
-# 全景预览聊天页骨架 CSS（中性默认；被测的全局美化用 !important 会正常压过，与MMD真机一致）。
-# .page 是全高 flex 列容器；.pano-chat 滚动区 flex:1；.pano-input-bar 固定底部。
+# ── MMD 真实聊天页外壳（实测复刻，2026-08-28）────────────────────────────────
+# 依据：Playwright 进真实 iframe#chatIframe 读 CSSOM + getComputedStyle，
+#      站点 www.sexyai.ai #/pages/chat/chat（旧聊天页 chatVersion:0）。
+#      完整契约见 preview/MMD真实页DOM契约-2026-08-28.md。
+#
+# 🚨 改这份 CSS 前先读这段。这里每条取值都是实测真值，不是"看着顺眼"调出来的。
+# 旧版本这里放的是一套凭空造的中性浅色骨架（白底 #fff、AI 气泡 #f0f0f3、用户气泡
+# #3a76f0、顶栏 48px、气泡 max-width:82%、无 pre-line），与真机**没有一项相符**。
+# 后果不是"预览丑一点"：
+#   1) 缺 `white-space:pre-line` → 预览查不出「换行空白条」，这是 MMD 头号排版坑；
+#   2) 气泡配色凭空取值 → 作者照预览定状态栏配色，上真机全糊在背景里；
+#   3) 缺 .chat-scope-box/.scroll-view 两层 → 作者按文档写深选择器，预览失配。
+# 沙盒分支早就被测试禁止"好看但失真"（test_dark_tokens_equal_measured_truth），
+# MMD 分支同一条纪律，别往回改。
+#
+# 主题变量：平台由 JS 写在 body 内联 style 上（实测共 29 个），不是样式表规则、也不靠
+# class 切换主题。这里注入实测的**深色一套**。浅色一套真机未抓到取值（运行时不暴露），
+# 故不臆造 —— 需要浅色请回真机抓，别在这里填猜的值。
+MMD_THEME_VARS_DARK = {
+    "--background-color": "#17181A", "--card-background-color": "#282A2E",
+    "--chat-content-font-color": "#FFFFFF", "--primary-font-color": "#FFFFFF",
+    "--primary-color": "#FF6D97", "--shortcut-button-font-color": "#FFFFFF",
+    "--input-background-color": "#33353B", "--input-font-color": "#FFFFFF",
+    "--mindtype-font-color": "#FF6D97", "--more-item-bg-color": "#2C2E32",
+    "--share-item-bg-color": "#2C2E32", "--history-font-color": "#FFFFFF",
+    "--history-remark-font-color": "#C5C5C5",
+    "--model-help-content-font-color": "#FFFFFF",
+    "--model-setting-power-bg-color": "#0D0E0F",
+    "--model-setting-power-tips-color": "#999999",
+    "--model-setting-remark-color": "#C5C5C5", "--modify-input-bg-color": "#1E1F24",
+    "--vditor-bg-color": "#0D0E0F", "--msg-option-separator-color": "#333333",
+    "--conversation-list-content-color": "#C5C5C5",
+    "--cancel-btn-background-color": "#FFB7CC", "--item-background-color": "#1E1F24",
+    "--item-tip-color": "#FF6D97", "--item-tip2-color": "#FF6D97",
+    "--tip-font-color": "#cccccc", "--modify-item-bottom-color": "#999999",
+    "--btn-bg-color": "#33353B", "--btn-border-color": "transparent",
+}
+
+# rem 缩放律（实测两点拟合，误差 <0.001px）：
+#   rootFontSize = 16 * min(innerWidth, 375) / 375
+# 实测：主聊天页 iframe 宽 1280 → 16px（封顶）；编辑页预览 iframe 宽 283 → 12.0747px。
+# 真机由 uni-app 写在 html 内联 style 上。CSS 的 min()/calc() 能精确表达同一条式子，
+# 不需要 JS，且 iframe 改宽时自动跟随 —— 少了这条，所有 rem 尺寸全错。
+MMD_ROOT_FONT_SIZE = "min(16px, calc(100vw * 16 / 375))"
+
+# MMD 真实聊天页骨架 CSS。选择器层级与真机一字对应（去掉 uni-app 的 data-v scope hash，
+# 那个 hash 每次构建都变，作者写卡也用不到）。被测的全局美化用 !important 照常压过。
+MMD_PANORAMA_CSS = """html{font-size:%(rootfont)s}
+html,body{margin:0;width:100%%;height:100%%;user-select:none;touch-action:manipulation;
+  font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+body{overflow-x:hidden;font-size:16px;background-color:var(--background-color,#17181A);%(themevars)s}
+*{margin:0;-webkit-tap-highlight-color:transparent}
+uni-view,uni-scroll-view,uni-image,uni-text{display:block}
+
+/* 顶栏：真实 2.8125rem = 45px @16px 基准 */
+.chat .topTabbar{width:100%%;height:2.8125rem;line-height:2.8125rem;display:flex;
+  justify-content:space-between;color:var(--primary-font-color,#FFFFFF)}
+.chat .topTabbar .header-box{padding:0 0.625rem;display:flex;align-items:center;justify-content:space-between}
+.chat .topTabbar .header-center{width:55%%;flex:1;display:flex;align-items:center;
+  color:var(--primary-font-color,#FFFFFF)}
+.chat .topTabbar .header-role-img{display:flex;align-items:center;margin-right:0.15625rem}
+.chat .topTabbar .header-role-img .pano-avatar-dot{width:1.5625rem;height:1.5625rem;
+  border-radius:0.78125rem;background:#4f7df5}
+.chat .topTabbar .header-roleName{margin:0 5px;font-size:0.9375rem;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.chat .topTabbar .header-icon-meun{display:flex;align-items:center;margin-right:12px;position:relative}
+.chat .topTabbar .header-icon-meun .header-meun{display:flex;align-items:center;
+  margin-left:0.78125rem;width:1.09375rem;height:1.09375rem;opacity:.75;
+  font-size:0.8125rem;justify-content:center}
+
+/* 滚动壳：真机 .chat-scope-box 是 fixed 全屏 + 角色背景图，.scroll-view 用内联 style
+   下推 2.8125rem 并留出 3.2rem。这两层是所有 chat-body 后代选择器的前缀，不能省。 */
+.chat .chat-scope-box{position:fixed;top:0;left:0;width:100%%;height:100%%;z-index:11;
+  background-position:center center;background-size:auto 100%%;background-repeat:no-repeat}
+.chat .chat-scope-box .scroll-view{height:calc(100%% - 3.2rem);margin-top:2.8125rem;
+  background:rgba(0,0,0,0);position:relative;z-index:999;overflow-y:auto;
+  -webkit-overflow-scrolling:touch}
+.chat .chat-scope-box .scroll-view .uni-scroll-view-content{min-height:100%%}
+
+/* 消息列表 */
+.chat .chat-scope-box .scroll-view .chat-body{position:relative;padding-bottom:10.625rem;
+  display:flex;flex-direction:column;font-size:15px}
+.chat .chat-scope-box .scroll-view .chat-body .item{display:flex;align-items:center;
+  padding:0.71875rem 0.9375rem}
+.chat .chat-scope-box .scroll-view .chat-body .self{justify-content:flex-end}
+.chat .chat-scope-box .scroll-view .chat-body .item .left{background-color:#fff;
+  border-radius:1rem 1rem 1rem 0!important}
+.chat .chat-scope-box .scroll-view .chat-body .item .right{background-color:#c2dcff;
+  border-radius:1rem 1rem 0!important}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope{position:relative;
+  max-width:94%%;color:var(--chat-content-font-color,#FFFFFF)}
+/* 🚨 .content 这块是重点：background 覆盖上面 .left/.right 的白底/蓝底（所以深色主题下
+   两侧气泡同色），opacity:.9 影响实际观感色，white-space:pre-line 是「换行空白条」真因。 */
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content{padding:0.75rem;
+  background:var(--background-color,#17181A);opacity:.9;
+  box-shadow:0 0.125rem 0.125rem rgba(0,0,0,.01);border-radius:0.5rem;white-space:pre-line}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table{
+  border-collapse:collapse;empty-cells:show;overflow:auto;border-spacing:0;display:block;
+  word-break:keep-all;width:100%%}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table th{font-weight:600}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table td,
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table th{
+  padding:6px 13px;border:1px solid #dfe2e5;word-break:normal;white-space:nowrap}
+.chat .chat-scope-box .scroll-view .chat-body .item .avatar{display:flex;justify-content:center;
+  width:2.4375rem;height:2.4375rem;background:#4f7df5;border-radius:1.5625rem;overflow:hidden}
+/* 首条描述气泡：通栏 + 圆角被覆盖成对称 0.5rem（无尖角） */
+.chat .chat-scope-box .scroll-view .chat-body .avatar-body{width:100%%}
+.chat .chat-scope-box .scroll-view .chat-body .avatar-body .touch-scope{width:100%%;max-width:100%%}
+.chat .chat-scope-box .scroll-view .chat-body .avatar-body .touch-scope .left{border-radius:0.5rem!important}
+.chat .chat-scope-box .scroll-view .chat-body .select-box{margin-right:0.625rem}
+/* 重开/编辑小圆钮：z-index 只有 2，组件层级要压过它 */
+.modify-btn-scope{position:absolute;left:0;z-index:2;margin-top:0.5rem;display:flex}
+.modify-btn-scope .modify-btn{width:1.5rem;height:1.5rem;display:flex;align-items:center;
+  justify-content:center;background:rgba(0,0,0,.5);border-radius:50%%;margin-right:0.5rem;
+  font-size:0.75rem;color:#fff}
+
+/* 开场白选择块 */
+.prologue-scope{padding:0 0.96156rem}
+.prologue-scope .prologue-title{text-align:center}
+.prologue-scope .prologue-title span{background:rgba(0,0,0,.5);border-radius:0.46875rem;
+  font-size:0.875rem;color:#fff;padding:0.3125rem 0.625rem}
+.prologue-scope .prologue-content{display:flex;align-items:center;min-height:2.8125rem;height:auto;
+  background:var(--background-color,#17181A);opacity:.9;border-radius:0.375rem;
+  font-size:0.8125rem;color:var(--chat-content-font-color,#FFFFFF);padding:0.9375rem;margin-top:0.625rem}
+
+/* 官方侧边挂载点：悬浮组件的靶位，真机就是这两个空容器 */
+.chat .mm-left-side-container{position:fixed;top:50%%;transform:translateY(-50%%);display:flex;
+  flex-direction:column;gap:0.375rem;z-index:9999;left:0}
+.chat .mm-right-side-container{position:fixed;top:50%%;transform:translateY(-50%%);display:flex;
+  flex-direction:column;gap:0.375rem;z-index:9999;right:0}
+
+/* 底部：快捷条 + 输入区。真机 .chat-bottom 是 fixed bottom, z-index 999 */
+.chat .chat-bottom{z-index:999;width:100%%;transition:.1s;position:fixed;bottom:0}
+.chat .chat-bottom .shortcut-bar-wrapper{position:relative;height:2.375rem;
+  background:var(--background-color,#17181A);overflow:hidden;margin-bottom:-1px}
+.chat .chat-bottom .shortcut-bar{display:flex;align-items:center;height:2.375rem;
+  padding:0 0.375rem;gap:0.3125rem;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+.chat .chat-bottom .shortcut-bar::-webkit-scrollbar{display:none}
+.chat .chat-bottom .shortcut-btn{flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;gap:0.1875rem;height:1.75rem;box-sizing:border-box;padding:0 0.5rem;
+  background:var(--input-background-color,#1E1F24);border-radius:0.875rem;font-size:0.75rem;
+  color:var(--shortcut-button-font-color,#8D949D);white-space:nowrap;border:0}
+.chat .chat-bottom .shortcut-bar-wrapper.theme-dark .shortcut-btn{background:#2c2e32}
+.chat .chat-bottom .chat-bottom-wapper{background:var(--background-color,#17181A)}
+.chat .chat-bottom .send-msg{display:flex;align-items:flex-end;padding:0.5rem 0.9375rem;
+  width:100%%;box-sizing:border-box;transition:.1s;margin-bottom:-1px}
+.chat .chat-bottom .uni-textarea{width:100%%;display:flex;align-items:flex-end;justify-content:space-between}
+.chat .chat-bottom .uni-textarea .chat-input-scope{width:100%%;position:relative;
+  background:var(--input-background-color,#1E1F24);border-radius:1.25rem;
+  border:.0625rem solid var(--primary-color,#FF6D97);display:flex;align-items:center;
+  justify-content:space-between;padding:0 0.5rem;box-sizing:border-box}
+.chat .chat-bottom .uni-textarea .chat-input-scope.has-toolbar{flex-direction:column;
+  align-items:stretch;padding:0.3125rem 0.5rem;border-radius:0.75rem}
+/* ── 输入框折叠/展开两态（实测）──────────────────────────────────────────
+   折叠：显示 .chat-input-collapsed-row（内含 [1] 预览 textarea + 发送钮）
+   展开：+.is-expanded → 显示 .chat-input-toolbar + [0] 主 textarea + .chat-input-bottom-row
+   🚨 全局美化改输入框必须**两态都看**：工具条（粘贴/清空）只在展开态存在。*/
+.chat .chat-bottom .uni-textarea .chat-input-scope.has-toolbar .chat-input-toolbar{display:none}
+.chat .chat-bottom .uni-textarea .chat-input-scope.has-toolbar.is-expanded .chat-input-toolbar{
+  display:flex;align-items:center;gap:0.5rem;margin-bottom:0.375rem}
+.chat .chat-bottom .uni-textarea .chat-input-scope.has-toolbar .chat-input-toolbar
+  .chat-input-tool-btn{display:flex;align-items:center;gap:0.1875rem;font-size:0.75rem;
+  color:#a0a0a0;padding:0.25rem 0.5625rem;background-color:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1);border-radius:0.375rem}
+/* [0] 主 textarea：折叠态隐藏、展开态显示 */
+.chat .chat-bottom .uni-textarea .chat-input-scope>.chatMsgTextarea{display:none}
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-expanded>.chatMsgTextarea{display:block;
+  width:100%%;line-height:1.4;min-height:1.4rem;max-height:9.8rem;padding:0 0.125rem;
+  margin-bottom:0.5rem;overflow-y:auto}
+/* 折叠行 / 展开行互斥 */
+.chat .chat-bottom .uni-textarea .chat-input-scope .chat-input-collapsed-row{display:flex;
+  align-items:center;justify-content:space-between;min-height:2.5625rem}
+/* 折叠行与展开行互斥：展开态隐藏折叠行（否则两行叠加、输入框高成 172px 而非 125px） */
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-expanded .chat-input-collapsed-row{display:none}
+/* 折叠行左右两格（算力数字 / 发送钮）：单行态 align-self:stretch 撑满行高居中；
+   多行态改 align-self:auto + padding-bottom 沉到底（实测 .is-multiline 分支）。*/
+.chat .chat-bottom .uni-textarea .chat-input-scope .chat-input-collapsed-row>uni-view:first-child,
+.chat .chat-bottom .uni-textarea .chat-input-scope .chat-input-collapsed-row>uni-view:last-child{
+  align-self:stretch;display:flex;align-items:center;min-height:1.25rem;
+  transition:padding-top .25s,padding-bottom .25s}
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-multiline .chat-input-collapsed-row{
+  align-items:flex-end}
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-multiline
+  .chat-input-collapsed-row>uni-view:first-child,
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-multiline
+  .chat-input-collapsed-row>uni-view:last-child{align-self:auto;padding-bottom:0.5rem}
+.chat .chat-bottom .uni-textarea .chat-input-scope .chat-input-bottom-row{display:none}
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-expanded .chat-input-bottom-row{display:flex;
+  align-items:center;justify-content:space-between;padding-bottom:0.375rem}
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-expanded
+  .chat-input-bottom-row>uni-view{padding-top:0.875rem;min-height:1.25rem}
+/* 输入框内的图标（发送钮）实测 1.25rem —— 比外面的「+」(1.5625rem) 小一档 */
+.chat .chat-bottom .uni-textarea .chat-input-scope .btn-icon{width:1.25rem;height:1.25rem}
+.chat .chat-bottom .uni-textarea .chat-input-scope.is-expanded{padding:0.625rem}
+.chat .chat-bottom .uni-textarea .chat-input-scope .chat-input-collapsed-display{flex:1;
+  min-width:0;padding:0 0.375rem;cursor:text}
+.chat .chat-bottom .uni-textarea .chat-input-scope .chat-input-collapsed-preview{
+  max-height:8.75rem;padding-top:0;padding-bottom:2px}
+/* 🚨 上下 padding 一律挂在 `uni-textarea` **壳**上，内层 `textarea` 恒零上下 padding
+   —— 这是真机的分层方式（实测：折叠预览壳 24px / 内层 22px；展开主输入壳与内层同 22px）。
+   预览曾把两层压平成一条 `padding:0.5rem 0.25rem` 写在内层上，后果是每一态都多 16px：
+   折叠 41→43px、输入框 53→55px；展开态主输入 22→43px。改壳不改内层。*/
+/* `vertical-align:top` 消掉 textarea 的 inline 基线间隙。真机内层是 `position:absolute`
+   所以本来就不撑壳；预览内层走正常流，不消间隙会让壳比内层高 5px
+   → 展开态输入框 125→131px。
+   ⚠️ 别改成 `display:block` 修这个：block 会让 rows=1 的高度约束失效，
+   折叠预览从 22px 涨到 67px、折叠态输入框 53→79px（本地实测踩过）。*/
+.chat .chat-bottom .uni-textarea .chat-input-scope .uni-textarea-textarea{
+  padding-top:0;padding-bottom:0;vertical-align:top}
+.chat .chat-bottom .uni-textarea .chat-input-scope .mind-type{display:flex;place-items:center;
+  font-weight:500;font-size:0.78125rem;color:var(--mindtype-font-color,#FF6D97)}
+.chat .chat-bottom .uni-textarea.is-multiline,
+.chat .chat-bottom .uni-textarea.is-expanded{align-items:flex-end}
+/* 壳（uni-textarea）承 padding；内层 textarea 只承字体/颜色/无边框，上下 padding 由
+   上面那条清零。真机壳基线 `padding:0.75rem 0.25rem 0.75rem 0.1875rem`，
+   折叠预览与展开态各自覆盖（见上）。*/
+.chat .chat-bottom .uni-textarea .chat-input-scope .chatMsgTextarea{
+  padding:0.75rem 0.25rem 0.75rem 0.1875rem;box-sizing:border-box}
+.chat .chat-bottom .uni-textarea .chat-input-scope .chatMsgTextarea,
+.chat .chat-bottom .uni-textarea .chat-input-scope .uni-textarea-textarea{width:100%%;
+  max-height:11.875rem;overflow-y:auto;line-height:1.4!important;font-size:1rem;
+  font-family:"PingFang SC";color:var(--input-font-color,#FFFFFF);background:transparent;
+  border:0;outline:0;resize:none;box-sizing:border-box}
+.chat .chat-bottom .uni-textarea .chat-input-scope .chatMsgTextarea::placeholder,
+.chat .chat-bottom .uni-textarea .chat-input-scope .uni-textarea-textarea::placeholder{color:#999}
+.chat .chat-bottom .pano-compose-row{display:flex;align-items:flex-end;gap:0.375rem;width:100%%}
+.chat .chat-bottom .pano-send{flex:0 0 auto;width:1.625rem;height:1.625rem;border:0;padding:0;
+  border-radius:50%%;background:var(--primary-color,#FF6D97);color:#fff;font-size:0.75rem;
+  line-height:1;cursor:pointer}
+.chat .chat-bottom .pano-send:active{opacity:.8}
+/* 预览发送钮同时带 .btn-icon（对齐真机 uni-image.btn-icon，好让作者测可见性筛法）。
+   尺寸跟 `.chat-input-scope .btn-icon` 一致 = 实测 1.25rem（20px）。
+   ⚠️ 旧版这里写 1.625rem 并注明"防止被压小"，是错的：真机两态发送钮都是 20px，
+   1.625rem(26px) 来自 `.send-btn-icon` 那条**未被用到**的规则。
+   🚨 观感：真机发送钮是 `ico_send_dark.png`（灰色纸飞机）、**背景透明、不变粉**
+   （2026-08-29 实机注入文字前后复验：bg 恒 rgba(0,0,0,0)，无激活变色）。
+   旧版画成粉色实心圆+白箭头是错的，这里覆盖成透明底+灰色纸飞机 SVG（currentColor 驱动）。*/
+.chat .chat-bottom .uni-textarea .chat-input-scope .pano-send.btn-icon,
+.chat .chat-bottom .uni-textarea .chat-input-scope .pano-send-expanded.btn-icon{
+  width:1.25rem;height:1.25rem;background:transparent;border-radius:0;
+  color:#9198a1;display:flex;align-items:center;justify-content:center}
+.chat .chat-bottom .uni-textarea .chat-input-scope .pano-send.btn-icon svg,
+.chat .chat-bottom .uni-textarea .chat-input-scope .pano-send-expanded.btn-icon svg{
+  width:0.9375rem;height:0.9375rem;display:block}
+.chat .chat-bottom .pano-compose-icon{flex:0 0 auto;width:1.75rem;height:1.75rem;border:0;
+  padding:0;border-radius:50%%;background:var(--input-background-color,#33353B);
+  color:var(--primary-font-color,#FFFFFF);font-size:0.8125rem;cursor:pointer}
+
+/* 长按菜单遮罩：真机 z-index 99999，组件想盖在它上面基本不可能 —— 预览留着做层级参照 */
+.msg-option-scope{height:100%%;width:100%%;position:fixed;top:0;left:0;
+  background-color:rgba(0,0,0,.7);z-index:99999;backdrop-filter:blur(5px);display:none}
+
+/* ── 弹窗体系（实测复刻，全局美化会打到这些面板）───────────────────────────
+   通用三层：.u-popup(height:0!) > .u-transition.u-fade-*(遮罩) / .u-slide-up-*(内容)
+             > .u-popup__content > 各面板自己的 scope 类
+   🚨 uview 基线 .u-popup__content 是**白底**，深色全靠面板 scope 或内联 style 覆盖 ——
+   作者若只改了自己面板忘了别的，真机就会露白，预览必须能重现这一点。*/
+.u-popup{flex:1}                        /* 真机 height:0，别拿它做可见性判据 */
+.u-overlay{position:fixed;top:0;left:0;width:100%%;height:100%%;background-color:rgba(0,0,0,.7)}
+.u-popup__content{background-color:#fff;position:relative}   /* ← 框架基线白底，实测原文 */
+.u-popup__content--round-bottom{border-radius:10px 10px 0 0}
+.u-popup__content--round-center{border-radius:10px}
+.u-popup__content__close{position:absolute}
+.u-popup__content__close--top-right{top:15px;right:15px}
+.u-status-bar,.u-safe-bottom{width:100%%}
+.pano-sheet{position:fixed;left:0;bottom:0;width:100%%;z-index:10075;display:none}
+.pano-sheet[data-open="on"]{display:block}
+.pano-sheet-mask{position:fixed;top:0;left:0;width:100%%;height:100%%;background-color:rgba(0,0,0,.7)}
+/* 总结剧情实测 z-index 1000000000，比别的高 5 个数量级 —— 组件永远盖不过它 */
+.pano-sheet[data-sheet="summary"]{z-index:1000000000}
+
+/* 模型设置：scope 自带底色/padding/高度 */
+.model-setting-scope{height:34.375rem;box-sizing:border-box;width:100%%;max-width:100%%;overflow:hidden;
+  padding:0 1rem 1rem;background-color:var(--background-color,#17181A);display:flex;flex-direction:column}
+.model-setting-scope .mp-top{display:flex;align-items:center;justify-content:space-between;
+  padding:1.125rem 0.125rem 0.5625rem;flex-shrink:0}
+.model-setting-scope .mp-top .mp-title{font-weight:600;font-size:1.0625rem;
+  color:var(--primary-font-color,#FFFFFF);line-height:1}
+.model-setting-scope .mp-top .mp-close{width:1.5rem;height:1.5rem;line-height:1.375rem;text-align:center;
+  border-radius:50%%;color:var(--model-setting-remark-color,#C5C5C5);font-size:1.125rem;font-weight:300}
+.model-setting-scope .mp-info-bar{display:flex;align-items:center;justify-content:space-between;
+  padding:0 0.125rem 0.75rem;flex-shrink:0}
+.model-setting-scope .mp-info-bar .mp-model-name{font-size:0.75rem;
+  color:var(--model-setting-remark-color,#C5C5C5);flex:1;overflow:hidden;white-space:nowrap;
+  text-overflow:ellipsis;padding-right:0.5rem}
+.model-setting-scope .mp-info-bar .mp-energy-pill{display:flex;align-items:baseline;gap:0.125rem;
+  background:var(--model-setting-power-bg-color,#0D0E0F);border-radius:0.75rem;
+  padding:0.25rem 0.5625rem;flex-shrink:0}
+.model-setting-scope .mp-info-bar .mp-energy-pill .mp-ev{font-size:1.25rem;font-weight:700;line-height:1;
+  color:var(--primary-color,#FF6D97)}
+.model-setting-scope .mp-info-bar .mp-energy-pill .mp-el{font-size:0.6875rem;font-weight:500;line-height:1;
+  color:var(--model-setting-remark-color,#C5C5C5)}
+.model-setting-scope .mp-setting-body{flex:1;height:0;min-height:0;overflow-y:auto}
+.model-setting-scope .mp-card,.model-setting-scope .mp-switch-row{
+  background:var(--model-setting-power-bg-color,#0D0E0F);border-radius:0.5rem;margin-bottom:0.5rem}
+.model-setting-scope .mp-card{padding:0.625rem 0.6875rem 0.4375rem}
+.model-setting-scope .mp-card-head{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:0.5rem}
+.model-setting-scope .mp-card-head .mp-card-title{font-size:0.8125rem;font-weight:500;
+  color:var(--primary-font-color,#FFFFFF)}
+.model-setting-scope .mp-tokens{display:flex;flex-wrap:wrap;gap:0.3125rem}
+.model-setting-scope .mp-tokens .mp-token-btn{width:calc(25%% - 0.25rem);height:1.875rem;display:flex;
+  align-items:center;justify-content:center;line-height:1;border-radius:0.3125rem;
+  border:.0625rem solid var(--model-setting-remark-color,#C5C5C5);text-align:center;font-size:0.8125rem;
+  color:var(--primary-font-color,#FFFFFF);margin-bottom:0.3125rem;background:transparent;box-sizing:border-box}
+.model-setting-scope .mp-tokens .mp-token-btn.selected{color:var(--primary-color,#FF6D97);font-weight:600;
+  border-color:var(--primary-color,#FF6D97)}
+.model-setting-scope .mp-switch-row{display:flex;align-items:center;justify-content:space-between;padding:0.6875rem}
+.model-setting-scope .mp-sw-title{font-size:0.8125rem;font-weight:500;color:var(--primary-font-color,#FFFFFF)}
+.model-setting-scope .mp-sw-desc{font-size:0.6875rem;color:var(--model-setting-remark-color,#C5C5C5)}
+.model-setting-scope .bottom .btn{color:#fff;font-size:1rem;width:100%%;height:2.65625rem;
+  line-height:2.65625rem;text-align:center;background:var(--primary-color,#FF6D97);border-radius:1.5625rem}
+
+/* 对话设置：scope 透明，底色靠 content 内联；无圆角 */
+.conv-style-modal{display:flex;flex-direction:column;background-color:transparent;width:100%%;
+  height:69vh;overflow:hidden;box-sizing:border-box}
+.cs-modal-header{height:3.125rem;display:flex;align-items:center;justify-content:space-between;
+  padding:0 0.9375rem;border-bottom:0.03125rem solid rgba(255,255,255,.05);
+  background-color:var(--background-color,#1E1F24);color:var(--primary-font-color,#FFFFFF)}
+.cs-header-left,.cs-header-right{font-size:0.875rem;color:var(--primary-font-color,#FFFFFF);
+  display:flex;align-items:center}
+.cs-header-center{flex:1;text-align:center}
+.cs-header-title{font-size:0.9375rem;font-weight:700}
+.cs-modal-content{flex:1;height:0;display:flex;flex-direction:column;overflow-y:auto;padding:0.9375rem}
+
+/* 总结剧情 */
+.summary-sheet{display:flex;flex-direction:column;width:100%%;height:34.375rem;max-height:84vh;
+  background-color:var(--background-color,#17181A);color:var(--primary-font-color,#FFFFFF);
+  padding:0 1rem 1rem;overflow:hidden;position:relative;box-sizing:border-box}
+.summary-top{display:flex;align-items:center;justify-content:space-between;
+  padding:1.125rem 0.125rem 0.5625rem;flex-shrink:0}
+.summary-top-title{font-size:1.0625rem;font-weight:600;color:var(--primary-font-color,#FFFFFF);line-height:1}
+.summary-close{width:1.5rem;height:1.5rem;line-height:1.375rem;text-align:center;border-radius:50%%;
+  color:var(--model-setting-remark-color,#C5C5C5);font-size:1.125rem;font-weight:300}
+.summary-body{flex:1;height:0;padding:0.625rem 0.125rem 0.875rem;box-sizing:border-box;overflow-y:auto}
+.summary-card{background:var(--card-background-color,#1E1F24);border-radius:0.5rem;padding:0.75rem}
+.summary-label{font-size:0.75rem;color:var(--model-setting-remark-color,#C5C5C5);margin-bottom:0.375rem;
+  display:flex;align-items:center;justify-content:space-between}
+.summary-footer.bottom{padding:0.75rem 0 0;flex-shrink:0;display:flex;flex-direction:column}
+.summary-save-btn.btn{width:100%%;height:2.625rem;border-radius:1.3125rem;
+  background:var(--primary-color,#FF6D97);color:#fff;font-size:0.9375rem;font-weight:500;
+  line-height:2.625rem;text-align:center;box-sizing:border-box}
+
+/* 用户人设：🚨 这一套用 --lo* 变量族，实测那 18 个全部「引用但从未定义」，
+   恒走 var(--loX, 字面量) 的 fallback → 作者改 --lo* 不生效，只能直接选类名。
+   预览照真机**不定义**它们，好让作者在预览里就发现改不动。*/
+.role-profile-modal{display:flex;flex-direction:column;isolation:isolate;background-color:transparent;
+  width:100%%;height:69vh;overflow:hidden;box-sizing:border-box;font-size:0.875rem;line-height:1.4;
+  color:var(--loPrimary-font-color,#FFFFFF)}
+.role-profile-modal .header-scope{padding:0.875rem 0;flex-shrink:0;width:100%%;
+  background-color:var(--loBackground-color,#17181A)}
+.role-profile-modal .header-scope .header-box{padding:0 0.625rem;display:flex;align-items:center;
+  justify-content:space-between;font-size:1rem}
+.role-profile-modal .header-scope .icon-back{display:flex;align-items:center;
+  color:var(--loPrimary-font-color,#FFFFFF);font-size:0.8125rem}
+.role-profile-modal .header-scope .page-title{font-weight:500;font-size:0.9375rem;
+  color:var(--loPrimary-font-color,#FFFFFF)}
+.role-profile-modal .header-scope .complete-btn{margin-right:0.48063rem;font-weight:500;
+  color:var(--loPrimary-color,#FF6D97);font-size:0.875rem}
+.role-setting{background-color:var(--loBackground-color,#17181A);padding:0.9375rem;
+  color:var(--loPrimary-font-color,#FFFFFF);flex:1;overflow-y:auto}
+.role-setting .switch-card{background-color:var(--loCard-background-color,#1E1F24);border-radius:0.625rem;
+  padding:0.625rem;margin-bottom:0.5rem;display:flex;align-items:center;justify-content:space-between}
+.role-setting .switch-card .switch-title{font-size:0.8125rem;
+  color:var(--loPrimary-font-color,#FFFFFF);margin-bottom:0.1875rem;font-weight:700}
+.role-setting .switch-card .switch-desc{font-size:0.6875rem;color:var(--lo-subtitle-color,#ccc);line-height:1.4}
+.role-setting .card{background-color:var(--loCard-background-color,#1E1F24);border-radius:0.625rem;
+  padding:0.625rem;margin-bottom:0.5rem}
+.role-setting .card .card-title{font-size:0.8125rem;font-weight:600;
+  color:var(--loPrimary-font-color,#FFFFFF)}
+.role-setting .card .card-desc{font-size:0.6875rem;color:var(--lo-subtitle-color,#ccc);margin-bottom:0.625rem}
+.role-setting .card .textarea-dark{padding:0.625rem;border:0;border-radius:0.375rem;font-size:0.75rem;
+  width:100%%;box-sizing:border-box;min-height:6.25rem;
+  background-color:var(--loInput-background-color,#1E1F24);color:var(--loPrimary-font-color,#FFFFFF)}
+
+/* 分享：矮条，实测 bg #282A2E(=--card-background-color)、padding 15.4px、h 167px */
+.share-popup{background-color:var(--card-background-color,#282A2E);padding:0.9375rem;
+  display:flex;flex-direction:column;align-items:center;gap:0.625rem}
+.share-popup .share-title{font-size:1rem;font-weight:700;color:var(--primary-font-color,#FFFFFF)}
+.share-popup .share-sub-title{font-size:0.75rem;color:var(--model-setting-remark-color,#C5C5C5)}
+.share-popup .gen-link-btn{padding:0.375rem 1.25rem;border-radius:1rem;
+  background:var(--primary-color,#FF6D97);color:#fff;font-size:0.8125rem}
+
+/* AI帮聊 居中 dialog（未点，按既有 DOM/CSS 仿真）：u-fade-zoom-* + round-center */
+.pano-dialog{position:fixed;top:0;left:0;width:100%%;height:100%%;z-index:10075;display:none;
+  align-items:center;justify-content:center}
+.pano-dialog[data-open="on"]{display:flex}
+.pano-dialog .u-popup__content{background-color:var(--background-color,#17181A);border-radius:10px}
+.alert-scope{height:auto;width:18.75rem;padding:0 1.875rem;display:flex;flex-direction:column}
+.alert-scope .alert-title{color:var(--primary-font-color,#FFFFFF);font-size:1.09375rem;text-align:center;
+  margin-top:0.9375rem;font-weight:700}
+.alert-scope .alert-content{color:var(--primary-font-color,#FFFFFF);padding:1.40625rem 0;
+  font-size:0.875rem;text-align:center}
+.alert-scope .alert-checkbox{display:flex;align-items:center;justify-content:center;font-size:0.8125rem;
+  color:var(--primary-font-color,#FFFFFF);margin-bottom:0.625rem}
+.alert-scope .alert-checkbox .checkbox-box{display:flex;align-items:center;justify-content:center;
+  width:0.875rem;height:0.875rem;border:.0625rem solid var(--primary-font-color,#FFFFFF);
+  border-radius:0.1875rem;margin-right:0.375rem;box-sizing:border-box}
+.alert-scope .alert-bottom{display:flex;justify-content:center;align-items:center;font-size:1rem;
+  padding:0 0 0.9375rem}
+.alert-scope .alert-bottom-double{justify-content:space-between}
+.alert-scope .alert-bottom .ok-btn{color:var(--primary-color,#FF6D97)}
+.alert-scope .alert-bottom-double .cancel-btn{color:var(--primary-font-color,#FFFFFF)}
+
+/* 输入框左侧 AI帮聊入口（💡）实测样式。
+   真机那里是 25×25 的 `uni-image`，容器实测 25×41。预览用 💡 字形代替图片，
+   所以必须把字形锁进 1.5625rem 的盒子里 —— 否则 27px 字形会把整行顶高 2px，
+   连带 .chat-input-scope 53→55px（本地实测踩过）。*/
+.chat .chat-bottom .uni-textarea .ai-assistant{position:relative;display:flex;align-items:center;
+  margin-right:0.1875rem;color:var(--primary-font-color,#FFFFFF);
+  width:1.5625rem;height:1.5625rem;box-sizing:content-box;
+  font-size:1.5625rem;line-height:1;justify-content:center}
+/* 右侧「+」更多入口：真机是 .chat-input-scope 的**兄弟**，不在输入框内部。
+   两态都留在输入框右侧外部（不会跑到输入框下方）；靠 padding-bottom 把图标压到视觉中线。*/
+.chat .chat-bottom .uni-textarea .more-options-scope{display:flex;align-items:center;
+  margin-left:0.375rem}
+.chat .chat-bottom .uni-textarea .more-options-scope .btn-icon{width:1.5625rem;height:1.5625rem}
+/* 🚨 观感：真机 `+` 是 `ico_more_dark.png` —— **一个灰色描边圆圈里一个加号**（展开态换
+   `ico_more_called_dark.png`，圈里变减号）。旧版预览退化成飘在边上的裸全角＋（无圈），
+   与真机差最远。这里用 CSS 把它画成灰圈+居中字形，两态都带圈（＋⇄－，JS 只换字形不换圈）。
+   字形用裸 43(+)/8722(−)（不用带圈的 8854 ⊖，否则与 CSS 圈叠成双圈）。*/
+.chat .chat-bottom .uni-textarea .more-options-scope .btn-icon{
+  box-sizing:border-box;border:0.09375rem solid #6b7079;border-radius:50%%;
+  color:#9198a1;display:flex;align-items:center;justify-content:center;
+  font-size:1rem;line-height:1;font-weight:300}
+/* 🚨 两态 padding-bottom 差 0.125rem（实测 15.5px→13.5px）：.uni-textarea 是 align-items
+   flex-end，两侧图标靠这个 padding 顶到输入框视觉中线。展开态输入框变高、底行自带
+   padding，所以垫片要略薄一点。改全局美化时动了这两个值，图标就会偏离中线。*/
+.chat .chat-bottom .uni-textarea .ai-assistant,
+.chat .chat-bottom .uni-textarea .more-options-scope{padding-bottom:0.96875rem;
+  transition:padding-bottom .25s}
+.chat .chat-bottom .uni-textarea.is-multiline .ai-assistant,
+.chat .chat-bottom .uni-textarea.is-expanded .ai-assistant,
+.chat .chat-bottom .uni-textarea.is-multiline .more-options-scope,
+.chat .chat-bottom .uni-textarea.is-expanded .more-options-scope{padding-bottom:0.84375rem}
+.chat .chat-bottom .uni-textarea .ai-assistant .beta-badge{position:absolute;top:-0.3125rem;
+  left:-0.625rem;background-color:var(--primary-color,#FF6D97);color:#fff;font-size:0.625rem;
+  padding:0.125rem 0.1875rem;border-radius:0.3125rem;line-height:1}
+
+/* 「+」展开的更多面板：不是弹窗，在 .chat-bottom 内展开。
+   位置：`.chat-bottom-wapper` 里排在 `.send-msg` **之后** → 面板在输入框**下方**、
+   把输入框整条往上顶（实测底栏 105px→422px；面板自身 317px）。
+   若同时展开输入框则 105→494px。组件按"底栏 105px"算避让位置会被压住。*/
+.chat .chat-bottom .more-scope{height:auto;padding:0.75rem 0.9375rem 0.9375rem;display:none;
+  flex-wrap:wrap;gap:0.625rem;background:var(--background-color,#17181A)}
+.chat .chat-bottom .more-scope[data-open="on"]{display:flex}
+.chat .chat-bottom .more-scope .item{width:calc(25%% - 0.625rem);text-align:center}
+.chat .chat-bottom .more-scope .item .item-title{font-weight:400;font-size:0.8125rem;
+  color:var(--primary-font-color,#FFFFFF);line-height:1.15625rem;height:1.15625rem;margin-top:0.4375rem}
+.chat .chat-bottom .more-scope .item .item-icon{width:100%%;height:4.03125rem;
+  background:var(--more-item-bg-color,#2C2E32);border-radius:1.25rem;padding:1.25rem 1.40625rem;
+  box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:1.25rem}
+
+/* 指令栏：真机「选择指令」原地替换快捷条（不是弹窗） */
+.chat .chat-bottom .shortcut-bar-wrapper .instruction-bar{display:flex;align-items:center;
+  height:2.375rem;padding:0 0.375rem;gap:0.3125rem;overflow-x:auto;white-space:nowrap;
+  scrollbar-width:none}
+.chat .chat-bottom .shortcut-bar-wrapper .instruction-bar.hidden{transform:translateX(0.9375rem);
+  opacity:0;pointer-events:none;position:absolute;inset:0}
+.chat .chat-bottom .shortcut-bar-wrapper .shortcut-bar.hidden{transform:translateX(-0.9375rem);
+  opacity:0;pointer-events:none;position:absolute;inset:0}
+.chat .chat-bottom .shortcut-bar-wrapper .back-btn{flex-shrink:0;width:1.5rem;height:1.5rem;
+  border-radius:50%%;background:var(--primary-color,#FF6D97);display:flex;align-items:center;
+  justify-content:center;color:#fff;box-shadow:0 0.125rem 0.5rem rgba(255,109,151,.35)}
+.chat .chat-bottom .shortcut-bar-wrapper .instruction-chip{display:inline-flex;align-items:center;
+  justify-content:center;flex-shrink:0;height:1.75rem;box-sizing:border-box;padding:0 0.6875rem;
+  margin-right:0.3125rem;background:var(--input-background-color,#1E1F24);border-radius:0.875rem;
+  font-size:0.75rem;color:var(--shortcut-button-font-color,#8D949D);white-space:nowrap;border:0}
+.chat .chat-bottom .shortcut-bar-wrapper.theme-dark .instruction-chip{background:#2c2e32}"""
+
+
+# 全景预览聊天页骨架 CSS（中性默认；被测的全局美化用 !important 会正常压过）。
+# 🚨 这份现在只给 **本地酒馆(st)** 用：它是一套中性占位骨架，没有 ST 真机实测依据。
+# MMD 已改走 MMD_PANORAMA_CSS（实测复刻）。别再把这份当"MMD 聊天页"——它不是。
+# 要给 ST 做同等还原，需要先抓真实 ST 页（.mes/.mes_text/#chat 那一套）再改这里。
 PANORAMA_CSS = """html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;font-family:system-ui,sans-serif;background:#fff;color:#222}
 .page{flex:1;display:flex;flex-direction:column;min-height:0;background:#fff}
@@ -959,15 +1462,24 @@ PANORAMA_RUNTIME_SCAFFOLD = (
     "touch.setAttribute('data-from',side==='left'?'ai':'user');"
     "touch.setAttribute('data-state','done');"
     "ct.setAttribute('data-chat','message-body');}"
+    # MMD 骨架下 .chat 是根容器、滚动区是 #pano-chat（.scroll-view），二者不再同一个节点；
+    # 元素名也要跟着建成 uni-view，否则作者写 `uni-view > .content` 在动态气泡上会失配。
+    "function mmd(){return !!D.querySelector('.chat-scope-box');}"
+    "function el(tag){return D.createElement(mmd()?'uni-view':tag);}"
+    "function pane(){return D.querySelector('#pano-chat')||D.querySelector('.chat');}"
+    "function shell(){return D.querySelector('.chat-scope-box')||D.querySelector('.chat');}"
     "function add(side,text){var root=chat();if(!root)return null;"
-    "var it=D.createElement('div');it.className='item';it.setAttribute('data-preview-dynamic','1');"
-    "var touch=D.createElement('div');touch.className='touch-scope';"
-    "var ct=D.createElement('div');ct.className='content '+side;ct.textContent=text;"
+    "var it=el('div');it.className='item'+(mmd()?' Ai':'')+(side==='right'?' self':'');"
+    "it.setAttribute('data-preview-dynamic','1');"
+    "var touch=el('div');touch.className='touch-scope';"
+    "var ct=el('div');ct.className='content '+side;ct.textContent=text;"
     "hook(it,touch,ct,side);"
-    "touch.appendChild(ct);it.appendChild(touch);root.appendChild(it);"
-    "var pane=D.querySelector('.chat');if(pane)pane.scrollTop=pane.scrollHeight;return ct;}"
+    "touch.appendChild(ct);it.appendChild(touch);"
+    "if(mmd()){var wrap=el('div');wrap.appendChild(it);root.appendChild(wrap);}"
+    "else{root.appendChild(it);}"
+    "var sc=pane();if(sc)sc.scrollTop=sc.scrollHeight;return ct;}"
     "function syncRoute(hash){var active=/chat\\/chat/.test(hash);"
-    "var pane=D.querySelector('.chat'),input=D.querySelector('.chat-bottom'),label=D.querySelector('.pano-route-label');"
+    "var pane=shell(),input=D.querySelector('.chat-bottom'),label=D.querySelector('.pano-route-label');"
     "if(pane){pane.hidden=!active;pane.setAttribute('aria-hidden',active?'false':'true');}"
     "if(input){input.hidden=!active;input.setAttribute('aria-hidden',active?'false':'true');}"
     "if(label)label.textContent=active?'chat/chat':'index/index';return active;}"
@@ -990,7 +1502,8 @@ PANORAMA_SEND_SCAFFOLD = (
     "onerror=\"(function(){"
     "var ta=document.querySelector('.uni-textarea-textarea');"
     "var btn=document.querySelector('.pano-send');"
-    "var chat=document.querySelector('.chat');"
+    # MMD 骨架下滚动区是 #pano-chat；.chat 退化成根容器（不滚动）。
+    "var chat=document.querySelector('#pano-chat')||document.querySelector('.chat');"
     "if(!ta||!btn||!chat)return;"
     "var addMsg=function(side,text){"
     "if(window.__tavernPreview){return side==='left'?window.__tavernPreview.addAI(text):window.__tavernPreview.addUser(text);}"
@@ -1118,6 +1631,14 @@ _SANDBOX_HOOKS = {
     "toolbar": '<div data-slot="toolbar"></div>',
     "input": ' data-chat="input"',
     "send": ' data-chat="send"',
+    # 以下为 2026-08-29 实测补齐的钩子（旧版缺，作者按手册写选择器会失配）
+    "shortcut": ' data-chat="shortcut"',
+    "instruction_bar": ' data-chat="instruction-bar"',
+    "instruction_back": ' data-chat="instruction-back"',
+    "instruction_chip": ' data-chat="instruction-chip"',
+    "assistant": ' data-chat="assistant" data-action="assistant"',
+    "assistant_tip": "",   # 真机点击后才插入，默认不渲染
+    "model_chip": ' data-chat="model-chip" data-action="model"',
 }
 
 
@@ -1170,7 +1691,85 @@ def _sandbox_toolbar_html(obj):
                    html_mod.escape(dump, quote=True), "事件日志"))
     return ('<details class="preview-tools" data-preview-tools="1">'
             '<summary>沙盒仿真控制（默认折叠）</summary><div class="preview-tools-body">'
-            '<span class="preview-tools-label">平台侧动作</span>%s</div></details>' % "".join(rows))
+            '<span class="preview-tools-label">平台侧动作</span>%s'
+            '%s</div></details>' % ("".join(rows), _sandbox_panel_tools_html()))
+
+
+# 浮层开关按钮：分两组摆，标签直接写清"卡片能改 / 平台侧改不动"，
+# 免得作者对着宿主弹窗白写 --chat-modal-*。
+SANDBOX_PANEL_TOOLS_IN = (
+    ("more-panel", "＋更多面板", "composer 内展开（不是弹窗）；壳吃 --chat-modal-bg、"
+                              "正文 --chat-modal-text、项图标 --chat-more-item-bg。"
+                              "实测 composer 95→412px"),
+    ("message-menu", "长按菜单", "[data-chat=message-menu]，z-8200 + backdrop blur；"
+                               "内层吃 --chat-modal-surface / --chat-modal-text"),
+    ("alert", "居中 alert", "[data-chat=alert]，实测 position:absolute（非 fixed）、"
+                          "遮罩 rgba(0,0,0,.45)、z-9000；确定钮吃 --chat-accent"),
+    ("snack", "snack 提示", "[data-chat=snack]，composer 侧，z-8100"),
+    ("snackbar", "snackbar", "[data-probe=snackbar]，平台侧，z-10090（最高）"),
+    ("share-bar", "分享条", "[data-chat=share-bar]，吃 --chat-composer-bg + --chat-accent"),
+    ("share-pick-bar", "选消息底栏", "[data-chat=share-pick-bar]，吃 --chat-modal-surface"),
+    ("share-shot-loading", "长图 loading", "[data-chat=share-shot-loading]，z-8000"),
+    ("summary-bubble", "总结气泡", "[data-chat=summary-bubble]，长在消息流里"),
+    ("history-loading", "历史加载", "[data-probe=history-loading]，会把 messages 整块隐藏"),
+)
+
+SANDBOX_PANEL_TOOLS_HOST = (
+    ("model", "模型设置"), ("conv", "对话设置"), ("summary", "总结剧情"),
+    ("role", "用户人设"), ("share", "分享"),
+)
+
+
+def _sandbox_panel_tools_html():
+    """沙盒浮层开关（预览工具，非被测产物）。"""
+    win = "document.querySelector('.pano-frame').contentWindow"
+    parts = ['<span class="preview-tools-label">iframe 内浮层（卡片 CSS 能改）</span>']
+    for name, label, tip in SANDBOX_PANEL_TOOLS_IN:
+        parts.append(
+            '<button class="preview-tool" type="button" title="%s" '
+            'onclick="%s.__sbxPanels.open(\'%s\')">%s</button>'
+            % (html_mod.escape(tip, quote=True), win, name, label))
+    parts.append(
+        '<button class="preview-tool" type="button" title="指令栏与快捷条原地互斥切换'
+        '（不是弹窗）" onclick="%s.__sbxPanels.toggleInstruction()">指令栏切换</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="AI帮聊 tip：真机点击后才插入'
+        '（[data-chat=assistant-tip]，吃 --chat-modal-accent）" '
+        'onclick="%s.__sbxPanels.assistantTip()">帮聊 tip</button>' % win)
+    for mode in ("content", "full", "closed"):
+        parts.append(
+            '<button class="preview-tool" type="button" title="舞台 %s 态'
+            '（实测 content=absolute/z-2000、full=fixed/z-3000、closed=display:none）" '
+            'onclick="%s.__sbxPanels.stage(\'%s\')">舞台 %s</button>' % (mode, win, mode, mode))
+    parts.append('<span class="preview-tools-label">宿主页弹窗（平台侧 · 卡片改不动，'
+                 '只看遮挡层级）</span>')
+    for name, label in SANDBOX_PANEL_TOOLS_HOST:
+        parts.append(
+            '<button class="preview-tool" type="button" '
+            'title="渲染在宿主页 uni-app，跨源 iframe 之外；探针验证在卡里改 '
+            '--chat-modal-* 对它无效" '
+            'onclick="%s.__sbxPanels.open(\'%s\')">%s</button>' % (win, name, label))
+    parts.append('<span class="preview-tools-label">输入框三态</span>')
+    for state, lab, tip in (
+            ("", "折叠", "基线态：min-height 82rpx、单行居中（实测）"),
+            ("is-multiline", "多行", "真机内容多行时自动加：换 padding、底对齐，"
+                                    "两侧圆钮 padding-bottom 27rpx"),
+            ("is-expanded", "展开", "转 grid 三区（tools/input/chip.send），"
+                                   "工具行「粘贴/清空」才显示、model-chip order 归 0")):
+        parts.append(
+            '<button class="preview-tool" type="button" title="%s" '
+            'onclick="%s.__sbxPanels.fieldState(\'%s\')">%s</button>'
+            % (html_mod.escape(tip, quote=True), win, state, lab))
+    parts.append('<span class="preview-tools-label">主题</span>')
+    for t, lab in (("dark", "深色"), ("light", "浅色")):
+        parts.append(
+            '<button class="preview-tool" type="button" title="切 [data-theme]'
+            '（两套 29 令牌均为实测真值）" '
+            'onclick="%s.__sbxPanels.theme(\'%s\')">%s</button>' % (win, t, lab))
+    parts.append(
+        '<button class="preview-tool" type="button" title="关闭所有浮层" '
+        'onclick="%s.__sbxPanels.closeAll()">全部关闭</button>' % win)
+    return "".join(parts)
 
 
 def _sandbox_accuracy_html(profile):
@@ -1215,29 +1814,600 @@ def _sandbox_accuracy_html(profile):
     return "".join(rows)
 
 
+# 三面板专用「扁平壳」CSS：与全景共用同一批实测取值，但去掉 fixed 定位与视口高度，
+# 让诊断 iframe 仍能靠 body.scrollHeight 自动撑高。
+#
+# 🚨 与全景壳的区别只有**布局**（fixed→静态流、100%高→auto），**取值一律照抄实测**：
+# 主题变量、rem 缩放律、气泡 padding/圆角/opacity、以及最要紧的 white-space:pre-line。
+# 别为了"面板看着紧凑"改这些数 —— 三面板是单组件体检台，量错了后面全景也白搭。
+# 顶栏/底栏/弹窗**故意不放**：那些属于组合审核，是全景的职责，放进来只会干扰单组件诊断。
+MMD_PANEL_SHELL_CSS = """html{font-size:%(rootfont)s}
+html,body{margin:0;width:100%%;
+  font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+body{font-size:16px;background-color:var(--background-color,#17181A);%(themevars)s}
+*{margin:0;-webkit-tap-highlight-color:transparent}
+uni-view,uni-scroll-view,uni-image,uni-text{display:block}
+/* 层级与类名照真机，但改静态流（fixed 会让诊断 iframe 撑不起高度） */
+.chat .chat-scope-box{position:static;width:100%%}
+.chat .chat-scope-box .scroll-view{position:static;margin:0;height:auto;background:rgba(0,0,0,0)}
+.chat .chat-scope-box .scroll-view .chat-body{position:relative;padding-bottom:0;
+  display:flex;flex-direction:column;font-size:15px}
+.chat .chat-scope-box .scroll-view .chat-body .item{display:flex;align-items:center;
+  padding:0.71875rem 0.9375rem}
+.chat .chat-scope-box .scroll-view .chat-body .item .left{background-color:#fff;
+  border-radius:1rem 1rem 1rem 0!important}
+.chat .chat-scope-box .scroll-view .chat-body .item .right{background-color:#c2dcff;
+  border-radius:1rem 1rem 0!important}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope{position:relative;
+  max-width:94%%;color:var(--chat-content-font-color,#FFFFFF)}
+/* 🚨 pre-line 是「换行空白条」真因，三面板必须带 —— 少了它单组件阶段查不出来 */
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content{padding:0.75rem;
+  background:var(--background-color,#17181A);opacity:.9;
+  box-shadow:0 0.125rem 0.125rem rgba(0,0,0,.01);border-radius:0.5rem;white-space:pre-line}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table{
+  border-collapse:collapse;empty-cells:show;overflow:auto;border-spacing:0;display:block;
+  word-break:keep-all;width:100%%}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table th{font-weight:600}
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table td,
+.chat .chat-scope-box .scroll-view .chat-body .item .touch-scope .content table th{
+  padding:6px 13px;border:1px solid #dfe2e5;word-break:normal;white-space:nowrap}
+/* 悬浮组件面板：组件多用 position:fixed 挂 body，给个最小视口高度好让它们有处可去 */
+body{min-height:220px}"""
+
+
+def _mmd_panel_shell_css():
+    """三面板用的扁平壳（与全景共用实测取值，布局改静态流）。"""
+    themevars = "".join("%s:%s;" % (k, v) for k, v in MMD_THEME_VARS_DARK.items())
+    return MMD_PANEL_SHELL_CSS % {"rootfont": MMD_ROOT_FONT_SIZE, "themevars": themevars}
+
+
+def _mmd_panorama_css():
+    """把实测主题变量与 rem 缩放律填进 MMD 外壳 CSS。
+
+    主题变量写在 body 规则里（真机是 body 内联 style，样式表规则等效且可被作者
+    的全局美化用 !important 压过，与真机一致）。"""
+    themevars = "".join("%s:%s;" % (k, v) for k, v in MMD_THEME_VARS_DARK.items())
+    return MMD_PANORAMA_CSS % {"rootfont": MMD_ROOT_FONT_SIZE, "themevars": themevars}
+
+
+# 弹窗仿真节点（实测复刻，2026-08-28 逐个点开抓取）。
+# 全局美化会打到这些面板，作者必须能在预览里看到自己的 CSS 有没有波及/漏掉它们。
+# 默认全部关闭（真机也是关的），由外层工具栏按钮切 data-open。
+#
+# 🚨 三件必须照抄真机的事，别"优化"掉：
+#   1. `.u-popup__content` 保留框架基线白底（实测 `background-color:#fff`）。深色是各面板
+#      自己的 scope 或内联 style 覆盖出来的 —— 作者漏改某个面板时真机会露白，预览得能重现。
+#   2. 「模型设置/对话设置/用户人设/分享」z-index 10075，但「总结剧情」是 1000000000
+#      （实测差 5 个数量级）。组件层级参照必须区分这两档。
+#   3. 用户人设那套用 `--lo*` 变量族，实测 18 个全部「引用但从未定义」，恒走 fallback。
+#      预览**故意不定义**它们 —— 好让作者在预览阶段就发现"改 --lo* 没反应"。
+MMD_POPUP_SIM = (
+    # ── 模型设置：slide-up 半屏，scope 自带底色 ──
+    '<uni-view class="u-popup pano-sheet" data-sheet="model" data-open="off">'
+    '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="model"></uni-view>'
+    '<uni-view class="u-transition" style="position:fixed;left:0;bottom:0;width:100%">'
+    '<uni-view class="u-popup__content" '
+    'style="flex:1;border-top-left-radius:10px;border-top-right-radius:10px">'
+    '<uni-view class="model-setting-scope theme-dark">'
+    '<uni-view class="mp-top"><uni-view class="mp-title">模型设置</uni-view>'
+    '<uni-view class="mp-close" data-pano-sheet-close="model">&#215;</uni-view></uni-view>'
+    '<uni-view class="mp-info-bar"><uni-view class="mp-model-name">gemini-3.1-pro</uni-view>'
+    '<uni-view class="mp-energy-pill"><uni-text class="mp-ev">45</uni-text>'
+    '<uni-text class="mp-el">电量</uni-text></uni-view></uni-view>'
+    '<uni-scroll-view class="mp-setting-body">'
+    '<uni-view class="mp-card"><uni-view class="mp-card-head">'
+    '<uni-view class="mp-card-title">上下文长度</uni-view></uni-view>'
+    '<uni-view class="mp-tokens">'
+    '<uni-view class="mp-token-btn">4K</uni-view>'
+    '<uni-view class="mp-token-btn selected">8K</uni-view>'
+    '<uni-view class="mp-token-btn">16K</uni-view>'
+    '<uni-view class="mp-token-btn">32K</uni-view>'
+    '</uni-view></uni-view>'
+    '<uni-view class="mp-switch-row"><uni-view class="mp-sw-left">'
+    '<uni-view class="mp-sw-title">流式输出</uni-view>'
+    '<uni-view class="mp-sw-desc">逐字返回，体验更流畅</uni-view></uni-view></uni-view>'
+    '</uni-scroll-view>'
+    '<uni-view class="bottom"><uni-view class="btn">确定</uni-view></uni-view>'
+    '</uni-view><uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
+    '</uni-view></uni-view></uni-view>'
+    # ── 对话设置：scope 透明，底色由 content 内联给；无圆角 ──
+    '<uni-view class="u-popup pano-sheet" data-sheet="conv" data-open="off">'
+    '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="conv"></uni-view>'
+    '<uni-view class="u-transition" style="position:fixed;left:0;bottom:0;width:100%">'
+    '<uni-view class="u-popup__content" style="flex:1;background-color:#17181A">'
+    '<uni-view class="conv-style-modal">'
+    '<uni-view class="cs-modal-header">'
+    '<uni-view class="cs-header-left" data-pano-sheet-close="conv">取消</uni-view>'
+    '<uni-view class="cs-header-center"><uni-view class="cs-header-title">对话设置</uni-view></uni-view>'
+    '<uni-view class="cs-header-right" data-pano-sheet-close="conv">确定</uni-view></uni-view>'
+    '<uni-view class="cs-modal-content"><uni-scroll-view class="outer-scroll-view">'
+    '<uni-view class="summary-card">对话样式设置项（预览占位）</uni-view>'
+    '</uni-scroll-view></uni-view>'
+    '</uni-view><uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
+    '</uni-view></uni-view></uni-view>'
+    # ── 总结剧情：z-index 1000000000（实测，比别的高 5 个数量级）──
+    '<uni-view class="u-popup pano-sheet" data-sheet="summary" data-open="off">'
+    '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="summary"></uni-view>'
+    '<uni-view class="u-transition" style="position:fixed;left:0;bottom:0;width:100%">'
+    '<uni-view class="u-popup__content" '
+    'style="flex:1;border-top-left-radius:10px;border-top-right-radius:10px">'
+    '<uni-view class="summary-sheet theme-dark">'
+    '<uni-view class="summary-top"><uni-text class="summary-top-title">记忆管理面板</uni-text>'
+    '<uni-view class="summary-close" data-pano-sheet-close="summary">&#215;</uni-view></uni-view>'
+    '<uni-scroll-view class="summary-body">'
+    '<uni-view class="summary-label"><uni-text>剧情总结</uni-text></uni-view>'
+    '<uni-view class="summary-card">总结内容（预览占位）</uni-view>'
+    '</uni-scroll-view>'
+    '<uni-view class="summary-footer bottom">'
+    '<uni-view class="summary-save-btn btn">保存</uni-view></uni-view>'
+    '</uni-view><uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
+    '</uni-view></uni-view></uni-view>'
+    # ── 用户人设：--lo* 变量族（故意不定义，照真机走 fallback）──
+    '<uni-view class="u-popup pano-sheet" data-sheet="role" data-open="off">'
+    '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="role"></uni-view>'
+    '<uni-view class="u-transition" style="position:fixed;left:0;bottom:0;width:100%">'
+    '<uni-view class="u-popup__content" style="flex:1">'
+    '<uni-view class="role-profile-modal">'
+    '<uni-view class="header-scope"><uni-view class="header-box">'
+    '<uni-view class="icon-back" data-pano-sheet-close="role">取消</uni-view>'
+    '<uni-view class="page-title">用户人设</uni-view>'
+    '<uni-view class="complete-btn" data-pano-sheet-close="role">保存</uni-view>'
+    '</uni-view></uni-view>'
+    '<uni-view class="role-setting">'
+    '<uni-view class="switch-card"><uni-view>'
+    '<uni-view class="switch-title">启用用户人设</uni-view>'
+    '<uni-view class="switch-desc">开启后 AI 会参考你的人设</uni-view></uni-view></uni-view>'
+    '<uni-view class="card"><uni-view class="card-title">人设内容</uni-view>'
+    '<uni-view class="card-desc">描述你扮演的角色</uni-view>'
+    '<uni-view class="textarea-dark">（预览占位）</uni-view></uni-view>'
+    '</uni-view>'
+    '</uni-view><uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
+    '</uni-view></uni-view></uni-view>'
+    # ── 分享：矮条 + 框架自带右上角关闭钮 ──
+    '<uni-view class="u-popup pano-sheet" data-sheet="share" data-open="off">'
+    '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="share"></uni-view>'
+    '<uni-view class="u-transition" style="position:fixed;left:0;bottom:0;width:100%">'
+    '<uni-view class="u-popup__content" style="flex:1">'
+    '<uni-view class="u-status-bar u-safe-area-inset-top"></uni-view>'
+    '<uni-view class="share-popup">'
+    '<uni-view class="share-title">分享角色</uni-view>'
+    '<uni-view class="share-sub-title">https://www.sexyai.ai/</uni-view>'
+    '<uni-view class="gen-link-btn">生成链接</uni-view>'
+    '</uni-view>'
+    '<uni-view class="u-popup__content__close u-popup__content__close--top-right" '
+    'data-pano-sheet-close="share">&#10005;</uni-view>'
+    '<uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
+    '</uni-view></uni-view></uni-view>'
+    # ── AI帮聊说明：居中 dialog（未点真机，按既有 DOM/CSS 仿真）──
+    '<uni-view class="u-popup pano-dialog" data-sheet="alert" data-open="off">'
+    '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="alert"></uni-view>'
+    '<uni-view class="u-transition" style="position:relative">'
+    '<uni-view class="u-popup__content u-popup__content--round-center">'
+    '<uni-view class="alert-scope">'
+    '<uni-view class="alert-title">AI帮聊功能介绍</uni-view>'
+    '<uni-view class="alert-content">AI帮聊：不知道怎么回？让AI做你的嘴替！</uni-view>'
+    '<uni-view class="alert-checkbox"><uni-view class="checkbox-box"></uni-view>'
+    '<uni-text>不再提示</uni-text></uni-view>'
+    '<uni-view class="alert-bottom alert-bottom-double">'
+    '<uni-view class="cancel-btn" data-pano-sheet-close="alert">取消</uni-view>'
+    '<uni-view class="ok-btn" data-pano-sheet-close="alert">确定</uni-view>'
+    '</uni-view></uni-view>'
+    '<uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
+    '</uni-view></uni-view></uni-view>'
+)
+
+
+# 弹窗/面板开关脚手架：预览工具自带，非被测产物。走 img onerror 与 MMD 载体一致。
+# 暴露 window.__panoPanels 给外层工具栏与 GUI 测试调用。
+MMD_PANEL_SCAFFOLD = (
+    '<img src="x" data-pano-panel-scaffold="1" style="display:none" '
+    "onerror=\"(function(){"
+    "var D=document;"
+    "var closeAll=function(){"
+    "var l=D.querySelectorAll('[data-sheet]');"
+    "for(var i=0;i<l.length;i++){l[i].setAttribute('data-open','off');}};"
+    # 🚨 属性用双引号包裹 → 内部禁裸双引号（mmd.md §2 红线，初版在此踩坑：
+    # `[data-sheet=\"'+name+'\"]` 里的 `"` 提前闭合属性，onerror 被截断到 230 字符 →
+    # SyntaxError 静默吞掉 → 面板开关整个不工作、只留一个残留 img。
+    # 修法：CSS 属性选择器的值是合法标识符时可**不加引号**，彻底避开引号问题。
+    "var open=function(name){closeAll();"
+    "var el=D.querySelector('[data-sheet='+name+']');"
+    "if(el){el.setAttribute('data-open','on');}return !!el;};"
+    # 「+」更多面板开合。复刻真机三件事：
+    #  ① 面板排在 .send-msg **之后** → 展开时输入框被往上顶（底栏 105→422px，实测）。
+    #  ② 图标随开合换图（真机 ico_more_dark ⇄ ico_more_called_dark，都是"灰圈里的±号"）
+    #     → 预览用 CSS 画灰圈、JS 只换圈内字形 +(43)⇄−(8722)，
+    #     并同步 .more-options-scope 的 data-more，好让作者用属性选择器判开合。
+    #  ③ 真机关态 `.more-scope` 是 **v-if 节点不存在**，不是 display:none —— 所以这里
+    #     用 data-open 之外还挂 data-vif-absent 提示；作者若拿 querySelector('.more-scope')
+    #     判开合，预览与真机结论会相反（预览恒命中）。判据请用 data-more。
+    "var toggleMore=function(){var m=D.querySelector('.more-scope');if(!m)return false;"
+    "var on=m.getAttribute('data-open')!=='on';"
+    "m.setAttribute('data-open',on?'on':'off');"
+    "var mo=D.querySelector('.more-options-scope');"
+    "if(mo){mo.setAttribute('data-more',on?'on':'off');"
+    "var ic=mo.querySelector('.btn-icon');"
+    "if(ic){ic.textContent=on?String.fromCharCode(8722):String.fromCharCode(43);}}"
+    "return on;};"
+    "var toggleInstr=function(){"
+    "var sb=D.querySelector('.shortcut-bar'),ib=D.querySelector('.instruction-bar');"
+    "if(!sb||!ib)return false;"
+    "var on=sb.className.indexOf('hidden')<0;"
+    "sb.className=on?'shortcut-bar hidden':'shortcut-bar';"
+    "ib.className=on?'instruction-bar':'instruction-bar hidden';return on;};"
+    "var l=D.querySelectorAll('[data-pano-sheet-close]');"
+    "for(var i=0;i<l.length;i++){l[i].onclick=function(ev){ev.stopPropagation();closeAll();};}"
+    "var sc=D.querySelectorAll('.shortcut-btn');"
+    "var map={'\\u6a21\\u578b\\u8bbe\\u7f6e':'model','\\u5bf9\\u8bdd\\u8bbe\\u7f6e':'conv',"
+    "'\\u603b\\u7ed3\\u5267\\u60c5':'summary','\\u7528\\u6237\\u4eba\\u8bbe':'role'};"
+    "for(var j=0;j<sc.length;j++){(function(b){b.onclick=function(ev){ev.stopPropagation();"
+    "var t=(b.textContent||'').replace(/^\\s+|\\s+$/g,'');"
+    "if(map[t]){open(map[t]);}else{toggleInstr();}};})(sc[j]);}"
+    "var mo=D.querySelector('.more-options-scope');"
+    "if(mo){mo.onclick=function(ev){ev.stopPropagation();toggleMore();};}"
+    "var ai=D.querySelector('.ai-assistant');"
+    "if(ai){ai.onclick=function(ev){ev.stopPropagation();open('alert');};}"
+    "var bk=D.querySelector('.back-btn');"
+    "if(bk){bk.onclick=function(ev){ev.stopPropagation();toggleInstr();};}"
+    # ── 输入框折叠/展开 + 双 textarea 同步（复刻 2026-08-29 实测行为）──
+    # 真机是 Vue model 单一真值源：写任一 textarea + 派发 input，另一个同 tick 跟上。
+    # 预览用同名 class 的两个节点 + 手动镜像来复现，好让作者验证回填选择器与美化两态。
+    #
+    # 实测三条（此前预览复刻错了，已改，详见契约 §5d）：
+    #  ① 收回是 blur 驱动，不是"点 .chat-body"驱动 —— 真机对页面空白派合成 click
+    #     四个目标全部收不回；派 blur 立刻收回。真人点外面能收回是因为焦点被挪走
+    #     顺带触发 blur。所以这里绑 blur，不绑 body click：真人点外面照样收回
+    #     （浏览器会移焦→触发 blur），而作者用合成 click 试就会跟真机一样收不回。
+    #  ② is-multiline 是**高度**判据不是"含换行"判据 —— 实测 120 字零换行同样会加。
+    #  ③ 派了 input 事件是**同 tick 立刻**同步；不派事件也会在 ~100ms 被轮询采纳。
+    #     所以这里 input 立刻同步，另设 ~100ms 轮询兜底裸赋值，连那个竞态窗口一起复现。
+    "var scope=D.querySelector('.chat-input-scope');"
+    "var uni=D.querySelector('.uni-textarea');"
+    "var tas=D.querySelectorAll('.uni-textarea-textarea');"
+    # 高度判据（对齐真机：is-multiline 看渲染行数，不看换行符）。两个坑：
+    #  a) 必须量**当前可见**的那个 textarea —— 折叠态 [0] 是 display:none、
+    #     scrollHeight 恒 0，量它永远判不出 multiline。
+    #  b) textarea 的 scrollHeight **只涨不缩**，内容变短后仍保留涨上去的高度。
+    #     所以量之前先把 height 压到 0、读完立刻还原（同 tick 内，无闪烁）。
+    # 两个坑本地实测都踩过一次，别简化掉。
+    "var isML=function(el,v){"
+    "if(v.indexOf(String.fromCharCode(10))>=0)return true;"
+    "var m=null;"
+    "for(var i=0;i<tas.length;i++){if(tas[i].offsetParent!==null){m=tas[i];break;}}"
+    "if(!m)m=el;"
+    "if(!m)return false;"
+    "var lh=parseFloat((D.defaultView||window).getComputedStyle(m).lineHeight);"
+    "if(!lh||isNaN(lh))lh=20;"
+    "var prev=m.style.height;"
+    "m.style.height='0px';"
+    "var sh=m.scrollHeight;"
+    "m.style.height=prev;"
+    "return sh>lh*1.8;};"
+    "var applyCls=function(on,ml){if(!scope)return;"
+    "scope.className='chat-input-scope has-toolbar'+(on?' is-expanded':'')+(ml?' is-multiline':'');"
+    "if(uni){uni.className='uni-textarea'+(on?' is-expanded':'')+(ml?' is-multiline':'');}};"
+    "var setState=function(on){if(!scope)return;"
+    "applyCls(on,/is-multiline/.test(scope.className));return on;};"
+    "var syncFrom=function(src){if(tas.length<2)return;"
+    "var v=src.value;"
+    "for(var i=0;i<tas.length;i++){if(tas[i]!==src&&tas[i].value!==v){tas[i].value=v;}}"
+    "if(scope){applyCls(/is-expanded/.test(scope.className),isML(tas[0]||src,v));}};"
+    "for(var t=0;t<tas.length;t++){(function(el){"
+    # 派了 input 事件 → 真机同 tick 落定，这里也立刻同步（不再 setTimeout）
+    "el.addEventListener('input',function(){syncFrom(el);});"
+    "})(tas[t]);}"
+    # 轮询兜底：复现真机"裸赋值 .value 不派事件，约 100ms 后也会被采纳"，
+    # 连带那个竞态窗口（窗口内写两次会互相盖）一起可复现。
+    "var lastSeen=tas.length?tas[0].value:'';"
+    "setInterval(function(){if(!tas.length)return;"
+    "for(var i=0;i<tas.length;i++){if(tas[i].value!==lastSeen){"
+    "lastSeen=tas[i].value;syncFrom(tas[i]);return;}}},100);"
+    "var disp=D.querySelector('.chat-input-collapsed-display');"
+    "if(disp){disp.onclick=function(ev){ev.stopPropagation();setState(true);"
+    "if(tas[0]){tas[0].focus();}};}"
+    # 收回 = 主 textarea 失焦（真机判据）。真人点页面任何地方都会移焦→collapse。
+    "if(tas[0]){tas[0].addEventListener('blur',function(){setState(false);});}"
+    "window.__panoInput={expand:function(){return setState(true);},"
+    "collapse:function(){return setState(false);},"
+    "state:function(){return scope?scope.className:null;},"
+    "nodes:function(){var o=[];for(var i=0;i<tas.length;i++){"
+    "o.push({i:i,val:tas[i].value,visible:tas[i].getBoundingClientRect().height>0});}return o;},"
+    "fill:function(v){var el=D.querySelector('.uni-textarea-textarea');if(!el)return null;"
+    "el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));return el.value;}};"
+    "window.__panoPanels={open:open,closeAll:closeAll,"
+    "toggleMore:toggleMore,toggleInstruction:toggleInstr,"
+    "list:function(){var o=[],l=D.querySelectorAll('[data-sheet]');"
+    "for(var i=0;i<l.length;i++){o.push(l[i].getAttribute('data-sheet'));}return o;},"
+    "opened:function(){var l=D.querySelectorAll('[data-sheet][data-open=on]');"
+    "return l.length?l[0].getAttribute('data-sheet'):null;}};"
+    "})()\">"
+)
+
+
+# 外层工具栏的弹窗开关按钮。全局美化必须逐个面板看过 —— 作者常只顾气泡，
+# 忘了模型设置/对话设置/用户人设/分享/AI帮聊说明，真机一开面板就露白或错色。
+MMD_PANEL_TOOLS = (
+    ("model", "模型设置", "slide-up 半屏 · scope 自带底色 · z-index 10075"),
+    ("conv", "对话设置", "slide-up 69vh · 底色在 content 内联 · 无圆角"),
+    ("summary", "总结剧情", "slide-up 半屏 · z-index 1000000000（比别的高5个数量级）"),
+    ("role", "用户人设", "slide-up 69vh · 用 --lo* 变量族（实测18个全未定义，恒走fallback）"),
+    ("share", "分享", "矮条 · 框架自带右上角关闭钮"),
+    ("alert", "AI帮聊说明", "居中 dialog · .alert-scope · round-center"),
+)
+
+
+def _mmd_panel_tools_html():
+    """MMD 全景专属：弹窗/面板开关按钮（预览工具，非被测产物）。"""
+    win = "document.querySelector('.pano-frame').contentWindow"
+    parts = ['<span class="preview-tools-label">弹窗仿真</span>']
+    for name, label, tip in MMD_PANEL_TOOLS:
+        parts.append(
+            '<button class="preview-tool" type="button" title="%s" '
+            'onclick="%s.__panoPanels.open(\'%s\')">%s</button>'
+            % (html_mod.escape(tip, quote=True), win, name, label))
+    parts.append(
+        '<button class="preview-tool" type="button" title="输入框右侧「+」展开的面板'
+        '（在 .chat-bottom 内，不是弹窗；底栏 105px→317px）" '
+        'onclick="%s.__panoPanels.toggleMore()">＋更多面板</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="「选择指令」原地替换快捷条'
+        '（不是弹窗）" onclick="%s.__panoPanels.toggleInstruction()">指令栏切换</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="关闭所有弹窗" '
+        'onclick="%s.__panoPanels.closeAll()">全部关闭</button>' % win)
+    return "".join(parts)
+
+
+def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
+    """MMD 真实聊天页骨架 HTML（实测复刻，2026-08-28）。
+
+    与真机一字对应的层级（去 data-v scope hash）：
+      .chat > .topTabbar
+            > .chat-scope-box > .scroll-view > .uni-scroll-view-content > .chat-body#msglistview
+            > .chat-bottom
+            > .mm-left-side-container / .mm-right-side-container
+    气泡两种形态都给：`.item.Ai.avatar-body`（首条描述，通栏、对称圆角）与
+    `.item.Ai`（普通 AI 消息，带 .modify-btn-scope 小圆钮），再加一条 `.item.self`
+    用户消息 —— 三种真机形态齐了，作者才能看出组件在哪种气泡里会挤。
+
+    被测内容放在**普通 AI 气泡**里（真机状态栏就长在这），不放通栏描述气泡。
+    真机元素名是 uni-view/uni-scroll-view/uni-image/uni-text（自定义元素，非 div），
+    照抄是有意义的：作者若写 `div > .content` 这类子选择器，真机会失配，预览得能暴露。"""
+    return (
+        '%(runtime)s'
+        '%(hoisted)s'
+        '<uni-view class="chat"%(root)s>'
+        # ── 顶栏 ──
+        '<uni-view class="page-header-scope">'
+        '<uni-view class="topTabbar"%(header)s>'
+        '<uni-view class="header-box"><uni-view class="icon-back"%(header_back)s>&#8249;</uni-view></uni-view>'
+        '<uni-view class="header-center">'
+        '<uni-view class="header-role-img"><uni-view class="pano-avatar-dot"></uni-view></uni-view>'
+        '<uni-view class="header-roleName"%(header_title)s>角色名</uni-view>'
+        '</uni-view>'
+        '<uni-view class="header-icon-meun"%(header_actions)s>'
+        '<uni-view class="header-meun header-meun-rating">&#9734;</uni-view>'
+        '<uni-view class="header-meun">&#9776;</uni-view>'
+        '<uni-view class="header-meun">&#8635;</uni-view>'
+        '<uni-view class="header-meun">&#8942;</uni-view>'
+        '</uni-view>%(header_extra)s</uni-view></uni-view>'
+        '%(statusbar)s'
+        # ── 滚动壳（两层，真机所有 chat-body 后代选择器的前缀）──
+        '<uni-view class="chat-scope-box">'
+        '<uni-scroll-view class="scroll-view dark pano-chat" id="pano-chat"%(messages)s>'
+        '<div class="uni-scroll-view"><div class="uni-scroll-view-content">'
+        '<uni-view class="chat-body" id="msglistview"%(list)s>'
+        # 首条：描述气泡（通栏 + 对称圆角，无尖角）
+        '<uni-view><uni-view class="item Ai avatar-body"%(frame)s>'
+        '<uni-view class="touch-scope">'
+        '<uni-view class="content left">角色描述气泡（通栏形态：touch-scope 满宽、圆角对称 0.5rem）</uni-view>'
+        '</uni-view></uni-view></uni-view>'
+        # 用户消息（.self 右对齐 + .content.right）
+        '<uni-view><uni-view class="item Ai self"%(frame)s>'
+        '<uni-view class="touch-scope"%(msg_user)s>'
+        '<uni-view class="content right"%(body)s>用户示例消息</uni-view>'
+        '</uni-view></uni-view></uni-view>'
+        # 被测内容：普通 AI 气泡（真机状态栏/组件的落点）
+        '<uni-view><uni-view class="item Ai"%(frame)s>'
+        '<uni-view class="select-box" style="display:none"></uni-view>'
+        '<uni-view class="touch-scope" id="item0"%(msg_ai)s>'
+        '<uni-view class="content left" id="q-1"%(body)s>%(tested)s</uni-view>'
+        '<uni-view class="modify-btn-scope">'
+        '<uni-view class="modify-btn">&#8635;</uni-view>'
+        '<uni-view class="modify-btn">&#9998;</uni-view>'
+        '<uni-view class="modify-btn">&#9679;</uni-view>'
+        '</uni-view>%(message_extra)s%(message_actions)s'
+        '</uni-view></uni-view></uni-view>'
+        # 开场白选择块
+        '<uni-view class="prologue-scope">'
+        '<uni-view class="prologue-title"><span>你可以选择开场</span></uni-view>'
+        '<uni-view class="prologue-content">开场白示例</uni-view>'
+        '</uni-view>'
+        '<uni-view id="chatBottom"></uni-view>'
+        '</uni-view></div></div></uni-scroll-view></uni-view>'
+        # 官方侧边挂载点（悬浮组件靶位）
+        '<uni-view class="mm-left-side-container"></uni-view>'
+        '<uni-view class="mm-right-side-container"></uni-view>'
+        '%(stage)s'
+        # ── 底部：快捷条 + 输入区 ──
+        '<uni-view class="chat-bottom"%(composer)s>'
+        '%(toolbar)s'
+        # 快捷条与指令栏互斥（真机「选择指令」原地替换，不是弹窗）
+        '<uni-view class="shortcut-bar-wrapper theme-dark"><uni-view class="shortcut-bar">'
+        '<button class="shortcut-btn" type="button">模型设置</button>'
+        '<button class="shortcut-btn" type="button">对话设置</button>'
+        '<button class="shortcut-btn" type="button">选择指令</button>'
+        '<button class="shortcut-btn" type="button">总结剧情</button>'
+        '<button class="shortcut-btn" type="button">新的聊天</button>'
+        '<button class="shortcut-btn" type="button">用户人设</button>'
+        '</uni-view>'
+        '<uni-view class="instruction-bar hidden">'
+        '<uni-view class="back-btn"><uni-text class="back-arrow">&#8249;</uni-text></uni-view>'
+        '<uni-scroll-view class="instruction-scroll">'
+        '<uni-view class="instruction-chip">清空输入框</uni-view>'
+        '<uni-view class="instruction-chip">通用总结</uni-view>'
+        '<uni-view class="instruction-chip">选项生成</uni-view>'
+        '<uni-view class="instruction-chip">字数控制</uni-view>'
+        '<uni-view class="instruction-chip">人称转换</uni-view>'
+        '</uni-scroll-view></uni-view></uni-view>'
+        '<uni-view class="chat-bottom-wapper">'
+        '%(sendmsg)s'
+        # 「+」展开的更多面板：在 .chat-bottom 内（不是弹窗），11 项 4 列。
+        # 🚨 位置在 `.send-msg` **之后** —— 面板在输入框下方、把输入框往上顶（实测）。
+        # 排到前面会变成"面板在输入框上方"，和真机相反。
+        '<uni-view class="more-scope" data-open="off">'
+        '<uni-view class="item"><uni-view class="item-icon">&#8635;</uni-view>'
+        '<uni-view class="item-title">重置聊天</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#8681;</uni-view>'
+        '<uni-view class="item-title">导出聊天</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9998;</uni-view>'
+        '<uni-view class="item-title">新的聊天</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9881;</uni-view>'
+        '<uni-view class="item-title">编辑角色</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9634;</uni-view>'
+        '<uni-view class="item-title">更换背景</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9776;</uni-view>'
+        '<uni-view class="item-title">自定义指令</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9786;</uni-view>'
+        '<uni-view class="item-title">用户人设</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9744;</uni-view>'
+        '<uni-view class="item-title">设定补充</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9636;</uni-view>'
+        '<uni-view class="item-title">对话设置</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">&#9635;</uni-view>'
+        '<uni-view class="item-title">剧情总结</uni-view></uni-view>'
+        '<uni-view class="item"><uni-view class="item-icon">?</uni-view>'
+        '<uni-view class="item-title">游玩教程</uni-view></uni-view>'
+        '</uni-view>'
+        '</uni-view></uni-view>'
+        # 长按菜单遮罩（层级参照，默认 display:none）
+        '<uni-view class="msg-option-scope"></uni-view>'
+        # 弹窗体系仿真（默认全关，真机也是关的）
+        '%(popupsim)s'
+        '</uni-view>'
+        '%(sendscaffold)s'
+        '%(panelscaffold)s'
+    ) % dict(hooks, runtime=runtime, tested=tested_content,
+             statusbar="", hoisted="", sendscaffold=send_scaffold,
+             popupsim=MMD_POPUP_SIM, panelscaffold=MMD_PANEL_SCAFFOLD,
+             sendmsg=MMD_SEND_MSG_HTML % dict(hooks))
+
+
+# 输入区（`.send-msg`）：单独拆出来，好让 `.more-scope` 能排在它**之后**（实测顺序）。
+MMD_SEND_MSG_HTML = (
+        '<uni-view class="send-msg">'
+        '<uni-view class="uni-textarea">'
+        # 输入框左侧 AI帮聊入口（💡）—— 点它开 .alert-scope 居中 dialog
+        '<uni-view class="ai-assistant">&#128161;'
+        '<uni-view class="beta-badge">10</uni-view></uni-view>'
+        # 输入框：实测是**两个 textarea 互相让位**（不是一个节点变高）。
+        # DOM 顺序恒定 [0]主 / [1]折叠预览，变的只是谁可见；class 两个都叫
+        # `.uni-textarea-textarea chatMsgTextarea`，所以 querySelector 永远命中 [0]。
+        # 折叠态下 [0] 不可见 —— 引擎回填仍然有效（Vue model 双向同步），预览照此复刻。
+        '<uni-view class="chat-input-scope has-toolbar">'
+        # 恒隐藏的发送代理（真机内联 display:none;0×0;absolute，两种状态都在）
+        '<uni-image class="btn-icon chat-send-proxy" '
+        'style="display:none;width:0;height:0;position:absolute"></uni-image>'
+        # 工具条：仅展开态可见
+        '<uni-view class="chat-input-toolbar">'
+        '<uni-view class="chat-input-tool-btn">粘贴</uni-view>'
+        '<uni-view class="chat-input-tool-btn">清空</uni-view>'
+        '</uni-view>'
+        # [0] 主 textarea：仅展开态可见
+        '<uni-textarea class="chatMsgTextarea">'
+        '<textarea class="uni-textarea-textarea" rows="1" '
+        'placeholder="快来聊天吧~"%(input)s></textarea>'
+        '</uni-textarea>'
+        # 折叠行：含 [1] 预览 textarea 与折叠态发送按钮
+        '<uni-view class="chat-input-collapsed-row">'
+        '<uni-view><uni-view class="mind-type">45</uni-view></uni-view>'
+        '<uni-view class="chat-input-collapsed-display">'
+        '<uni-textarea class="chatMsgTextarea chat-input-collapsed-preview">'
+        '<textarea class="uni-textarea-textarea" rows="1" placeholder="快来聊天吧~"></textarea>'
+        '</uni-textarea></uni-view>'
+        # 带 btn-icon：真机发送钮就是 uni-image.btn-icon，作者用
+        # `.btn-icon:not(.chat-send-proxy)` + offsetParent 筛可见钮的写法要能在预览里测通。
+        '<uni-view><button class="pano-send send-btn btn-icon" type="button" '
+        'title="发送（折叠态）"%(send)s>'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round">'
+        '<line x1="22" y1="2" x2="11" y2="13"></line>'
+        '<polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>'
+        '</button></uni-view>'
+        '</uni-view>'
+        # 展开行：展开态的发送按钮
+        '<uni-view class="chat-input-bottom-row">'
+        '<uni-view><uni-view class="mind-type">45</uni-view></uni-view>'
+        '<uni-view><button class="pano-send-expanded send-btn btn-icon" type="button" '
+        'title="发送（展开态）">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round">'
+        '<line x1="22" y1="2" x2="11" y2="13"></line>'
+        '<polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>'
+        '</button></uni-view>'
+        '</uni-view>'
+        '</uni-view>'
+        # 「+」更多入口：真机是 .chat-input-scope 的兄弟节点，两态都在输入框右侧外部。
+        # data-more 由脚手架切 on/off，好复刻真机换图标（＋ ⇄ ⊖）。
+        '<uni-view class="more-options-scope" data-more="off">'
+        '<uni-view class="btn-icon">&#43;</uni-view></uni-view>'
+        '</uni-view></uni-view>'
+    )
+
+
 def _panorama_hooks(platform):
     """沙盒模式返回官方 data-* 钩子；其余平台全为空串（骨架一字不变）。"""
     keys = ("root", "header", "header_back", "header_title", "header_actions",
             "header_extra", "messages", "list", "frame", "msg_user", "msg_ai",
             "body", "message_extra", "message_actions", "stage", "composer",
-            "toolbar", "input", "send")
+            "toolbar", "input", "send",
+            # 2026-08-29 实测补齐
+            "shortcut", "instruction_bar", "instruction_back", "instruction_chip",
+            "assistant", "assistant_tip", "model_chip")
     if platform != "mmdsandbox":
         return {k: "" for k in keys}
     return dict(_SANDBOX_HOOKS)
 
 
-# 沙盒模式设计令牌清单（实测确证共 14 个，mmd-sandbox.md §6.1）。
-# 依据：逆向沙盒样式表 sandbox-app.css + 真机探针实测。官方手册只记了前 9 个
-# + --chat-viewport-height（共 10 条），漏记了本清单最后 5 个 —— 作者在卡里写
-# var(--chat-input-bg) 等是**真机可用**的，预览必须一并注入，否则预览样式塌掉
-# 而真机正常，作者会去"修"一个不存在的 bug。改动这里前请先确认实测依据。
-SANDBOX_DESIGN_TOKENS = (
+# ── 沙盒模式设计令牌：实测 29 个（2026-08-29 真机 CSSOM）─────────────────────
+# 依据：Playwright 进真实卡片 iframe（c<roleId>.sbx.aitchat.org）读 styleSheets，
+# 平台把两套值分别定义在 [data-theme="dark"] / [data-theme="light"]，各 29 条，
+# **没有 :root 定义**。完整契约见 references/platforms/mmd-sandbox-real-page-contract-2026-08-29.md
+#
+# 🚨 历史修正：这里曾只列 14 个，漏了 15 个 —— 其中整个 `--chat-modal-*` 族（9 个）
+# 与 `--chat-composer-*`/`--chat-shortcut-bg`/`--chat-input-placeholder`/`--chat-input-border`
+# 都是**真机可用**的。官方《角色卡制作手册》把后 18 个称作「底栏和白名单弹窗」变量，
+# 与本次实测完全一致（18/18 逐个注入醒目色验证生效）。少注入它们 → 预览塌样式而真机
+# 正常，作者会去"修"一个不存在的 bug。
+#
+# 分两组是**语义**差异，不是证据等级差异（两组都是实测）：
+#   气泡组（前 10 个，含 viewport-height）：改了会带动整页与气泡。
+#   白名单组（后 18 个）：只换底栏与「+」更多面板等 iframe 内浮层，**不动**气泡语义色，
+#   也不动图标（图标是 <img>，改不了）。
+SANDBOX_BUBBLE_TOKENS = (
     "--chat-bg", "--chat-surface", "--chat-text", "--chat-text-muted",
     "--chat-border", "--chat-accent",
     "--chat-bubble-user-bg", "--chat-bubble-ai-bg", "--chat-bubble-text",
-    # 以下 5 个为官方手册漏记项，实测两套主题均有定义。
-    "--chat-input-bg", "--chat-input-text", "--chat-shortcut-text",
-    "--chat-more-item-bg", "--chat-share-pick-bg",
+    "--chat-share-pick-bg",
+)
+
+# 官方手册「底栏和白名单弹窗另有 18 个变量」——逐个实测生效（见上方注释）。
+SANDBOX_WHITELIST_TOKENS = (
+    "--chat-composer-bg", "--chat-composer-text",
+    "--chat-shortcut-bg", "--chat-shortcut-text",
+    "--chat-input-bg", "--chat-input-text",
+    "--chat-input-placeholder", "--chat-input-border",
+    "--chat-modal-bg", "--chat-modal-surface",
+    "--chat-modal-text", "--chat-modal-muted", "--chat-modal-accent",
+    "--chat-modal-input-bg", "--chat-modal-input-text",
+    "--chat-modal-cancel-bg", "--chat-modal-btn-bg", "--chat-modal-btn-border",
+)
+
+# `--chat-more-item-bg` 实测是 `var(--chat-modal-surface)` 的**别名**（两套主题都是），
+# 平台自己这么定义的，作者可直接覆盖，故一并计入。
+SANDBOX_DESIGN_TOKENS = (
+    SANDBOX_BUBBLE_TOKENS + SANDBOX_WHITELIST_TOKENS + ("--chat-more-item-bg",)
 )
 
 # 沙盒模式 14 个设计令牌的预览默认值。定义在 [data-chat="root"] 上，作者换肤改变量、
@@ -1247,72 +2417,128 @@ SANDBOX_DESIGN_TOKENS = (
 # 放在 [data-theme="dark"] 覆盖规则上，效果等价且省一份重复。
 #
 # 🚨 证据等级（别混淆，也别为了"好看"改回失真值）：
-#   深色 14 个全部是 `【实测】` 真值，一字不改。曾经这里放的是好看但失真的值
-#   （--chat-bg:#16181d、气泡 #1a7f5a/#22262c），让预览显示出"气泡有独立底色"
-#   这个平台并不存在的配色 —— 作者会照着它定状态栏配色，上真机才发现整块糊在
-#   背景里。这个谎发生在**设计决策阶段**，代价比"气泡默认看不见"高得多。
-#   实测两个气泡背景与页面背景**同色**（都是 #17181a），预览照此还原。
-#   浅色一套是 `【类推，未实测】`：探针只覆盖了深色，这里按既有浅色板与深色的
-#   对应关系类推，仅作可用占位，**不要当实测事实引用**。
-#   气泡默认无视觉分界的问题用预览专属描边解决（见下 data-preview-bubble-outline），
-#   不靠篡改令牌取值 —— 描边一眼是辅助线，改底色是冒充平台配色。
-# 🚨 --chat-viewport-height 不在那 14 个里：实测它是平台用 JS 写在 root 上的**内联
-# style**（随 visualViewport 变化），不是样式表变量。预览注入它只是合理的静态模拟，
-# 别把它当设计令牌统计。
-# --rpx = calc(100vw / 750) 同样不计入 14 个，但它是平台全部尺寸的基准，作者按文档
-# 会写 calc(24 * var(--rpx))，预览不注入就会算成 0 → 尺寸全塌。故一并注入。
-# 功能栏平台不给样式，这里只给最小可见占位，作者仍需自己写背景/高度/sticky。
+#   深浅两套 **各 29 个全部是【实测】真值**（2026-08-29 抓 [data-theme=dark] /
+#   [data-theme=light] 两条规则的 cssText，逐字照抄）。浅色不再是类推 —— 旧注释说
+#   "探针只覆盖深色、浅色按对应关系类推"，那个状态已经结束。
+#   曾经这里放的是好看但失真的值（--chat-bg:#16181d、气泡 #1a7f5a/#22262c），让预览
+#   显示出"气泡有独立底色"这个平台并不存在的配色 —— 作者会照着它定状态栏配色，上真机
+#   才发现整块糊在背景里。这个谎发生在**设计决策阶段**，代价比"气泡默认看不见"高得多。
+#   实测气泡三色是 var(--chat-bg)/var(--chat-text) 的**别名**（两套主题皆然），
+#   所以气泡与页面背景恒同色。预览照此还原；视觉分界用预览专属描边解决
+#   （见下 data-preview-bubble-outline），不靠篡改令牌取值。
+# 🚨 --chat-viewport-height 不计入 29 个：实测它是平台用 JS 写在 root 上的**内联
+# style**（实测 900px/860px/857px 随视口高变），不是样式表变量。
+# --rpx 同样不计入，但它是平台全部尺寸的基准。实测两档（见 SANDBOX_RPX_* ）。
+# 功能栏平台不给样式（实测 [data-slot=statusbar] 只有 flex:0 1 auto），作者需自己写。
 SANDBOX_DARK_TOKEN_VALUES = {
-    # 【实测】逆向 sandbox-app.css + 真机探针。测试锁定这份取值，防回退。
+    # 【实测】[data-theme="dark"] 规则原文，2026-08-29。测试锁定这份取值，防回退。
     "--chat-bg": "#17181a", "--chat-surface": "#1e1f24", "--chat-text": "#fff",
     "--chat-text-muted": "#c5c5c5", "--chat-border": "#333", "--chat-accent": "#ff6d97",
-    # 气泡三色 = 页面背景，实测无视觉分界。
+    # 气泡三色实测是别名（var(--chat-bg)/var(--chat-text)），此处展开为解析后的值。
     "--chat-bubble-user-bg": "#17181a", "--chat-bubble-ai-bg": "#17181a",
     "--chat-bubble-text": "#fff",
+    "--chat-share-pick-bg": "#2c2e32",
+    # 白名单 18 个（官方手册「底栏和白名单弹窗」，实测逐个生效）
+    "--chat-composer-bg": "#17181a", "--chat-composer-text": "#fff",
+    "--chat-shortcut-bg": "#2c2e32", "--chat-shortcut-text": "#fff",
     "--chat-input-bg": "#1e1f24", "--chat-input-text": "#fff",
-    "--chat-shortcut-text": "#fff",
-    "--chat-more-item-bg": "#2c2e32", "--chat-share-pick-bg": "#2c2e32",
+    "--chat-input-placeholder": "#c5c5c5", "--chat-input-border": "#ff6d97",
+    "--chat-modal-bg": "#17181a", "--chat-modal-surface": "#2c2e32",
+    "--chat-modal-text": "#fff", "--chat-modal-muted": "#c5c5c5",
+    "--chat-modal-accent": "#ff6d97",
+    "--chat-modal-input-bg": "#1e1f24", "--chat-modal-input-text": "#fff",
+    "--chat-modal-cancel-bg": "#ffb7cc", "--chat-modal-btn-bg": "#33353b",
+    "--chat-modal-btn-border": "transparent",
+    # 实测是 var(--chat-modal-surface) 的别名
+    "--chat-more-item-bg": "#2c2e32",
 }
 
-SANDBOX_CHROME_CSS = """.pano-sandbox-host{height:100%;min-height:0;overflow:hidden;background:#17181a}
-[data-chat="root"]{--chat-bg:#ffffff;--chat-surface:#f5f6f8;--chat-text:#1f2328;
-  --chat-text-muted:#6b7280;--chat-border:#d8dbe0;--chat-accent:#1a7f5a;
-  --chat-bubble-user-bg:#ffffff;--chat-bubble-ai-bg:#ffffff;--chat-bubble-text:#1f2328;
-  --chat-input-bg:#ffffff;--chat-input-text:#1f2328;--chat-shortcut-text:#1f2328;
-  --chat-more-item-bg:#f5f6f8;--chat-share-pick-bg:#f5f6f8;
-  --chat-viewport-height:100vh;--rpx:calc(100vw / 750);
-  position:relative;display:flex;flex-direction:column;width:100%;height:var(--chat-viewport-height);
-  min-height:0;max-width:100%;overflow:hidden auto;background-color:var(--chat-bg);color:var(--chat-text);
-  background-position:center center;background-size:auto 100%;background-repeat:no-repeat;
+SANDBOX_LIGHT_TOKEN_VALUES = {
+    # 【实测】[data-theme="light"] 规则原文，2026-08-29。**不再是类推**。
+    "--chat-bg": "#fff", "--chat-surface": "#f5f8fc", "--chat-text": "#212226",
+    "--chat-text-muted": "#8d949d", "--chat-border": "#e5e7eb", "--chat-accent": "#17aafd",
+    "--chat-bubble-user-bg": "#fff", "--chat-bubble-ai-bg": "#fff",
+    "--chat-bubble-text": "#212226",
+    "--chat-share-pick-bg": "#e6e6e6",
+    "--chat-composer-bg": "#fff", "--chat-composer-text": "#212226",
+    "--chat-shortcut-bg": "#f1f4f9", "--chat-shortcut-text": "#8d949d",
+    "--chat-input-bg": "#f6f8fc", "--chat-input-text": "#333",
+    "--chat-input-placeholder": "#8d949d", "--chat-input-border": "#17aafd",
+    "--chat-modal-bg": "#fff", "--chat-modal-surface": "#f5f8fc",
+    "--chat-modal-text": "#212226", "--chat-modal-muted": "#8d949d",
+    "--chat-modal-accent": "#17aafd",
+    "--chat-modal-input-bg": "#f6f8fc", "--chat-modal-input-text": "#212226",
+    "--chat-modal-cancel-bg": "#f5f8fc", "--chat-modal-btn-bg": "#fff",
+    "--chat-modal-btn-border": "#efefef",
+    "--chat-more-item-bg": "#f5f8fc",
+}
+
+# --rpx 尺寸基准（实测三点 + 断点原文，2026-08-29）：
+#   [data-chat="root"]{--rpx:calc(100vw / 750)}
+#   @media (min-width:961px){[data-chat="root"]{--rpx:calc(375px / 750)}}
+# 实测：视口 298px→单位 298px、400px→400px、1280px→**375px**（桌面封顶）。
+# 🚨 旧值是 `@media(min-width:750px){--rpx:1px}` —— 断点与取值双错：真机断点是 961px，
+# 且桌面档不是固定 1px 而是 375/750=0.5px。差 2 倍，作者按预览调的尺寸上真机全错。
+SANDBOX_RPX_BASE = "calc(100vw / 750)"
+SANDBOX_RPX_DESKTOP = "calc(375px / 750)"
+SANDBOX_RPX_BREAKPOINT = "961px"
+
+SANDBOX_CHROME_CSS = """html,body{height:100%%;margin:0}
+body{display:flex;flex-direction:column;background:#17181a}
+.pano-sandbox-host{height:100%%;min-height:0;overflow:hidden;background:#17181a}
+/* 🚨 令牌必须挂在**单属性** [data-theme=*] 上（与真机同特异性 0,1,0）。
+   曾写成 [data-chat="root"][data-theme="dark"]（0,2,0）→ 作者按手册写
+   `[data-chat="root"]{--chat-modal-bg:X}`（0,1,0）在预览里被压过、看着"没生效"，
+   而真机两边都是 0,1,0、靠文档顺序作者赢（平台 CSS 在前、作者 hoisted style 在后）。
+   这类"预览比真机更严"的假象会让作者去改一个没坏的东西，别改回去。 */
+[data-theme="light"]{%(light)s}
+[data-theme="dark"]{%(dark)s}
+[data-chat="root"]{
+  --chat-viewport-height:100vh;--rpx:%(rpxbase)s;
+  width:100%%;max-width:100%%;height:var(--chat-viewport-height);min-height:0;
+  background-color:var(--chat-bg);color:var(--chat-text);
+  display:flex;flex-direction:column;margin:0;position:relative;overflow-x:hidden;overflow-y:auto;
+  background-position:center center;background-size:auto 100%%;background-repeat:no-repeat;
   font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;box-sizing:border-box}
 [data-chat="root"] *,[data-chat="root"] *:before,[data-chat="root"] *:after{box-sizing:border-box}
-[data-chat="root"][data-theme="dark"]{--chat-bg:#17181a;--chat-surface:#1e1f24;--chat-text:#fff;
-  --chat-text-muted:#c5c5c5;--chat-border:#333;--chat-accent:#ff6d97;
-  --chat-bubble-user-bg:#17181a;--chat-bubble-ai-bg:#17181a;--chat-bubble-text:#fff;
-  --chat-input-bg:#1e1f24;--chat-input-text:#fff;--chat-shortcut-text:#fff;
-  --chat-more-item-bg:#2c2e32;--chat-share-pick-bg:#2c2e32}
 [data-chat="header"]{flex:0 0 calc(90 * var(--rpx));min-height:calc(90 * var(--rpx));height:calc(90 * var(--rpx));display:flex;
   align-items:center;justify-content:space-between;padding:0;background:var(--chat-bg);border:0;color:var(--chat-text)}
-[data-chat="header-back"]{flex:0 0 auto;width:calc(76 * var(--rpx));height:100%;display:flex;align-items:center;
+[data-chat="header-back"]{flex:0 0 auto;width:calc(76 * var(--rpx));height:100%%;display:flex;align-items:center;
   justify-content:center;padding:0 calc(20 * var(--rpx));border:0;background:transparent;color:var(--chat-text);
   font:inherit;font-size:calc(50 * var(--rpx));cursor:pointer}
 [data-chat="header-title"]{flex:1 1 0;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
   font-size:calc(30 * var(--rpx));line-height:1.25;font-weight:500}
-[data-chat="header-actions"]{flex:0 0 auto;display:flex;align-items:center;gap:calc(8 * var(--rpx));
-  margin-right:calc(16 * var(--rpx))}
-.pano-head-action{width:calc(52 * var(--rpx));height:calc(52 * var(--rpx));display:flex;align-items:center;
-  justify-content:center;padding:0;border:0;background:transparent;color:var(--chat-text);font:inherit;
+/* 🚨 实测尺寸律（2026-08-29）：actions 用 **margin-right:12px（px，不是 rpx）** 且
+   gap:normal；间距靠每项 margin-left:25rpx。项本身 35rpx 宽 × 撑满顶栏高，img 35rpx。
+   曾写成 gap:8rpx + 52rpx 方钮 —— 桌面档下图标间距和真机差一截。 */
+[data-chat="header-actions"]{flex:0 0 auto;display:flex;align-items:center;margin-right:12px}
+[data-chat="header-actions"] > button,.pano-head-action{width:calc(35 * var(--rpx));height:100%%;
+  margin-left:calc(25 * var(--rpx));display:flex;align-items:center;justify-content:center;padding:0;
+  border:0;background:transparent;color:var(--chat-text);font:inherit;
   font-size:calc(30 * var(--rpx));cursor:pointer}
-[data-slot="header-extra"]{display:none}
+[data-chat="header-actions"] > button > .pano-glyph,.pano-head-action > .pano-glyph{
+  width:calc(35 * var(--rpx));height:calc(35 * var(--rpx));font-size:calc(30 * var(--rpx));
+  display:flex;align-items:center;justify-content:center;line-height:1}
+/* 顶栏第 1 钮（评论）真机是 .header-comments，position:relative —— 给 .rate-tip 定位用。
+   .rate-tip 本次未出现（可能有条件），先把定位上下文留出来。 */
+[data-chat="header-actions"] .header-comments{position:relative}
+[data-chat="header-actions"] .rate-tip{position:absolute;z-index:1}
+/* 标题左侧角色头像：实测 50rpx 圆形 + margin-right:5rpx。曾整个漏掉。 */
+[data-chat="header-title"] > .pano-title-avatar{width:calc(50 * var(--rpx));height:calc(50 * var(--rpx));
+  margin-right:calc(5 * var(--rpx));border-radius:50%%;flex-shrink:0;background:var(--chat-modal-surface);
+  display:flex;align-items:center;justify-content:center;font-size:calc(26 * var(--rpx));overflow:hidden}
+/* 🚨 实测原文是 :empty 才隐藏。曾写成无条件 display:none —— 作者往 header-extra
+   插内容，预览里永远看不见，真机却显示。别改回无条件。 */
+[data-slot="header-extra"]:empty{display:none}
 [data-slot="statusbar"]{flex:0 1 auto;min-height:0}
 [data-chat="messages"]{flex:1 1 auto;min-height:0;overflow:hidden auto;padding:0;background:transparent;
   -webkit-overflow-scrolling:touch}
-[data-chat="messages"] [data-chat="list"]{display:block;min-height:100%;padding:0 0 calc(18 * var(--rpx))}
+[data-chat="messages"] [data-chat="list"]{display:block;min-height:100%%;padding:0 0 calc(18 * var(--rpx))}
 [data-chat="message-frame"]{display:flow-root;margin:0}
-[data-chat="message"]{display:flex;flex-direction:column;width:100%;max-width:100%;padding:calc(23 * var(--rpx)) calc(30 * var(--rpx));
+[data-chat="message"]{display:flex;flex-direction:column;width:100%%;max-width:100%%;padding:calc(23 * var(--rpx)) calc(30 * var(--rpx));
   margin:0;align-items:flex-start;background:transparent;color:var(--chat-text)}
 [data-chat="message"][data-from="user"]{align-items:flex-end}
-[data-chat="message"] [data-chat="message-body"]{max-width:90%;padding:calc(24 * var(--rpx));margin:0;border:0;
+[data-chat="message"] [data-chat="message-body"]{max-width:90%%;padding:calc(24 * var(--rpx));margin:0;border:0;
   border-radius:calc(32 * var(--rpx)) calc(32 * var(--rpx)) calc(32 * var(--rpx)) 0;
   background:var(--chat-bubble-ai-bg);color:var(--chat-bubble-text);font-size:15px;line-height:1.55;
   white-space:pre-line;opacity:.9;word-break:break-word}
@@ -1320,44 +2546,581 @@ SANDBOX_CHROME_CSS = """.pano-sandbox-host{height:100%;min-height:0;overflow:hid
   background:var(--chat-bubble-user-bg)}
 [data-slot="message-extra"],[data-chat="message-actions"]{display:block;width:0;height:0;overflow:hidden}
 [data-slot="left"],[data-slot="right"]{position:relative;flex:0 1 auto;min-height:0}
+/* 🚨 底栏吃的是 --chat-composer-bg/-text（不是 --chat-bg/--chat-text）。实测原文如此，
+   两者默认同色所以肉眼看不出差别 —— 但作者只改 --chat-composer-bg 时，写错会让预览
+   毫无反应而真机变色。别"顺手"统一成 --chat-bg。 */
 [data-chat="composer"]{position:static;left:auto;right:auto;bottom:auto;flex:0 0 auto;display:flex;
-  flex-direction:column;align-items:stretch;gap:0;padding:0;background:var(--chat-bg);border:0;
-  color:var(--chat-text);z-index:auto}
+  flex-direction:column;align-items:stretch;gap:0;padding:0;background:var(--chat-composer-bg);border:0;
+  color:var(--chat-composer-text);z-index:auto}
 [data-slot="toolbar"]{display:block;height:0}
-.pano-shortcuts{display:flex;align-items:center;gap:calc(6 * var(--rpx));padding:calc(10 * var(--rpx)) calc(8 * var(--rpx));
-  overflow:hidden auto;scrollbar-width:none}
-.pano-shortcut{flex:0 0 auto;display:flex;align-items:center;gap:calc(6 * var(--rpx));height:calc(56 * var(--rpx));
-  padding:0 calc(16 * var(--rpx));border:0;border-radius:calc(28 * var(--rpx));background:var(--chat-more-item-bg);
-  color:var(--chat-shortcut-text);font:inherit;font-size:calc(24 * var(--rpx));white-space:nowrap}
-.pano-compose-row{display:flex;align-items:center;gap:calc(16 * var(--rpx));padding:calc(16 * var(--rpx)) calc(30 * var(--rpx));
-  min-height:calc(114 * var(--rpx))}
-.pano-compose-icon,.pano-send{flex:0 0 auto;width:calc(60 * var(--rpx));min-width:0;height:calc(60 * var(--rpx));
-  display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:0;background:transparent;color:var(--chat-text);
-  font:inherit;font-size:calc(38 * var(--rpx));cursor:pointer}
-.pano-input-shell{flex:1 1 auto;min-width:0;display:flex;align-items:center;border:1px solid var(--chat-accent);
-  border-radius:calc(32 * var(--rpx));background:var(--chat-input-bg);padding:0 calc(16 * var(--rpx))}
-[data-chat="input"]{flex:1 1 auto;width:auto;height:auto;min-width:0;min-height:calc(60 * var(--rpx));max-height:calc(192 * var(--rpx));
-  resize:none;padding:calc(10 * var(--rpx)) 0;border:0;outline:0;border-radius:0;background:transparent;color:var(--chat-input-text);
-  font:inherit;font-size:16px;line-height:1.4}
-[data-chat="input"]::placeholder{color:var(--chat-text-muted)}
-[data-chat="send"]{color:var(--chat-accent)}
+/* ── 底栏：实测复刻（2026-08-29）。官方手册「底栏和白名单弹窗」那 18 个变量的靶点。
+   🚨 旧版这里用 .pano-shortcuts/.pano-shortcut/.pano-compose-row/.pano-input-shell 四个
+   自造类名，真机对应的是 [data-chat=shortcut] / [data-chat=instruction-bar] /
+   .composer-shortcut-wrap / .composer-row / .composer-field。作者按手册写钩子选择器时，
+   预览必须能命中，否则调不出效果又找不到原因。自造类保留为兼容别名（见下 legacy 段）。*/
+[data-chat="composer"] button{appearance:none;background:0 0;border:0;margin:0;padding:0;
+  color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+[data-chat="composer"] button:disabled{opacity:.4;cursor:not-allowed}
+[data-chat="composer"] img{display:block}
+[data-chat="composer"] .composer-shortcut-wrap{height:calc(76 * var(--rpx));position:relative;overflow:hidden}
+[data-chat="composer"] [data-chat="shortcut"],[data-chat="instruction-bar"]{height:calc(76 * var(--rpx));
+  padding:0 calc(12 * var(--rpx));gap:calc(10 * var(--rpx));display:flex;align-items:center;box-sizing:border-box;
+  transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .3s}
+[data-chat="composer"] [data-chat="shortcut"]{overflow:auto hidden;white-space:nowrap;scrollbar-width:none}
+[data-chat="composer"] [data-chat="shortcut"]::-webkit-scrollbar{display:none}
+[data-chat="composer"] [data-chat="shortcut"].hidden{transform:translateX(calc(-30 * var(--rpx)));opacity:0;
+  pointer-events:none;position:absolute;inset:0}
+[data-chat="composer"] [data-chat="instruction-bar"]{overflow:hidden}
+[data-chat="composer"] [data-chat="instruction-bar"].hidden{transform:translateX(calc(30 * var(--rpx)));opacity:0;
+  pointer-events:none;position:absolute;inset:0}
+[data-chat="composer"] [data-chat="shortcut"] > button{height:calc(56 * var(--rpx));padding:0 calc(16 * var(--rpx));
+  border-radius:calc(28 * var(--rpx));font-size:calc(24 * var(--rpx));gap:calc(6 * var(--rpx));
+  background:var(--chat-shortcut-bg);color:var(--chat-shortcut-text);white-space:nowrap;
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
+[data-chat="composer"] [data-chat="instruction-chip"]{height:calc(56 * var(--rpx));padding:0 calc(22 * var(--rpx));
+  margin-right:calc(10 * var(--rpx));background:var(--chat-shortcut-bg);
+  border-radius:calc(28 * var(--rpx));font-size:calc(24 * var(--rpx));color:var(--chat-shortcut-text);
+  white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+[data-chat="composer"] [data-chat="instruction-back"]{width:calc(48 * var(--rpx));height:calc(48 * var(--rpx));
+  background:var(--chat-modal-accent);color:#fff;border-radius:50%%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 calc(4 * var(--rpx)) calc(16 * var(--rpx)) #ff6d9759}
+[data-theme="dark"] [data-chat="instruction-back"]{box-shadow:none}
+[data-chat="composer"] .instruction-back-arrow{font-size:calc(38 * var(--rpx));transform:translateY(calc(-5 * var(--rpx)));
+  font-weight:600;line-height:1}
+[data-chat="composer"] .instruction-scroll{white-space:nowrap;scrollbar-width:none;flex:1 1 0;align-items:center;
+  min-width:0;display:flex;overflow:auto hidden}
+[data-chat="composer"] .instruction-scroll::-webkit-scrollbar{display:none}
+[data-chat="composer"] .composer-row{width:100%%;padding:calc(16 * var(--rpx)) calc(30 * var(--rpx));
+  box-sizing:border-box;display:flex;align-items:center}
+[data-chat="composer"] .assistant-anchor,[data-action="more"]{flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;align-self:center;position:relative}
+[data-chat="composer"] .assistant-anchor{margin-right:calc(6 * var(--rpx))}
+[data-chat="composer"] [data-action="more"]{margin-left:calc(12 * var(--rpx))}
+[data-chat="composer"] [data-chat="assistant"]{display:flex;align-items:center;justify-content:center;position:relative}
+[data-chat="composer"] [data-chat="assistant"] .beta-badge{position:absolute;top:calc(-10 * var(--rpx));
+  left:calc(-20 * var(--rpx));padding:calc(4 * var(--rpx)) calc(6 * var(--rpx));
+  border-radius:calc(10 * var(--rpx));background:var(--chat-accent);color:#fff;
+  font-size:calc(20 * var(--rpx));display:flex;align-items:center;font-weight:500;line-height:1}
+/* AI帮聊 tip：真机点击后才插入，预览默认不渲染（由面板开关插入） */
+[data-chat="composer"] [data-chat="assistant-tip"]{position:absolute;bottom:100%%;left:0;transform:translateX(-5%%);
+  margin-bottom:calc(28 * var(--rpx));padding:calc(8 * var(--rpx)) calc(10 * var(--rpx));
+  border-radius:calc(15 * var(--rpx));background:var(--chat-modal-accent);color:#fff;
+  font-size:calc(22 * var(--rpx));white-space:nowrap;z-index:10;width:max-content;line-height:1.4}
+[data-chat="composer"] .assistant-tip-arrow{position:absolute;top:100%%;left:calc(30 * var(--rpx));width:0;height:0;
+  border-left:calc(8 * var(--rpx)) solid transparent;border-right:calc(8 * var(--rpx)) solid transparent;
+  border-top:calc(8 * var(--rpx)) solid var(--chat-modal-accent)}
+/* 输入框壳与三态（实测原文对齐 2026-08-29）：
+   折叠态 min-height:82rpx（旧版漏了这条，输入行整体矮一截）；
+   多行态 is-multiline 换 padding 并底对齐；展开态 is-expanded 转 grid（三区 tools/input/chip.send）。
+   🚨 font-size 那条实测在 ::placeholder 规则里（不是 input 本体），input 本体不设字号
+   —— 照抄，别"顺手"给 input 补 font-size，否则与真机差一截。 */
+[data-chat="composer"] .composer-field{flex:1 1 0;min-width:0;padding:0 calc(16 * var(--rpx));
+  background:var(--chat-input-bg);border-radius:calc(24 * var(--rpx));
+  border:calc(2 * var(--rpx)) solid var(--chat-input-border);
+  display:flex;align-items:center;box-sizing:border-box}
+[data-chat="composer"] .composer-field:not(.is-expanded){min-height:calc(82 * var(--rpx))}
+[data-chat="composer"] .composer-field.is-expanded{padding:calc(20 * var(--rpx));border-radius:calc(24 * var(--rpx));
+  grid-template-columns:auto 1fr auto;
+  grid-template-areas:"tools tools tools" "input input input" "chip . send";
+  align-items:stretch;display:grid}
+[data-chat="composer"] .composer-tools{align-items:center;gap:calc(16 * var(--rpx));
+  margin-bottom:calc(12 * var(--rpx));grid-area:tools;display:flex}
+[data-chat="composer"] .composer-field:not(.is-expanded) .composer-tools{display:none}
+[data-chat="composer"] .composer-tools button{align-items:center;gap:calc(6 * var(--rpx));
+  font-size:calc(24 * var(--rpx));color:var(--chat-shortcut-text);
+  padding:calc(8 * var(--rpx)) calc(18 * var(--rpx));background:var(--chat-shortcut-bg);
+  border-radius:calc(12 * var(--rpx));border:1px solid rgba(255,255,255,.1);display:flex}
+[data-chat="composer"] [data-chat="input"]{resize:none;width:100%%;min-width:0;color:var(--chat-input-text);
+  background:0 0;border:0;outline:none;flex:1 1 0;grid-area:input;font-family:inherit}
+[data-chat="composer"] [data-chat="input"]::placeholder{color:var(--chat-input-placeholder);
+  font-size:calc(32 * var(--rpx));padding:calc(8 * var(--rpx));box-sizing:border-box;
+  max-height:calc(32 * var(--rpx) * 1.4 * 5);scrollbar-width:none;font-family:inherit;
+  overflow-y:auto;line-height:1.4 !important}
+[data-chat="composer"] [data-chat="input"]::-webkit-scrollbar{width:0;height:0;display:none}
+[data-chat="composer"] .composer-field:not(.is-expanded) [data-chat="input"]{padding:0 calc(12 * var(--rpx));
+  max-height:calc(280 * var(--rpx));align-self:center}
+[data-chat="composer"] .composer-field.is-multiline:not(.is-expanded){padding:calc(16 * var(--rpx)) calc(20 * var(--rpx));
+  align-items:flex-end}
+[data-chat="composer"] .composer-field.is-multiline:not(.is-expanded) [data-chat="input"]{
+  padding:calc(8 * var(--rpx)) calc(12 * var(--rpx))}
+[data-chat="composer"] .composer-field.is-multiline:not(.is-expanded) [data-chat="model-chip"],
+[data-chat="composer"] .composer-field.is-multiline:not(.is-expanded) [data-chat="send"]{
+  padding-bottom:calc(16 * var(--rpx))}
+[data-chat="composer"] .composer-field.is-expanded [data-chat="input"]{min-height:calc(32 * var(--rpx) * 1.4);
+  max-height:calc(32 * var(--rpx) * 1.4 * 7);padding:0 calc(4 * var(--rpx));
+  margin-bottom:calc(16 * var(--rpx));overflow-y:auto}
+/* 多行/展开时左右两个圆钮改为底对齐（实测 :has() 选择器原文） */
+[data-chat="composer"] .composer-row:has(.is-expanded),
+[data-chat="composer"] .composer-row:has(.is-multiline){align-items:flex-end}
+[data-chat="composer"] .composer-row:has(.is-expanded) .assistant-anchor,
+[data-chat="composer"] .composer-row:has(.is-multiline) .assistant-anchor,
+[data-chat="composer"] .composer-row:has(.is-expanded) [data-action="more"],
+[data-chat="composer"] .composer-row:has(.is-multiline) [data-action="more"]{
+  padding-bottom:calc(27 * var(--rpx));align-self:flex-end}
+[data-chat="composer"] [data-chat="model-chip"]{font-weight:500;font-size:calc(25 * var(--rpx));
+  color:var(--chat-composer-text);white-space:nowrap;flex-shrink:0;order:-1;
+  grid-area:chip;align-items:center;display:flex}
+[data-chat="composer"] .composer-field.is-expanded [data-chat="model-chip"]{order:0}
+[data-chat="composer"] [data-chat="send"]{flex-shrink:0;grid-area:send;justify-content:center;align-items:center;
+  display:flex;color:var(--chat-accent)}
+/* 图标尺寸（实测）：send 的 img 40rpx；assistant 与 more 的 img 50rpx。
+   真机是「两者都 40rpx」后面再单独把 assistant 覆盖成 50rpx，这里照同样的顺序写。 */
+[data-chat="composer"] [data-chat="assistant"] .pano-glyph,
+[data-chat="composer"] [data-chat="send"] .pano-glyph{
+  width:calc(40 * var(--rpx));height:calc(40 * var(--rpx));font-size:calc(34 * var(--rpx));
+  display:flex;align-items:center;justify-content:center;line-height:1}
+[data-chat="composer"] [data-chat="assistant"] .pano-glyph{
+  width:calc(50 * var(--rpx));height:calc(50 * var(--rpx));font-size:calc(42 * var(--rpx))}
+[data-chat="composer"] [data-action="more"] .pano-glyph{width:calc(50 * var(--rpx));height:calc(50 * var(--rpx));
+  font-size:calc(44 * var(--rpx));display:flex;align-items:center;justify-content:center;line-height:1}
+/* 「+」更多面板：真机在 composer 内展开（不是弹窗），4 列 11 项，实测 composer 95→412px。
+   壳吃 --chat-modal-bg、正文吃 --chat-modal-text、项图标底吃 --chat-more-item-bg。*/
+[data-chat="more-panel"]{gap:calc(20 * var(--rpx));
+  padding:calc(24 * var(--rpx)) calc(30 * var(--rpx)) calc(30 * var(--rpx));
+  box-sizing:border-box;background:var(--chat-modal-bg);color:var(--chat-modal-text);
+  flex-wrap:wrap;display:none}
+[data-chat="more-panel"][data-open="on"]{display:flex}
+[data-chat="more-panel"] > button{width:calc(25%% - calc(20 * var(--rpx)));text-align:center;
+  font-size:calc(26 * var(--rpx));font-weight:400;line-height:calc(37 * var(--rpx));
+  color:var(--chat-modal-text);flex-direction:column;align-items:center;display:flex}
+[data-chat="more-panel"] > button > span{width:100%%;height:calc(129 * var(--rpx));
+  border-radius:calc(40 * var(--rpx));background:var(--chat-more-item-bg);box-sizing:border-box;
+  margin-bottom:calc(14 * var(--rpx));justify-content:center;align-items:center;display:flex;
+  font-size:calc(48 * var(--rpx))}
 [data-chat="messages"]{background:transparent}
 [data-chat="message"][data-from="ai"] [data-chat="message-body"]{background:var(--chat-bubble-ai-bg);color:var(--chat-bubble-text)}
 [data-chat="message"][data-from="user"] [data-chat="message-body"]{background:var(--chat-bubble-user-bg)}
 /* 预览专属辅助线，默认关闭；外层工具可临时在 root 挂此标记。 */
 [data-preview-bubble-outline] [data-chat="message-body"]{box-shadow:inset 0 0 0 1px var(--chat-border)}
-[data-chat="author-stage"]{position:fixed;inset:0;z-index:2000;background:var(--chat-bg)}
+/* 舞台三态（实测）：closed 不显示；content 只盖消息区 z-index 2000；full 盖整屏 3000。
+   旧版只有一个 fixed/inset:0/z-2000 + [hidden]，把 content 也画成盖整屏了。*/
+[data-chat="author-stage"]{background:var(--chat-bg)}
+[data-chat="author-stage"][data-stage="closed"]{display:none}
+[data-chat="author-stage"][data-stage="content"]{position:absolute;z-index:2000}
+[data-chat="author-stage"][data-stage="full"]{position:fixed;inset:0;z-index:3000}
 [data-chat="author-stage"][hidden]{display:none}
-@media (min-width:750px){[data-chat="root"]{--rpx:1px}[data-chat="header"]{flex-basis:45px;min-height:45px;height:45px}
-  [data-chat="header-back"]{width:38px;padding:0 10px;font-size:25px}[data-chat="header-title"]{font-size:16px;font-weight:500}
-  [data-chat="header-actions"]{gap:4px;margin-right:8px}.pano-head-action{width:34px;height:34px;font-size:18px}
-  [data-chat="message"]{padding:11.5px 15px}[data-chat="message"] [data-chat="message-body"]{padding:12px;border-radius:16px 16px 16px 0}
-  [data-chat="message"][data-from="user"] [data-chat="message-body"]{border-radius:16px 16px 0 16px}
-  .pano-shortcuts{gap:3px;padding:4px 6px}.pano-shortcut{height:28px;padding:0 8px;border-radius:14px;font-size:12px}
-  .pano-compose-row{gap:8px;padding:8px 15px;min-height:57px}.pano-compose-icon,.pano-send{width:30px;height:30px;font-size:19px}
-  .pano-input-shell{border-radius:16px;padding:0 8px}[data-chat="input"]{min-height:30px;max-height:96px;padding:5px 0}}
-@media (max-height:520px) and (orientation:landscape){.pano-shortcuts{display:none}}
+
+/* ── iframe 内浮层族（实测复刻）：这批**卡片 CSS 能打到**，必须完整仿真 ── */
+/* 长按消息菜单 z-8200 + backdrop blur */
+[data-chat="message-menu"]{position:fixed;inset:0;z-index:8200;backdrop-filter:blur(5px);
+  box-sizing:border-box;display:none}
+[data-chat="message-menu"][data-open="on"]{display:block}
+[data-chat="message-menu"] .menu-preview{margin:calc(160 * var(--rpx)) calc(32 * var(--rpx)) 0;
+  max-height:50%%;padding:calc(32 * var(--rpx));border-radius:calc(40 * var(--rpx));
+  background:var(--chat-modal-surface);color:var(--chat-modal-text);white-space:pre-line;
+  box-shadow:0 0 calc(8 * var(--rpx)) #0000000f;box-sizing:border-box;overflow:auto}
+[data-chat="message-menu"] .menu-options{width:calc(290 * var(--rpx));margin-left:1rem;
+  margin-top:calc(30 * var(--rpx));padding:calc(20 * var(--rpx)) calc(32 * var(--rpx));
+  border-radius:calc(40 * var(--rpx));background:var(--chat-modal-surface);
+  box-shadow:0 0 calc(8 * var(--rpx)) #0000000f;box-sizing:border-box}
+[data-chat="message-menu"] .menu-sep{width:calc(233 * var(--rpx));height:0;
+  border:calc(1 * var(--rpx)) solid var(--chat-border)}
+[data-chat="message-menu"] .menu-options [data-action]{width:100%%;height:calc(80 * var(--rpx));
+  color:var(--chat-modal-text);font-weight:500;font-size:calc(26 * var(--rpx));
+  line-height:calc(80 * var(--rpx));display:flex;justify-content:space-between;align-items:center}
+/* 居中 alert：实测 position:absolute（不是 fixed）、遮罩 .45、z-9000 */
+[data-chat="alert"]{position:absolute;inset:0;z-index:9000;background:rgba(0,0,0,.45);
+  justify-content:center;align-items:center;display:none}
+[data-chat="alert"][data-open="on"]{display:flex}
+[data-chat="alert"] .alert-box{background:var(--chat-modal-bg);color:var(--chat-modal-text);
+  border-radius:calc(24 * var(--rpx));min-width:calc(480 * var(--rpx));
+  padding:0 calc(40 * var(--rpx));box-sizing:border-box}
+[data-chat="alert"] [data-chat="toast"]{padding:calc(45 * var(--rpx)) 0;
+  font-size:calc(28 * var(--rpx));text-align:center;margin:0}
+[data-chat="alert-ok"]{width:100%%;margin:0 0 calc(30 * var(--rpx));color:var(--chat-accent);
+  font-size:calc(32 * var(--rpx));text-align:center;display:block;background:0 0;border:0}
+/* 两个 snackbar：平台侧 z-10090 与 composer 侧 z-8100 */
+[data-probe="snackbar"]{position:fixed;top:50%%;left:50%%;transform:translate(-50%%,-50%%);
+  z-index:10090;background:rgba(0,0,0,.7);color:#fff;border-radius:4px;padding:10px 20px;
+  font-size:14px;max-width:80%%;text-align:center;pointer-events:none;line-height:1.4;display:none}
+[data-probe="snackbar"][data-open="on"]{display:block}
+[data-chat="snack"]{position:fixed;top:50%%;left:50%%;transform:translate(-50%%,-50%%);
+  z-index:8100;background:rgba(0,0,0,.72);color:#fff;border-radius:calc(16 * var(--rpx));
+  padding:calc(20 * var(--rpx)) calc(28 * var(--rpx));font-size:calc(28 * var(--rpx));
+  max-width:70%%;text-align:center;pointer-events:none;line-height:1.4;display:none}
+[data-chat="snack"][data-open="on"]{display:block}
+/* 剧情总结提示气泡（长在消息流里） */
+[data-chat="summary-bubble"]{margin:calc(72 * var(--rpx)) calc(30 * var(--rpx)) calc(16 * var(--rpx));
+  padding:calc(18 * var(--rpx)) calc(24 * var(--rpx));border-radius:calc(40 * var(--rpx));
+  border:calc(1 * var(--rpx)) solid #ff6d9740;color:#ff6d97;background-color:rgba(255,109,151,.08);
+  gap:calc(16 * var(--rpx));align-items:center;box-sizing:border-box;display:none}
+[data-chat="summary-bubble"][data-open="on"]{display:flex}
+[data-chat="summary-bubble"].summary-light{color:#17aafd;background-color:rgba(23,170,253,.08);
+  border-color:rgba(23,170,253,.35)}
+[data-chat="summary-bubble"] .summary-bubble-text{font-size:calc(24 * var(--rpx));color:inherit;
+  flex:1 1 0;font-weight:600;line-height:1.5}
+[data-chat="summary-bubble"] .summary-bubble-btn{padding:calc(8 * var(--rpx)) calc(24 * var(--rpx));
+  border-radius:calc(24 * var(--rpx));background-color:#ff6d97;color:#fff;
+  font-size:calc(22 * var(--rpx));border:0;flex-shrink:0;font-weight:600}
+/* 分享条 / 分享选择模式 / 长图 */
+[data-chat="share-bar"]{align-items:center;column-gap:calc(24 * var(--rpx));
+  padding:calc(24 * var(--rpx)) calc(30 * var(--rpx));background:var(--chat-composer-bg);
+  flex:0 0 auto;display:none}
+[data-chat="share-bar"][data-open="on"]{display:flex}
+[data-chat="share-bar"] > button{padding:calc(20 * var(--rpx)) 0;border-radius:calc(16 * var(--rpx));
+  background:var(--chat-accent);color:#fff;font-size:calc(28 * var(--rpx));border:0;flex:1 1 0}
+[data-chat="share-pick-bar"]{justify-content:center;align-items:center;column-gap:calc(40 * var(--rpx));
+  padding:calc(40 * var(--rpx));background:var(--chat-modal-surface);flex:0 0 auto;display:none}
+[data-chat="share-pick-bar"][data-open="on"]{display:flex}
+[data-chat="share-pick-bar"] > button{width:25%%;color:var(--chat-modal-text);
+  font-size:calc(26 * var(--rpx));background:0 0;border:0;flex-direction:column;
+  align-items:center;display:flex}
+[data-chat="share-pick-icon"]{width:calc(120 * var(--rpx));height:calc(120 * var(--rpx));
+  margin-bottom:calc(14 * var(--rpx));background:var(--chat-border);border-radius:50%%;
+  justify-content:center;align-items:center;display:flex}
+[data-chat="message-frame"][data-share-picked]{background-color:var(--chat-share-pick-bg);opacity:.9}
+[data-chat="share-shot-loading"]{position:absolute;inset:0;z-index:8000;background:rgba(0,0,0,.35);
+  color:#fff;font-size:calc(28 * var(--rpx));justify-content:center;align-items:center;display:none}
+[data-chat="share-shot-loading"][data-open="on"]{display:flex}
+/* 历史加载骨架：真机会把 messages 整块隐藏 */
+[data-probe="history-loading"]{flex:1 1 0;justify-content:center;align-items:center;
+  gap:calc(12 * var(--rpx));font-size:calc(26 * var(--rpx));color:var(--chat-text-muted);
+  z-index:2;min-height:0;display:none}
+[data-probe="history-loading"][data-open="on"]{display:flex}
+[data-chat="root"]:has([data-probe="history-loading"][data-open="on"]) [data-chat="messages"]{
+  visibility:hidden;flex:0 0 0;min-height:0;overflow:hidden}
+
+/* ── 宿主页弹窗：卡片 CSS **打不到**，只画层级遮挡轮廓 ──────────────────────
+   实测：模型设置/对话设置/总结剧情/用户人设/分享 五个渲染在宿主页（h5.aitchat.org 的
+   uni-app），吃宿主 51 个 --background-color 系变量；在卡片 iframe 内注入
+   --chat-modal-* 对它们**零影响**（探针验证：注入 #00ff00 后弹窗仍 #17181a、
+   该变量在其上解析为未定义）。所以预览刻意把它们画成**灰底斜纹的"平台侧"占位**，
+   不套 --chat-modal-* —— 套了就是撒谎，作者会白写一堆选择器。*/
+.pano-host-popup{position:absolute;left:0;right:0;bottom:0;z-index:10075;display:none;
+  box-sizing:border-box;font-family:inherit}
+.pano-host-popup[data-open="on"]{display:block}
+/* 🚨 z-index 逐个实测（2026-08-29），不是一档：
+   9000  = model / model-switch / conversation / share / assist-alert
+   10075 = conv / role
+   1e9   = summary（比别的高 5 个数量级，组件永远盖不过它）
+   曾把 model 记成 10075 —— 实测是 9000。 */
+.pano-host-popup[data-host-popup="model"],
+.pano-host-popup[data-host-popup="model-switch"],
+.pano-host-popup[data-host-popup="conversation"],
+.pano-host-popup[data-host-popup="share"],
+.pano-host-popup[data-host-popup="assist-alert"]{z-index:9000}
+.pano-host-popup[data-host-popup="summary"]{z-index:1000000000}
+/* AI帮聊 alert：实测 u-fade-zoom + flex 居中 + 260px 定宽 + radius 10px（不是底部升起） */
+.pano-host-popup[data-host-popup="assist-alert"][data-open="on"]{display:flex;
+  align-items:center;justify-content:center;top:0}
+.pano-host-popup[data-host-popup="assist-alert"] .pano-host-sheet{width:260px;
+  border-radius:10px;background:#1e1f24}
+/* 遮罩实测 .5（沙盒宿主页），旧 MMD 聊天页是 .7 —— 别混。 */
+.pano-host-popup .pano-host-mask{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.pano-host-popup .pano-host-sheet{position:relative;background:#17181a;color:#fff;
+  border-top-left-radius:10px;border-top-right-radius:10px;padding:16px;
+  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.045) 0 8px,transparent 8px 16px)}
+.pano-host-popup[data-host-popup="conv"] .pano-host-sheet,
+.pano-host-popup[data-host-popup="role"] .pano-host-sheet{border-radius:0}
+.pano-host-popup .pano-host-tag{display:inline-block;margin-bottom:8px;padding:2px 8px;
+  border-radius:4px;background:#d29922;color:#000;font-size:10px;font-weight:600}
+.pano-host-popup .pano-host-title{font-size:15px;font-weight:600;margin-bottom:6px}
+.pano-host-popup .pano-host-note{font-size:11px;line-height:1.5;color:#c5c5c5}
+.pano-host-popup .pano-host-close{position:absolute;top:10px;right:12px;width:22px;height:22px;
+  border:0;border-radius:50%%;background:rgba(255,255,255,.08);color:#c5c5c5;font-size:14px;cursor:pointer}
+
+/* legacy 自造类：骨架上仍挂着这些 class（.pano-shortcuts/.pano-shortcut/.pano-compose-row/
+   .pano-compose-icon/.pano-send/.pano-input-shell），但**不再给它们任何样式** ——
+   样式全部由真实钩子（[data-chat=*]）提供。
+   🚨 曾在这里放过一份"等效"别名规则，结果 `.pano-input-shell{background:var(--chat-input-bg)}`
+   与 `[data-chat="composer"] .composer-field` 同时命中同一节点，作者想用类选择器改输入框时
+   两条打架、行为与真机不一致。类名只留作兼容锚点，样式一律走钩子。 */
+
+/* 桌面档：实测断点 961px、--rpx 封顶 375/750（旧版写 750px/1px，断点与取值双错）。
+   rpx 一改，下面所有 calc(N * var(--rpx)) 自动跟着缩，不需要再逐条写 px 覆盖。 */
+@media (min-width:%(bp)s){[data-chat="root"]{--rpx:%(rpxdesk)s}}
 """
+
+
+# ── 沙盒浮层仿真节点（实测复刻，2026-08-29）─────────────────────────────────
+# 分两类，别混：
+#   A. iframe 内（本段前半）：卡片 CSS **能**打到，作者的全局美化会波及它们，必须完整
+#      仿真、可开关。实测靶点见 references/platforms/mmd-sandbox.md。
+#   B. 宿主页（SANDBOX_HOST_POPUPS）：模型设置/对话设置/总结剧情/用户人设/分享 五个渲染
+#      在 h5.aitchat.org 的 uni-app 里，**跨源 iframe 之外**。探针验证：在卡片 iframe 内
+#      注入 --chat-modal-bg:#00ff00 后打开模型设置，它仍是 #17181a，且该变量在其上解析
+#      为「未定义」。所以这五个只画灰底斜纹的层级占位，**不套 --chat-modal-***
+#      —— 套了就是撒谎，作者会照着预览白写一堆选择器。
+# 默认全关（真机也是关的），由外层工具栏切 data-open="on|off"。
+
+# 「+」更多面板 11 项，data-action 全部照真机（实测顺序与取值，2026-08-29）。
+# 每项都可点：能开面板的直接开（对话设置/剧情总结/用户人设/新的聊天走宿主弹窗占位，
+# 自定义指令切指令栏），其余弹 snack 说明"平台侧动作，预览不模拟真实副作用"。
+SANDBOX_MORE_ITEMS = (
+    ("reset", "&#8635;", "重置聊天"),
+    ("export", "&#8681;", "导出聊天"),
+    ("conversations", "&#9998;", "新的聊天"),
+    ("role-edit", "&#9881;", "编辑角色"),
+    ("background", "&#9634;", "更换背景"),
+    ("instructions", "&#9776;", "自定义指令"),
+    ("persona", "&#9786;", "用户人设"),
+    ("extra", "&#9744;", "设定补充"),
+    ("style", "&#9636;", "对话设置"),
+    ("summary", "&#9635;", "剧情总结"),
+    ("help", "?", "游玩教程"),
+)
+
+SANDBOX_MORE_PANEL = (
+    '<div data-chat="more-panel" data-open="off">'
+    + "".join('<button type="button" data-action="%s"><span>%s</span>%s</button>'
+              % (act, glyph, label) for act, glyph, label in SANDBOX_MORE_ITEMS)
+    + '</div>'
+)
+
+# 展开态才显示的工具行（实测 .composer-field:not(.is-expanded) .composer-tools{display:none}）
+SANDBOX_COMPOSER_TOOLS = (
+    '<div class="composer-tools">'
+    '<button type="button" data-chat="paste">粘贴</button>'
+    '<button type="button" data-chat="clear">清空</button>'
+    '</div>'
+)
+
+SANDBOX_SUMMARY_BUBBLE = (
+    '<div data-chat="summary-bubble" data-open="off">'
+    '<span class="summary-bubble-text">剧情已总结到第 12 轮，可继续对话</span>'
+    '<button class="summary-bubble-btn" type="button">查看</button>'
+    '</div>'
+)
+
+SANDBOX_HISTORY_LOADING = (
+    '<div data-probe="history-loading" data-open="off">'
+    '<span data-probe="history-loading-spinner"></span>正在载入历史…'
+    '</div>'
+)
+
+SANDBOX_MESSAGE_MENU = (
+    '<div data-chat="message-menu" data-open="off">'
+    '<div class="menu-preview">被长按的消息正文（预览占位）</div>'
+    '<div class="menu-options">'
+    '<button type="button" data-action="copy">复制<span>&#10697;</span></button>'
+    '<div class="menu-sep"></div>'
+    '<button type="button" data-action="edit">编辑<span>&#9998;</span></button>'
+    '<div class="menu-sep"></div>'
+    '<button type="button" data-action="delete">删除<span>&#10005;</span></button>'
+    '</div></div>'
+)
+
+SANDBOX_ALERT = (
+    '<div data-chat="alert" data-open="off">'
+    '<div class="alert-box">'
+    '<p data-chat="toast">这是平台 alert 的正文（居中、position:absolute、z-9000）</p>'
+    '<button data-chat="alert-ok" type="button">确定</button>'
+    '</div></div>'
+)
+
+SANDBOX_SNACK = (
+    '<div data-chat="snack" data-open="off">composer 侧提示（z-8100）</div>'
+)
+
+SANDBOX_SNACKBAR = (
+    '<div data-probe="snackbar" data-open="off">平台 snackbar（z-10090）</div>'
+)
+
+SANDBOX_SHARE_BAR = (
+    '<div data-chat="share-bar" data-open="off">'
+    '<button type="button">分享长图</button>'
+    '<button type="button">选择消息</button>'
+    '</div>'
+)
+
+SANDBOX_SHARE_PICK_BAR = (
+    '<div data-chat="share-pick-bar" data-open="off">'
+    '<button type="button"><span data-chat="share-pick-icon">&#10697;</span>复制</button>'
+    '<button type="button"><span data-chat="share-pick-icon">&#9634;</span>长图</button>'
+    '<button type="button"><span data-chat="share-pick-icon">&#8681;</span>保存</button>'
+    '<button type="button"><span data-chat="share-pick-icon">&#10005;</span>取消</button>'
+    '</div>'
+)
+
+SANDBOX_SHARE_SHOT = (
+    '<div data-chat="share-shot-loading" data-open="off">正在生成长图…（z-8000）</div>'
+)
+
+
+# 沙盒浮层开关脚手架：**必须是经典 <script>**，沙盒禁 img onerror（测试也断言产物
+# 整页不得出现 "onerror"）。暴露 window.__sbxPanels 给外层工具栏与 GUI 测试。
+# data-open 用 on/off 而非 1/0：无引号属性选择器 [data-open=1] 非法（CSS 标识符不能
+# 以数字开头），带引号又会在别处引发转义麻烦。
+SANDBOX_PANEL_SCAFFOLD = (
+    '<script data-preview-panels="1">'
+    "(function(){var D=document;"
+    "var SEL='[data-chat=\"more-panel\"],[data-chat=\"message-menu\"],"
+    "[data-chat=\"alert\"],[data-chat=\"snack\"],[data-probe=\"snackbar\"],"
+    "[data-chat=\"share-bar\"],[data-chat=\"share-pick-bar\"],"
+    "[data-chat=\"share-shot-loading\"],[data-chat=\"summary-bubble\"],"
+    "[data-probe=\"history-loading\"],.pano-host-popup';"
+    "function all(){return D.querySelectorAll(SEL);}"
+    "function closeAll(){var l=all();for(var i=0;i<l.length;i++){"
+    "l[i].setAttribute('data-open','off');}"
+    "var tip=D.querySelector('[data-chat=\"assistant-tip\"]');if(tip)tip.remove();}"
+    "function nodeOf(name){"
+    "return D.querySelector('[data-chat=\"'+name+'\"]')"
+    "||D.querySelector('[data-probe=\"'+name+'\"]')"
+    "||D.querySelector('.pano-host-popup[data-host-popup=\"'+name+'\"]');}"
+    "function open(name){closeAll();var el=nodeOf(name);"
+    "if(el){el.setAttribute('data-open','on');}return !!el;}"
+    "function toggleInstr(){var sb=D.querySelector('[data-chat=\"shortcut\"]');"
+    "var ib=D.querySelector('[data-chat=\"instruction-bar\"]');"
+    "if(!sb||!ib)return false;var on=sb.className.indexOf('hidden')<0;"
+    "sb.className=on?'pano-shortcuts hidden':'pano-shortcuts';"
+    "ib.className=on?'':'hidden';return on;}"
+    "function assistantTip(){var a=D.querySelector('.assistant-anchor');if(!a)return false;"
+    "var old=D.querySelector('[data-chat=\"assistant-tip\"]');if(old){old.remove();return false;}"
+    "var t=D.createElement('div');t.setAttribute('data-chat','assistant-tip');"
+    "t.textContent='\\u4e0d\\u77e5\\u9053\\u600e\\u4e48\\u56de\\uff1f\\u8ba9AI\\u5e2e\\u4f60';"
+    "var ar=D.createElement('span');ar.className='assistant-tip-arrow';"
+    "t.appendChild(ar);a.appendChild(t);return true;}"
+    "function stage(mode){var s=D.querySelector('[data-chat=\"author-stage\"]');"
+    "if(!s)return null;s.removeAttribute('hidden');"
+    "s.setAttribute('data-stage',mode);"
+    "s.textContent=mode==='closed'?'':'\\u821e\\u53f0 '+mode;return mode;}"
+    "function themeOf(t){var r=D.querySelector('[data-chat=\"root\"]');"
+    "if(r)r.setAttribute('data-theme',t);return t;}"
+    "window.__sbxPanels={open:open,closeAll:closeAll,"
+    "toggleInstruction:toggleInstr,assistantTip:assistantTip,"
+    "stage:stage,theme:themeOf,"
+    "list:function(){var o=[],l=all();for(var i=0;i<l.length;i++){"
+    "o.push(l[i].getAttribute('data-chat')||l[i].getAttribute('data-probe')"
+    "||l[i].getAttribute('data-host-popup'));}return o;},"
+    "opened:function(){var l=all(),o=[];for(var i=0;i<l.length;i++){"
+    "if(l[i].getAttribute('data-open')==='on'){"
+    "o.push(l[i].getAttribute('data-chat')||l[i].getAttribute('data-probe')"
+    "||l[i].getAttribute('data-host-popup'));}}return o;}};"
+    "var cl=D.querySelectorAll('[data-host-close]');"
+    "for(var i=0;i<cl.length;i++){cl[i].onclick=function(ev){"
+    "ev.stopPropagation();closeAll();};}"
+    "var sc=D.querySelectorAll('[data-chat=\"shortcut\"] > button');"
+    "var map={model:'model',style:'conv',summary:'summary',"
+    "conversations:'model',persona:'role'};"
+    "for(var j=0;j<sc.length;j++){(function(b){b.onclick=function(ev){"
+    "ev.stopPropagation();var a=b.getAttribute('data-action');"
+    "if(a==='instructions'){toggleInstr();}else if(map[a]){open(map[a]);}};})(sc[j]);}"
+    "var more=D.querySelector('[data-action=\"more\"]');"
+    "if(more){more.onclick=function(ev){ev.stopPropagation();"
+    "var p=D.querySelector('[data-chat=\"more-panel\"]');if(!p)return;"
+    "var on=p.getAttribute('data-open')==='on';"
+    "closeAll();if(!on)p.setAttribute('data-open','on');};}"
+    "var asst=D.querySelector('[data-chat=\"assistant\"]');"
+    "if(asst){asst.onclick=function(ev){ev.stopPropagation();assistantTip();};}"
+    "var back=D.querySelector('[data-chat=\"instruction-back\"]');"
+    "if(back){back.onclick=function(ev){ev.stopPropagation();toggleInstr();};}"
+    # 「+」面板 11 个按钮全部可点：能开面板的直接开，其余弹 snack 说明是平台侧动作。
+    # 作者的全局美化能打到这批（面板在 iframe 内），所以点开后要能看出自己的 CSS 效果。
+    "function snack(msg){var s=D.querySelector('[data-chat=\"snack\"]');if(!s)return;"
+    "s.textContent=msg;closeAll();s.setAttribute('data-open','on');}"
+    "var MORE={style:'conv',summary:'summary',persona:'role',conversations:'model'};"
+    "var LABEL={reset:'\\u91cd\\u7f6e\\u804a\\u5929',export:'\\u5bfc\\u51fa\\u804a\\u5929',"
+    "'role-edit':'\\u7f16\\u8f91\\u89d2\\u8272',background:'\\u66f4\\u6362\\u80cc\\u666f',"
+    "extra:'\\u8bbe\\u5b9a\\u8865\\u5145',help:'\\u6e38\\u73a9\\u6559\\u7a0b'};"
+    "var mi=D.querySelectorAll('[data-chat=\"more-panel\"] > button');"
+    "for(var k=0;k<mi.length;k++){(function(b){b.onclick=function(ev){"
+    "ev.stopPropagation();var a=b.getAttribute('data-action');"
+    "if(a==='instructions'){closeAll();toggleInstr();return;}"
+    "if(MORE[a]){open(MORE[a]);return;}"
+    "snack((LABEL[a]||a)+'\\uff1a\\u5e73\\u53f0\\u4fa7\\u52a8\\u4f5c\\uff0c"
+    "\\u9884\\u89c8\\u4e0d\\u6a21\\u62df\\u771f\\u5b9e\\u526f\\u4f5c\\u7528');};})(mi[k]);}"
+    # 输入框三态：真机按内容行数自动加 is-multiline / 展开加 is-expanded。
+    # 预览按 textarea 实际换行数近似，并暴露 fieldState() 供工具栏强制切。
+    "var ta=D.querySelector('[data-chat=\"input\"]');"
+    "var field=D.querySelector('.composer-field');"
+    "function syncField(){if(!ta||!field)return;"
+    "var multi=(ta.value.indexOf('\\n')>=0)||ta.value.length>40;"
+    "if(field.className.indexOf('is-expanded')<0){"
+    "field.className=multi?'pano-input-shell composer-field is-multiline'"
+    ":'pano-input-shell composer-field';}}"
+    "if(ta){ta.addEventListener('input',syncField);}"
+    "function fieldState(s){if(!field)return null;"
+    "field.className='pano-input-shell composer-field'+(s?' '+s:'');return s||'base';}"
+    "window.__sbxPanels.fieldState=fieldState;"
+    "window.__sbxPanels.snack=snack;"
+    "})()"
+    '</script>'
+)
+
+
+def _host_popup(name, title, note):
+    return (
+        '<div class="pano-host-popup" data-host-popup="%s" data-open="off">'
+        '<div class="pano-host-mask" data-host-close="%s"></div>'
+        '<div class="pano-host-sheet">'
+        '<button class="pano-host-close" type="button" data-host-close="%s">&#215;</button>'
+        '<span class="pano-host-tag">平台侧 · 卡片改不动</span>'
+        '<div class="pano-host-title">%s</div>'
+        '<div class="pano-host-note">%s</div>'
+        '</div></div>' % (name, name, name, title, note)
+    )
+
+
+# 五个宿主弹窗（实测 scope 类名与 z-index 都在 note 里写明，供作者判断遮挡）
+SANDBOX_HOST_POPUPS = "".join([
+    _host_popup("model", "模型设置（快捷条第 1 钮）",
+                "真机 <b>.model-setting-scope.theme-dark</b>，渲染在宿主页 uni-app（h5 域），"
+                "z-index <b>9000</b>。内容是<b>参数</b>设置（输出 Token 上限 / 流式输出 / 预设提示词），"
+                "不是模型列表。吃宿主 <b>--background-color</b> 系变量；"
+                "在卡里改 --chat-modal-* <b>对它无效</b>（已探针验证：注入 #00ff00 后仍 #17181a、"
+                "该变量在其上解析为 undefined）。"),
+    _host_popup("model-switch", "对话模型选择（底栏模型芯片）",
+                "真机 <b>.model-switch-scope</b>，宿主页，z-index <b>9000</b>。"
+                "点底栏 <b>[data-chat=model-chip]</b> 打开（与快捷条「模型设置」是<b>两个不同面板</b>）。"
+                "内含 .title-row / .model-filter-tabs / .model-list 三段。卡片 CSS 打不到。"),
+    _host_popup("conv", "对话设置",
+                "真机 <b>.conv-style-modal</b>，宿主页，z-index 10075，无圆角，"
+                "底色由 .u-popup__content 内联 style 给。卡片 CSS 打不到。"),
+    _host_popup("summary", "总结剧情 / 记忆管理面板",
+                "真机 <b>.summary-sheet.theme-dark</b>，宿主页，"
+                "z-index <b>1000000000</b>（比别的高 5 个数量级，组件永远盖不过它）。"),
+    _host_popup("role", "用户人设",
+                "真机 <b>.role-profile-modal</b> + <b>.role-setting</b>，宿主页，z-index 10075。"
+                "用 <b>--lo*</b> 变量族（沙盒宿主页<b>有定义</b>，与旧聊天页不同）。"),
+    _host_popup("share", "分享角色（顶栏第 2 钮）",
+                "真机 <b>.share-popup</b>，宿主页，z-index <b>9000</b>"
+                "（旧聊天页是 10075，这里不同）。带框架自带右上角关闭钮 .u-popup__content__close。"),
+    _host_popup("conversation", "开启新的聊天（快捷条第 5 钮）",
+                "真机 <b>.conversation-list-scope</b>，宿主页，z-index <b>9000</b>，实测高 187px。"
+                "内含 .title-row / .conversation-list / .bottom &gt; .btn「创建新的聊天」。卡片 CSS 打不到。"),
+    _host_popup("assist-alert", "AI帮聊功能介绍（底栏左下角）",
+                "真机 <b>.alert-scope</b> 在宿主页，z-index <b>9000</b>，"
+                "过渡是 <b>u-fade-zoom</b>（居中 260px，不是底部升起）。"
+                "点 <b>[data-chat=assistant]</b> 首次触发。注意：这与 SDK 的 "
+                "<b>[data-chat=alert]</b>（iframe 内、卡片能改）<b>是两个东西</b>。"),
+])
+
+
+# 🚨 这 4 个在真机两套主题里都是**别名**，不是独立字面量：
+#   --chat-bubble-user-bg / --chat-bubble-ai-bg : var(--chat-bg)
+#   --chat-bubble-text                          : var(--chat-text)
+#   --chat-more-item-bg                         : var(--chat-modal-surface)
+# 必须照抄成 var() 引用，不能展开成字面量 —— 展开后作者改 --chat-bg / --chat-modal-surface
+# 时真机会跟着变、预览不变，作者会以为"改了没用"。SANDBOX_*_TOKEN_VALUES 里存的是
+# **解析后**的取值（供文档与断言用），发到 CSS 时这 4 个要换回引用形态。
+SANDBOX_ALIAS_TOKENS = {
+    "--chat-bubble-user-bg": "var(--chat-bg)",
+    "--chat-bubble-ai-bg": "var(--chat-bg)",
+    "--chat-bubble-text": "var(--chat-text)",
+    "--chat-more-item-bg": "var(--chat-modal-surface)",
+}
+
+
+def _sandbox_chrome_css():
+    """把实测的两套 29 令牌与 --rpx 两档填进沙盒外壳 CSS。
+
+    两套分别挂 [data-theme=light] / [data-theme=dark]（单属性，与真机同特异性
+    0,1,0 —— 见 CSS 里的红线注释），平台无 :root 定义。
+    别名 4 个发 var() 引用形态（见 SANDBOX_ALIAS_TOKENS）。"""
+    def _decl(values, indent="  "):
+        items = ["%s:%s;" % (k, SANDBOX_ALIAS_TOKENS.get(k, values[k]))
+                 for k in SANDBOX_DESIGN_TOKENS]
+        # 每行 3 个，保持可读
+        lines = [indent + "".join(items[i:i + 3]) for i in range(0, len(items), 3)]
+        return "\n" + "\n".join(lines)
+    return SANDBOX_CHROME_CSS % {
+        "light": _decl(SANDBOX_LIGHT_TOKEN_VALUES),
+        "dark": _decl(SANDBOX_DARK_TOKEN_VALUES),
+        "rpxbase": SANDBOX_RPX_BASE,
+        "rpxdesk": SANDBOX_RPX_DESKTOP,
+        "bp": SANDBOX_RPX_BREAKPOINT,
+    }
 
 
 def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
@@ -1433,38 +3196,85 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
             '<div class="content right"%(body)s>用户示例消息</div>%(message_extra)s%(message_actions)s'
             '</article></div>'
             '</div></main>'
+            '%(summarybubble)s'
+            '%(historyloading)s'
             '<div data-slot="left"></div><div data-slot="right"></div>'
             '%(stage)s'
             '<footer class="chat-bottom chat-input-scope pano-input-bar"%(composer)s>'
             '%(toolbar)s'
-            '<div class="pano-shortcuts">'
-            '<button class="pano-shortcut" type="button">模型设置</button>'
-            '<button class="pano-shortcut" type="button">对话设置</button>'
-            '<button class="pano-shortcut" type="button">选择指令</button>'
-            '<button class="pano-shortcut" type="button">总结剧情</button>'
-            '<button class="pano-shortcut" type="button">新的聊天</button>'
-            '<button class="pano-shortcut" type="button">用户人设</button>'
+            # 底栏：真实钩子名（[data-chat=shortcut] / instruction-bar / composer-row /
+            # composer-field / assistant / model-chip / more），作者按手册写选择器能命中。
+            '<div class="composer-shortcut-wrap">'
+            '<div class="pano-shortcuts"%(shortcut)s>'
+            '<button class="pano-shortcut" type="button" data-action="model">模型设置</button>'
+            '<button class="pano-shortcut" type="button" data-action="style">对话设置</button>'
+            '<button class="pano-shortcut" type="button" data-action="instructions">选择指令</button>'
+            '<button class="pano-shortcut" type="button" data-action="summary">总结剧情</button>'
+            '<button class="pano-shortcut" type="button" data-action="conversations">新的聊天</button>'
+            '<button class="pano-shortcut" type="button" data-action="persona">用户人设</button>'
             '</div>'
-            '<div class="pano-compose-row">'
-            '<button class="pano-compose-icon" type="button" title="指令">8</button>'
-            '<div class="pano-input-shell">'
+            '<div class="hidden"%(instruction_bar)s>'
+            '<button type="button"%(instruction_back)s>'
+            '<span class="instruction-back-arrow">&#8249;</span></button>'
+            '<div class="instruction-scroll">'
+            '<button type="button"%(instruction_chip)s>清空输入框</button>'
+            '<button type="button"%(instruction_chip)s>通用总结</button>'
+            '<button type="button"%(instruction_chip)s>选项生成</button>'
+            '<button type="button"%(instruction_chip)s>字数控制</button>'
+            '</div></div></div>'
+            # 输入行：子件顺序与真机一致（assistant-anchor / composer-field / more），
+            # field 内是 composer-tools（展开才显示）→ input → model-chip(order:-1) → send。
+            '<div class="pano-compose-row composer-row">'
+            '<div class="assistant-anchor">'
+            '<button class="pano-compose-icon" type="button" title="AI帮聊"%(assistant)s>'
+            '<span class="pano-glyph">&#128161;</span>'
+            '<span class="beta-badge">8</span></button>'
+            '%(assistant_tip)s'
+            '</div>'
+            '<div class="pano-input-shell composer-field">'
+            '%(composertools)s'
             '<textarea class="uni-textarea-textarea" rows="1" placeholder="快来聊天吧~"%(input)s></textarea>'
-            '<button class="pano-send send-msg" type="button" title="发送"%(send)s>➤</button>'
+            '<button class="pano-compose-icon" type="button" title="模型"%(model_chip)s>80</button>'
+            '<button class="pano-send send-msg" type="button" title="发送"%(send)s>'
+            '<span class="pano-glyph">&#10148;</span></button>'
             '</div>'
-            '<button class="pano-compose-icon" type="button" title="更多">＋</button>'
+            '<button class="pano-compose-icon" type="button" title="更多" data-action="more">'
+            '<span class="pano-glyph">&#65291;</span></button>'
             '</div>'
+            '%(morepanel)s'
+            '%(sharebar)s'
+            '%(sharepickbar)s'
             '</footer>'
+            '%(messagemenu)s'
+            '%(alertbox)s'
+            '%(snack)s'
+            '%(snackbar)s'
+            '%(shareshot)s'
+            '%(hostpopups)s'
             '</div></div>'
             '%(sendscaffold)s'
+            '%(panelscaffold)s'
         ) % dict(hooks, runtime=runtime, tested=tested_content,
                  statusbar=statusbar_node, hoisted=hoisted,
-                 sendscaffold=send_scaffold)
+                 sendscaffold=send_scaffold,
+                 panelscaffold=SANDBOX_PANEL_SCAFFOLD,
+                 morepanel=SANDBOX_MORE_PANEL,
+                 composertools=SANDBOX_COMPOSER_TOOLS,
+                 summarybubble=SANDBOX_SUMMARY_BUBBLE,
+                 historyloading=SANDBOX_HISTORY_LOADING,
+                 messagemenu=SANDBOX_MESSAGE_MENU,
+                 alertbox=SANDBOX_ALERT,
+                 snack=SANDBOX_SNACK, snackbar=SANDBOX_SNACKBAR,
+                 sharebar=SANDBOX_SHARE_BAR, sharepickbar=SANDBOX_SHARE_PICK_BAR,
+                 shareshot=SANDBOX_SHARE_SHOT, hostpopups=SANDBOX_HOST_POPUPS)
+    elif platform == "mmd":
+        page = _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold)
     else:
         page = (
             '%(runtime)s'
             '%(hoisted)s'
             '<div class="page"%(root)s>'
-            '<div class="topTabbar"%(header)s><span%(header_title)s>MMD Chat Preview</span>'
+            '<div class="topTabbar"%(header)s><span%(header_title)s>ST Chat Preview</span>'
             '<span class="pano-route-label">chat/chat</span>%(header_extra)s</div>'
             '%(statusbar)s'
             '<div class="chat chat-bg pano-chat" id="pano-chat"%(messages)s>'
@@ -1486,9 +3296,23 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
                  statusbar=statusbar_node, hoisted=hoisted,
                  sendscaffold=send_scaffold)
 
-    chrome_css = SANDBOX_CHROME_CSS if sandbox else ""
+    if sandbox:
+        # 🚨 沙盒不再叠中性 PANORAMA_CSS（与 mmd 分支同样的理由：两份规则互相打架）。
+        # 实测暴露的具体伤害：`.pano-input-bar .uni-textarea-textarea{font:inherit}` 把
+        # 输入框字号顶成 16px，而真机是浏览器默认 13.33px（真机 input 本体不设字号，
+        # 字号只在 ::placeholder 规则里）。另外那份还带 `.content.right{background:#3a76f0}`
+        # 蓝气泡与 `.pano-input-bar{position:fixed;z-index:90000}`，对沙盒全是假的。
+        shell_css = ""
+        chrome_css = _sandbox_chrome_css()
+    elif platform == "mmd":
+        # MMD 走实测复刻外壳，不叠中性骨架（两份规则会互相打架）。
+        shell_css = _mmd_panorama_css()
+        chrome_css = ""
+    else:
+        shell_css = PANORAMA_CSS
+        chrome_css = ""
     frame_doc = "<style>%s</style><style>%s</style><style>%s</style>%s" % (
-        MARKER_CSS, PANORAMA_CSS, chrome_css, page)
+        MARKER_CSS, shell_css, chrome_css, page)
     srcdoc = html_mod.escape(frame_doc, quote=True)
 
     n = _script_count(obj)
@@ -1535,8 +3359,10 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
             'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.leave()">离开聊天页</button>'
             '<button class="preview-tool" type="button" title="模拟返回聊天页" '
             'onclick="document.querySelector(\'.pano-frame\').contentWindow.__tavernPreview.returnToChat()">返回聊天页</button>'
-            '</div>')
-        label = '全景预览（所有组件组合 · 固定输入框 · 发送测试）'
+            + (_mmd_panel_tools_html() if platform == "mmd" else "")
+            + '</div>')
+        label = ('全景预览（所有组件组合 · 固定输入框 · 发送测试'
+                 + (' · 弹窗仿真）' if platform == "mmd" else '）'))
     audit_panel = (
         '<details class="pano-audit"><summary>诊断与证据说明（默认折叠）</summary>'
         '<div class="pano-audit-body">%s</div></details>' % audit

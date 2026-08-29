@@ -13,12 +13,20 @@
 
 模型每轮吐**全量快照**到 light DOM 隐藏 span → `img onerror` 点火 → `attachShadow` 把 UI 渲进 **shadow root**（隔离）→ 数据留 light（可扫描跨轮恢复）、UI 进 shadow（不过 markdown、不被染色）。
 
+> 🚨 **shadow CSS 首条必须写 `:host{white-space:normal}`**（2026-08-28 实测补正）。`white-space` 是**继承属性**，会穿过 shadow 边界从 host 气泡（`.content{white-space:pre-line}`）继承进来 —— shadow 隔离的是**选择器**，不隔离继承属性。实测 shadow 内 computed 值就是 `pre-line`，标签间换行同样撑出空白条（102px vs 子元素合计 51px）。本文档早期版本称"进 shadow 即对空白条免疫"，**那一条是错的**；`applyCss()` 注入的 `CSS` 文本开头请固定带上：
+>
+> ```css
+> :host{white-space:normal}
+> ```
+>
+> light DOM 降级路径（`styleLight()`）同理，需 `.g3-panel{white-space:normal}`。机制与证伪过程见 `../platforms/mmd.md` §13 与 `statusbar-radar.md`「MMD换行空白条陷阱」。
+
 ## 与雷达法 / KV V4.0 的选型对比
 
 | 维度 | 影渲法（本文档） | 雷达法（statusbar-radar.md） | KV V4.0（statusbar.md） |
 |---|---|---|---|
 | UI 载体 | **Shadow DOM**（隔离） | light DOM + 防御补丁 | light DOM 预制骨架 |
-| markdown 空白条 | **免疫**（shadow 不过 markdown 管线） | 需源头压平 + 三件套防御 CSS | 需防御 CSS |
+| 换行空白条 | **不免疫**，需 `:host{white-space:normal}`（`white-space` 是继承属性，穿过 shadow 边界；2026-08-28 实测 shadow 内 computed 仍是 `pre-line`） | 需 `white-space:normal` 或源头压平 | 同左 |
 | 平台强制染色 | **免疫**（shadow 边界天然挡） | 需 MutationObserver 哨兵剥离 | 无防御 |
 | CSS 类名冲突 | **免疫**（shadow 内隔离，无需前缀） | 需 `z-` 前缀 | 需前缀 |
 | 防平台重绘 | onerror 重新点火自动水合（幂等）；2.0 事务回退不留破碎 UI | 探针自检 + 2.5s 重建 | 无 |

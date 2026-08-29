@@ -36,6 +36,18 @@
 
 > 可拖动悬浮球与抽屉见 `floating-components.md`。运行时主题的设置入口优先复用主题包自带面板，不另造一套侧栏引擎。
 
+### 🚨 全局美化必须逐个弹窗面板自查
+
+**气泡只是一小部分**。顶栏/底栏按钮拉起的面板（模型设置、对话设置、总结剧情、用户人设、分享、AI帮聊说明）同样吃你的 CSS，而 uview 的 `.u-popup__content` **基线是白底**（`background-color:#fff`），深色全靠各面板自己的 scope 类覆盖出来 —— **漏改哪个面板，那个面板就露白**。
+
+三个容易翻车的点（实测，详见 `../platforms/mmd.md` §13.6）：
+
+1. **`.conv-style-modal`（对话设置）** scope 本身是 `background:transparent`，底色写在 `.u-popup__content` 的**内联 style** 上 → 只改 scope 类改不动它。
+2. **用户人设面板用 `--lo*` 变量族**，那 18 个变量真机**引用但从未定义**、恒走 fallback → 改 `--loBackground-color` 毫无反应，只能直接选 `.role-setting` / `.role-setting .card` 等类名。
+3. **`+` 展开的 `.more-scope` 不是弹窗**，在 `.chat-bottom` 内展开，底栏 105px→317px → 组件若按"底栏 105px"算避让位置，展开后会被压住。
+
+自查方式：`build-preview.py --platform mmd` 生成全景，工具栏「弹窗仿真」六个按钮 + 「＋更多面板」「指令栏切换」逐个开一遍，看有没有露白/错色/被压。
+
 ---
 
 ## 沙盒模式换肤（`/mmdsandbox`）
@@ -175,8 +187,16 @@ sdk.on('theme:change', function () {
 
 ### 页面背景
 
-- `.page`（页面根容器）
-- `.chat-bg`（聊天背景层）
+> 🚨 **`.page` 与 `.chat-bg` 不存在（2026-08-28 实机验证，别再用）**：这两个类名来自本节那份无出处的社区快照，实机 DOM 与 CSSOM **双双零命中**。真实的页面/背景层是：
+>
+> | 目标 | 真实选择器 | 说明 |
+> |---|---|---|
+> | 主容器 | `.chat` | 所有聊天页规则的前缀 |
+> | 背景层 | `.chat .chat-scope-box` | `position:fixed` 全屏、`z-index:11`，角色背景图由**内联 style** 写在这里 |
+> | 滚动区 | `.chat .chat-scope-box .scroll-view` | 内联 `margin-top:2.8125rem; height:calc(100% - 3.2rem)` |
+> | 页面底色 | `body` | `background-color:var(--background-color)` |
+>
+> ⚠️ 背景图是 `.chat-scope-box` 的**内联 `background` 属性**，不是变量 —— 只改 `--background-color` 换不掉它，要覆盖需 `.chat .chat-scope-box{background:...!important}`。完整层级见 `../platforms/mmd.md` §13。
 
 ### 图片
 
@@ -192,8 +212,9 @@ sdk.on('theme:change', function () {
 | 输入框 | `.chat .chat-bottom .uni-textarea .chat-input-scope textarea` |
 | 发送按钮（补充版） | `.chat .chat-bottom .btn-scope .send-btn` |
 | 发送按钮（档案版） | `.chat .chat-bottom .send-msg` |
-| 整体背景 | `.chat-bg` |
-| 页面容器 | `.page` |
+| 整体背景 | `.chat .chat-scope-box`（~~`.chat-bg` 不存在~~） |
+| 页面容器 | `.chat`（~~`.page` 不存在~~） |
+| 页面底色 | `body` |
 
 ---
 

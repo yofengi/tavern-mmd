@@ -4,7 +4,7 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 
 本文档给出**两个平台都验证过**的认证写法，供后续直接调用/改配色。预览验证用 `scripts/build-preview.py`（悬浮组件会被自动归入"悬浮组件预览"面板，全景预览里与其他组件组合显示）。
 
-> **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（无空白条）；代价：多一层 `attachShadow` 包装。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 属性用双引号包裹时内部全单引号、禁内部裸双引号（属性改用单引号包裹则内部可写双引号）。本文下方 light DOM 写法是当前 MMD 与本地酒馆的基线；shadow 变体用于需要强隔离的组件。全局主题 CSS 本身不可 shadow 化，因为它必须作用于平台 light DOM。**这两种写法都不适用于沙盒模式**（见下方平台红线表）。
+> **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（`*星号*` 不被吃）；代价：多一层 `attachShadow` 包装。⚠️ **换行空白条不在收益里**——`white-space` 是继承属性会穿过 shadow 边界（2026-08-28 实测），shadow CSS 仍须带 `:host{white-space:normal}`，见 `../platforms/mmd.md` §13。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 属性用双引号包裹时内部全单引号、禁内部裸双引号（属性改用单引号包裹则内部可写双引号）。本文下方 light DOM 写法是当前 MMD 与本地酒馆的基线；shadow 变体用于需要强隔离的组件。全局主题 CSS 本身不可 shadow 化，因为它必须作用于平台 light DOM。**这两种写法都不适用于沙盒模式**（见下方平台红线表）。
 
 ### 主题切换 / 设置 UI 的职责边界
 

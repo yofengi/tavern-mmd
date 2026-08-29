@@ -13,7 +13,11 @@
 >
 > 优先级：**源码 > 实机 > 官方手册 > 官方 skill 校验脚本**。未标注的段落沿用原始官方文档级别。
 >
-> 🚨 **官方资料已被证伪的条目清单**（细节见对应章节）：`ready` 会补发且可做首屏（§2.6）· `stage.el()` 关闭时返回 `null`（§4.6）· 平台 chrome 占 8000–8999（§6.3）· `beginning` 上限 10240（§8）· 4 空格缩进变代码块（§6.5）· 外链脚本需域名白名单（§13）· 纯字面量匹配式是首选（§7.1）· 只有 10 个 `--chat-*` 变量（§6.1）· 只有 `onclick` 可用（§5.2）。
+> 🚨 **官方资料已被证伪的条目清单**（细节见对应章节）：`ready` 会补发且可做首屏（§2.6）· `stage.el()` 关闭时返回 `null`（§4.6）· 平台 chrome 占 8000–8999（§6.3）· `beginning` 上限 10240（§8）· 4 空格缩进变代码块（§6.5）· 外链脚本需域名白名单（§13）· 纯字面量匹配式是首选（§7.1）· 只有 `onclick` 可用（§5.2）。
+>
+> ✅ **官方资料被实测证实的条目**：手册「底栏和白名单弹窗另有 18 个变量」为真（逐个注入验证 18/18 生效，§6.1）。但手册那句「会话列表 / 模型 / 角色资料这类白名单弹窗」易被误读 —— 模型设置那五个渲染在**宿主页**、卡片 CSS 打不到，见 §6.3b。
+>
+> 🚨 **本 skill 自己曾记错的条目**：只记 14 个 `--chat-*`（实为 29，§6.1）· `--rpx` 桌面档写成 `@media(min-width:750px){--rpx:1px}`（实为 961px / `375px/750`，§6.1）。
 >
 > **来源边界**：仍未确证的一律保留 `【待验证】` / `【原文未说明】`。当前已知空白：聊天页是否同施加 `Us` 长度截断（§8）· 15000 字固定传输在沙盒是否适用（§10.2）· `CACHE_QUOTA_BYTES` 超限行为（§4.4）· 取消订阅 API（§4）· 内联脚本是否对内容相同的多条去重（§2.4）· `SAFE_FOR_XML` 的无空格危险形态（§5.2）。
 >
@@ -48,7 +52,7 @@
 | 稳定选择器 | ❌ 平台 class 名会变 | ✅ `[data-chat]` / `[data-slot]` 承诺不改名 |
 | 长期面板 | 无处安放（挂气泡会随气泡销毁） | ✅ 舞台 `sdk.stage` |
 | 跨设备存档 | ❌ | ✅ `sdk.save`（落服务端） |
-| CSS 变量 | 无平台约定 | ✅ **14 个 `--chat-*`** + `--rpx`（`【实机实测】`；手册只记 10 个，见 §6.1） |
+| CSS 变量 | 无平台约定 | ✅ **29 个 `--chat-*`**（气泡10+白名单18+别名1）+ `--rpx` 两档（`【实机实测 2026-08-29】`，见 §6.1） |
 | 运行容器 | 宿主同文档 | ✅ **跨源 iframe** `c<卡片ID>.sbx.aitchat.org`（`【实机实测】`，见 §2.3） |
 | `document.currentScript` | 可用（实测） | ❌ **恒为 `null`**（`【源码确证】`+`【实机实测】`，见 §2.3） |
 | 外部 `fetch` / 外部字体 / 外部样式表 | 视宿主 CSP | ❌ **CSP 封死**（`connect-src 'self'`，见 §13） |
@@ -614,7 +618,7 @@ div  <  [data-slot="statusbar"]  <  [data-chat="root"]  <  div  <  body  <  html
 - 当前观测主题为 dark：root `display:flex; flex-direction:column; position:relative`，背景 `#17181a`；内联 style 同时写 `--chat-viewport-height` 与 `background-image/position/size/repeat`。
 - 1232×1248 下 header **45px**、`flex-shrink:0`；messages 吃剩余空间并独立滚动；composer 是静态 flex item、约 **95px**、`flex-shrink:0`，由快捷工具条和输入行构成。
 - message 全宽，桌面 padding **11.5px 15px**；message-body `max-width:90%`、正文 **15px**、`white-space:pre-line`、`opacity:.9`，AI 气泡左下角为 0。
-- `statusbar/left/right` 是 root 直接槽位；每条 message 含 `message-body/message-extra/message-actions`。外壳尺寸用 `--rpx=100vw/750` 缩放，正文仍保持约 15px。
+- `statusbar/left/right` 是 root 直接槽位；每条 message 含 `message-body/message-extra/message-actions`。外壳尺寸用 `--rpx`（基底 100vw/750，≥961px 封顶 375/750）缩放，正文仍保持约 15px。
 - light 外壳本次未量化；不能把 dark 几何外推成 light exact。
 
 本地 `build-preview.py --platform mmdsandbox` 以共享契约 v1.1.0 复刻以上外壳，并让内联 `--chat-viewport-height` 随 iframe resize/键盘 inset 更新。仿真器是回归工具，不反向定义平台事实。
@@ -694,28 +698,83 @@ linearGradient radialGradient stop clipPath title
 
 所有规则里的 `<style>` **合成一张全页样式表，后写的盖住先写的**。样式是全页作用域、**无隔离** —— 多条规则的 `<style>` 互相覆盖是**预期行为，不是 bug**（症状：「样式在预览里对，上线不对」）。
 
-### 6.1 `--chat-*` 变量：实为 14 个（手册只记 10 个）
+### 6.1 `--chat-*` 变量：实为 **29 个**（分气泡 10 + 白名单 18 + 别名 1）
 
-🚨 `【源码确证】`+`【实机实测 2026-08-26】`：**每套 14 个**，定义在 **`[data-theme=dark]` 与 `[data-theme=light]`** 两个选择器上。**没有 `:root` 定义、没有 `prefers-color-scheme`** —— 主题完全由 root 上的 `data-theme` 属性驱动。
+🚨 `【实机实测 2026-08-29】`：**每套 29 个**，定义在 **`[data-theme=dark]` 与 `[data-theme=light]`** 两个选择器上。**没有 `:root` 定义、没有 `prefers-color-scheme`** —— 主题完全由 root 上的 `data-theme` 属性驱动。
 
-| 变量 | 说明 | 深色实测值 |
-|---|---|---|
-| `--chat-bg` | 整页背景 | `#17181a` |
-| `--chat-surface` | 卡片、面板这类块的底色 | `#1e1f24` |
-| `--chat-text` | 正文颜色 | `#fff` |
-| `--chat-text-muted` | 次要文字，比正文淡 | `#c5c5c5` |
-| `--chat-border` | 边框颜色 | `#333` |
-| `--chat-accent` | 强调色，按钮高亮、血条可以用 | `#ff6d97` |
-| `--chat-bubble-user-bg` | 用户气泡背景 | `#17181a` |
-| `--chat-bubble-ai-bg` | AI 气泡背景 | `#17181a` |
-| `--chat-bubble-text` | 气泡里的字 | `#fff` |
-| **`--chat-input-bg`**（手册漏记） | 输入框底色 | `#1e1f24` |
-| **`--chat-input-text`**（手册漏记） | 输入框文字 | `#fff` |
-| **`--chat-shortcut-text`**（手册漏记） | 快捷条文字 | `#fff` |
-| **`--chat-more-item-bg`**（手册漏记） | 「更多」面板条目底色 | `#2c2e32` |
-| **`--chat-share-pick-bg`**（手册漏记） | 分享选择态底色 | `#2c2e32` |
+> **本节曾记 14 个，漏了 15 个**（含整个 `--chat-modal-*` 族 9 项）。官方《角色卡制作手册》把后 18 个称作「**底栏和白名单弹窗**另有 18 个变量」，与本次实测完全一致 —— 逐个注入醒目色验证，18/18 全部生效。旧版还把浅色一套标成"类推、未实测"，现已抓到真值。完整契约见 `mmd-sandbox-real-page-contract-2026-08-29.md`。
 
-**另有一个尺寸基准**：**`--rpx`** = `calc(100vw / 750)` `【实机实测】` —— 平台全部尺寸都以它为单位（750 设计稿宽）。作者想跟平台的视觉节奏，用 `calc(24 * var(--rpx))` 比写死 `px` 更贴。
+**A. 气泡/整页组（10 个）**：改了会带动整页与气泡。
+
+| 变量 | 说明 | 深色 | 浅色 |
+|---|---|---|---|
+| `--chat-bg` | 整页背景 | `#17181a` | `#fff` |
+| `--chat-surface` | 卡片、面板这类块的底色 | `#1e1f24` | `#f5f8fc` |
+| `--chat-text` | 正文颜色 | `#fff` | `#212226` |
+| `--chat-text-muted` | 次要文字 | `#c5c5c5` | `#8d949d` |
+| `--chat-border` | 边框颜色 | `#333` | `#e5e7eb` |
+| `--chat-accent` | 强调色 | `#ff6d97` | `#17aafd` |
+| `--chat-bubble-user-bg` | 用户气泡背景 | = `--chat-bg` | = `--chat-bg` |
+| `--chat-bubble-ai-bg` | AI 气泡背景 | = `--chat-bg` | = `--chat-bg` |
+| `--chat-bubble-text` | 气泡里的字 | = `--chat-text` | = `--chat-text` |
+| `--chat-share-pick-bg` | 分享选择态底色 | `#2c2e32` | `#e6e6e6` |
+
+> 气泡三个是 `var(--chat-bg)` / `var(--chat-text)` 的**别名**（不是独立取值），所以改 `--chat-bg` 气泡跟着走，只改其中一个也不会和整页脱节。
+
+**B. 底栏与白名单弹窗组（18 个）**：只换底栏与 iframe 内浮层，**不动**气泡语义色，**也换不了图标**（图标是 `<img>`）。
+
+| 变量 | 靶点（实测） | 深色 | 浅色 |
+|---|---|---|---|
+| `--chat-composer-bg` | 底栏整块背景 | `#17181a` | `#fff` |
+| `--chat-composer-text` | 底栏文字、`model-chip` | `#fff` | `#212226` |
+| `--chat-shortcut-bg` | 快捷钮 + 指令 chip 底 | `#2c2e32` | `#f1f4f9` |
+| `--chat-shortcut-text` | 快捷钮/chip 文字 | `#fff` | `#8d949d` |
+| `--chat-input-bg` | 输入框底（`.composer-field`） | `#1e1f24` | `#f6f8fc` |
+| `--chat-input-text` | 输入框字 | `#fff` | `#333` |
+| `--chat-input-placeholder` | 输入框占位字 | `#c5c5c5` | `#8d949d` |
+| `--chat-input-border` | 输入框描边 | `#ff6d97` | `#17aafd` |
+| `--chat-modal-bg` | **「+」更多面板壳** | `#17181a` | `#fff` |
+| `--chat-modal-surface` | 长按菜单、选消息底栏 | `#2c2e32` | `#f5f8fc` |
+| `--chat-modal-text` | 面板/菜单正文 | `#fff` | `#212226` |
+| `--chat-modal-muted` | 面板次要字 | `#c5c5c5` | `#8d949d` |
+| `--chat-modal-accent` | 帮聊 tip、指令返回钮 | `#ff6d97` | `#17aafd` |
+| `--chat-modal-input-bg` | 弹窗输入底 | `#1e1f24` | `#f6f8fc` |
+| `--chat-modal-input-text` | 弹窗输入字 | `#fff` | `#212226` |
+| `--chat-modal-cancel-bg` | 弹窗取消钮底 | `#ffb7cc` | `#f5f8fc` |
+| `--chat-modal-btn-bg` | 弹窗按钮底 | `#33353b` | `#fff` |
+| `--chat-modal-btn-border` | 弹窗按钮边 | `transparent` | `#efefef` |
+
+**C. 别名（1 个）**：`--chat-more-item-bg` = `var(--chat-modal-surface)`（两套主题皆然），即「+」面板里每个条目的图标底。
+
+> 🚨 **一共 4 个是别名，不是独立取值**（实测两套主题皆然）：`--chat-bubble-user-bg` / `--chat-bubble-ai-bg` → `var(--chat-bg)`、`--chat-bubble-text` → `var(--chat-text)`、`--chat-more-item-bg` → `var(--chat-modal-surface)`。含义：**改基色会自动传导**。反过来，你要是直接写死 `--chat-more-item-bg:#xxx`，就切断了这条链，之后再改 `--chat-modal-surface` 面板图标底不会跟着变。
+
+### 6.1a 特异性：作者覆盖为什么能赢（写选择器前必读）
+
+平台把令牌挂在**单属性** `[data-theme="dark"]` / `[data-theme="light"]` 上，特异性 **0,1,0**。你按手册写：
+
+```css
+[data-chat="root"]{ --chat-modal-bg:#121418 }   /* 也是 0,1,0 */
+```
+
+两边打平，靠**文档顺序**决胜 —— 平台 CSS 在前、你的 `<style>`（装卡时被 hoist 到页面）在后，所以**你赢**。
+
+由此推出两条实操结论：
+
+1. **不需要 `!important`** 去覆盖这 29 个令牌，平写就行（换**页面背景图**是另一回事，那个是内联 `background-image` 属性，仍需 `!important`，见 §6.6）。
+2. 你要是自己写成 `[data-chat="root"][data-theme="dark"]{...}`（0,2,0），会压过平台默认 —— 这没问题，但**换主题时你的值不会跟着换**，除非两套都写。想跟随主题就用单属性写法。
+
+🚨 **哪些"弹窗"能改、哪些改不动 —— 见 §6.4**。简言之：iframe 内的（「+」面板、长按菜单、alert、snack、分享条、总结气泡）能改；模型设置/对话设置/总结剧情/用户人设/分享这 5 个渲染在**宿主页**，卡片 CSS 打不到。
+
+**另有一个尺寸基准**：**`--rpx`** `【实机实测 2026-08-29，两档】`
+
+```css
+[data-chat="root"]{--rpx:calc(100vw / 750)}
+@media (min-width:961px){[data-chat="root"]{--rpx:calc(375px / 750)}}
+```
+
+平台全部尺寸都以它为单位（750 设计稿宽）。作者想跟平台的视觉节奏，用 `calc(24 * var(--rpx))` 比写死 `px` 更贴。**桌面封顶**：视口 ≥961px 时 `--rpx` 固定 `375/750 = 0.5px`，即整页按 375 宽的手机版渲染。实测三点：视口 298→`750*--rpx`=298px、400→400px、1280→**375px**。
+
+> 旧版本这里只记了基底档，且预览代码里写的是 `@media(min-width:750px){--rpx:1px}` —— **断点与取值双错**（真值 961px / 0.5px），按预览调的尺寸上真机会差一倍。
 
 🚨 **`--chat-viewport-height` 不是样式表变量** `【源码确证】`+`【实机实测】`：它是 **JS 写在 root 上的内联 style**（值为 `clientHeight - 键盘 inset`，随 `visualViewport` 实时更新，实测 `1205px`）。→ **不要试图用 CSS 覆盖它**（内联优先级压过样式表规则），也不要假设它是静态值；要读就 `getComputedStyle` 或直接用 `var(--chat-viewport-height)`。
 
@@ -771,6 +830,59 @@ linearGradient radialGradient stop clipPath title
 - 长按菜单（8200）带 `backdrop-filter`，会成为 fixed 后代的包含块 → **它打开时作者浮层一定在下面**，做「常驻不可遮挡」的倒计时之类要接受这一点。
 
 越界不会被拦，**只会盖错东西**。
+
+### 6.3b 🚨 弹窗分两类：iframe 内的能改，宿主页的改不动（2026-08-29 实测）
+
+沙盒卡片跑在 **`c<roleId>.sbx.aitchat.org` 的跨源 iframe** 里，宿主是 `h5.aitchat.org`。这条边界决定了作者的 CSS 能碰到什么。
+
+**A. iframe 内浮层 —— 卡片 CSS 能打到，全局美化必须照顾它们**
+
+| 靶点 | 钩子 | 吃哪些变量 | z-index |
+|---|---|---|---|
+| 「+」更多面板（4 列 11 项） | `[data-chat="more-panel"]`，每项 `button[data-action]` + 内层 `span`（图标底） | 壳 `--chat-modal-bg`、正文 `--chat-modal-text`、项图标底 `--chat-more-item-bg` | 无（在 composer 内展开，实测 composer 95→412px） |
+| 长按消息菜单 | `[data-chat="message-menu"]` + `.menu-preview`/`.menu-options`/`.menu-sep` | `--chat-modal-surface`、`--chat-modal-text`、`--chat-border` | **8200** + `backdrop-filter:blur(5px)` |
+| 居中 alert | `[data-chat="alert"]` + `[data-chat="toast"]` + `[data-chat="alert-ok"]` | 确定钮 `--chat-accent` | **9000**，实测 `position:absolute`（**不是** fixed）、遮罩 `rgba(0,0,0,.45)` |
+| composer 侧提示 | `[data-chat="snack"]` | 固定 `rgba(0,0,0,.72)` | **8100** |
+| 平台 snackbar | `[data-probe="snackbar"]` | 固定 `rgba(0,0,0,.7)` | **10090**（最高） |
+| 分享条 | `[data-chat="share-bar"]` | `--chat-composer-bg` + 按钮 `--chat-accent` | 无 |
+| 选消息底栏 | `[data-chat="share-pick-bar"]` + `share-pick-icon`/`share-pick-toggle` | `--chat-modal-surface`、图标底 `--chat-border` | 无 |
+| 长图 loading | `[data-chat="share-shot-loading"]` | 固定 `rgba(0,0,0,.35)` | **8000** |
+| 总结提示气泡 | `[data-chat="summary-bubble"]` | 固定粉/蓝两套（`.summary-light` 切） | 无（长在消息流里） |
+| 帮聊 tip | `[data-chat="assistant-tip"]` | `--chat-modal-accent` | 10（真机**点击后才插入**，默认不存在） |
+| 指令栏 | `[data-chat="instruction-bar"]` + `instruction-back`/`instruction-chip` | chip `--chat-shortcut-bg/-text`、返回钮 `--chat-modal-accent` | 无（与 `[data-chat="shortcut"]` 加 `.hidden` 互斥切换） |
+| 历史加载骨架 | `[data-probe="history-loading"]` | `--chat-text-muted` | 2（出现时把 `[data-chat=messages]` 整块 `visibility:hidden`） |
+
+**B. 宿主页弹窗 —— 卡片 CSS 打不到，别白写选择器**
+
+| 入口 | 真机 scope | z-index |
+|---|---|---|
+| 模型设置 | `.model-setting-scope.theme-dark` | 10075 |
+| 对话设置 | `.conv-style-modal` | 10075（无圆角，底色由 `.u-popup__content` 内联 style 给） |
+| 总结剧情 / 记忆管理面板 | `.summary-sheet.theme-dark` | **1000000000**（比别的高 5 个数量级，作者组件永远盖不过） |
+| 用户人设 | `.role-profile-modal` + `.role-setting` | 10075（用 `--lo*` 变量族，沙盒宿主页**有定义**，与旧聊天页 18 个全未定义不同） |
+| 分享角色 | `.share-popup` | **9000**（旧聊天页同名弹窗是 10075，这里不同） |
+
+这五个渲染在宿主页的 uni-app 里，外壳是 uview 三层（`.u-popup > .u-transition.u-fade-*|.u-slide-up-* > .u-popup__content > scope`），吃宿主 `body` 上那 51 个 `--background-color` / `--lo*` 系变量。
+
+**探针证据**：在卡片 iframe 内注入 `[data-chat=root]{--chat-modal-bg:#00ff00}` 后打开模型设置 —— 弹窗仍 `#17181a`、卡片面仍 `#2c2e32`，且 `--chat-modal-bg` 在其上解析为**未定义**。同一次注入下，iframe 内的「+」面板**立刻变绿**。
+
+> 官方手册把 `--chat-modal-bg` 描述为「更多面板壳、**宿主**列表弹窗底」。前半句实测成立，后半句容易被读成"能改模型设置那类弹窗"——**不成立**。手册用了"宿主"这个词但没区分"iframe 内重绘的"与"宿主页原生组件"，按上表办。
+
+**全景预览的对应处理**：iframe 内那批做成可开关的完整仿真；宿主页那五个只画灰底斜纹的层级占位并标注「平台侧 · 卡片改不动」——不套 `--chat-modal-*`，否则等于宣称能改。
+
+### 6.3c 「+」面板 11 项与输入框三态（实测细节）
+
+**11 项的 `data-action`**（顺序照真机）：`reset` 重置聊天 · `export` 导出聊天 · `conversations` 新的聊天 · `role-edit` 编辑角色 · `background` 更换背景 · `instructions` 自定义指令 · `persona` 用户人设 · `extra` 设定补充 · `style` 对话设置 · `summary` 剧情总结 · `help` 游玩教程。每项是 `button > span`（span 是圆角图标底，吃 `--chat-more-item-bg`）+ 文字标签。想改单项外观就 `[data-chat="more-panel"] > button[data-action="reset"]`。
+
+**输入框（`.composer-field`）三态**：
+
+| 态 | 触发 | 实测差异 |
+|---|---|---|
+| 基线 | 单行 | `min-height:calc(82 * var(--rpx))`、`padding:0 16rpx`、`align-items:center`；input `padding:0 12rpx`、`max-height:280rpx` |
+| `is-multiline` | 内容多行 | field `padding:16rpx 20rpx` + `align-items:flex-end`；input `padding:8rpx 12rpx`；`model-chip`/`send` 加 `padding-bottom:16rpx`；两侧圆钮（`.assistant-anchor` / `[data-action=more]`）`padding-bottom:27rpx` 且底对齐 |
+| `is-expanded` | 展开编辑 | field 转 **grid**，`grid-template-areas:"tools tools tools" "input input input" "chip . send"`、`padding:20rpx`、`align-items:stretch`；`.composer-tools`（粘贴/清空）**才显示**；`model-chip` 的 `order` 由 `-1` 归 `0` |
+
+🚨 **input 本体不设 `font-size`**（浏览器默认 13.33px），字号那条实测写在 `::placeholder` 规则里（`calc(32 * var(--rpx))`）。要改输入文字大小就自己给 `[data-chat="input"]` 加 `font-size`，别以为平台已经设过。
 
 ### 6.4 功能栏：零样式、会被压扁、而且是静态的
 
@@ -1183,7 +1295,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 2. **脚本骨架**：顶层只做「定义函数 + `sdk.on` 订阅 + 挂 `window`」，**一行 DOM 都不碰**；渲染函数挂 `message:mount` 与 `message:done`，函数内自带幂等哨兵（预览会重跑）。**不要用 `ready` 做首屏**（§2.6）。
 3. **状态栏 / 面板**：短小可见块走规则替换（`$1` / `$名字` 直出 HTML，零 JS）；要跟剧情变的走 `<script>` + `message:done` 读 `msg.content` 再渲染 —— **骨架写进规则保证节点存在，值靠 JS 改**（功能栏是静态的，不会自己刷新，§6.4）；要一直在的（地图、背包、小游戏）**一律挂舞台**。
 4. **状态持久化**：当场状态 `sdk.cache`，单卡本地偏好 `localStorage`，跨设备进度 `sdk.save`（打成一包、攒批写，`save.get` **必须 `try/catch`**）。**游客会丢，别做成唯一玩法。**
-5. **配色**：改 `[data-chat="root"][data-theme="dark|light"]` 上的 **14 个** `--chat-*` 变量（§6.1），不写死颜色；尺寸可用 `--rpx` 跟平台节奏；JS 涂色的订 `theme:change`。**换页面背景要 `!important`**。
+5. **配色**：改 `[data-chat="root"][data-theme="dark|light"]` 上的 **29 个** `--chat-*` 变量（§6.1），不写死颜色；尺寸可用 `--rpx` 跟平台节奏；JS 涂色的订 `theme:change`。**换页面背景要 `!important`**。
 6. **必做的三项重置**：`opacity:1`、`white-space:normal`（压掉 `message-body` 的默认值）、功能栏 `flex-shrink:0`（§6.6）。浮层 z-index 取 **3500–7999**，挂 `[data-slot="left"]`/`"right"`（§6.3）。
 7. **零外部依赖**：CSP 封死 `fetch`、外部字体、外部样式表（§13）→ 用系统字体栈、内联 `<style>`、`data:` 图片；状态只能来自 AI 正文 / `save` / `cache` / `localStorage`。
 8. **模型侧协议用方括号** `[状态]…[/状态]`，**绝不用中文尖括号**（会被剥壳删掉，§9.3）；匹配式**不能匹配空串**、别写太松（输出预算，§7.6）。
@@ -1238,7 +1350,7 @@ worker-src 'self';
 - `../output/card-json.md` —— chara_card_v2 打包，**沙盒模式不用**，仅当前 MMD / 本地酒馆用。
 - `../quality/checklist.md` —— 交付前自检。
 - `../beautify/statusbar.md` / `../beautify/statusbar-radar.md` —— 当前 MMD 的状态栏方案，**沙盒模式不可直接移植**（载体是被禁的 `img onerror`），只可参考数据协议与信息架构。
-- `../beautify/global-css.md` / `../beautify/style-system.md` —— 视觉设计思路可复用，选择器与变量须换成 `[data-chat]` / `--chat-*`（注意是 **14 个**，见 §6.1）。
+- `../beautify/global-css.md` / `../beautify/style-system.md` —— 视觉设计思路可复用，选择器与变量须换成 `[data-chat]` / `--chat-*`（注意是 **29 个**，见 §6.1）。
 - `../beautify/statusbar-shadowcast.md` —— 影渲法（Shadow DOM 隔离）。**沙盒模式一律不用**：沙盒本身是跨源 iframe，隔离已完成，再套 Shadow DOM 是纯负债（§2.3、§11.2）。其数据协议与 schema 设计仍可参考。
 
 > **本文档与 `mmd.md` 的证据等级已不同**：`mmd.md` 是本 skill 的实机实测；本文档是**逆向沙盒源码 + 真机探针**，并已推翻官方手册的多处说法（清单见文首）。两边的结论都不要互相套用。

@@ -731,6 +731,18 @@ test("契约声明 ready 无 late replay、裸字面量政策为 ERROR", () => {
   assert.equal(CONTRACT.regexPipeline.patternPolicy.severity, "ERROR");
   assert.equal(CONTRACT.regexPipeline.outputBudget.floor, 262144);
   assert.equal(CONTRACT.regexPipeline.outputBudget.inputMultiplier, 4);
-  assert.equal(CONTRACT.cssContract.tokenCount, 14);
-  assert.equal(CONTRACT.cssContract.designTokens.length, 14);
+  // 2026-08-29 实测：[data-theme=dark]/[data-theme=light] 各 29 条（旧记 14 条漏 15 个，
+  // 含整个 --chat-modal-* 族）。官方手册「底栏和白名单弹窗 18 个变量」与实测一致。
+  assert.equal(CONTRACT.cssContract.tokenCount, 29);
+  assert.equal(CONTRACT.cssContract.designTokens.length, 29);
+  assert.equal(CONTRACT.cssContract.bubbleTokens.length, 10);
+  assert.equal(CONTRACT.cssContract.whitelistTokens.length, 18);
+  assert.equal(CONTRACT.cssContract.lightTokenAccuracy, "exact");
+  // rpx 桌面档：断点 961px、封顶 375/750（旧记 750px/1px 是双错）
+  assert.equal(CONTRACT.cssContract.rpx.desktopBreakpoint, "961px");
+  assert.equal(CONTRACT.cssContract.rpx.desktopValue, "calc(375px / 750)");
+  // 宿主页那 5 个弹窗卡片 CSS 改不动（探针验证）
+  assert.equal(CONTRACT.cssContract.hostPopups.cardCssCanStyle, false);
+  assert.equal(CONTRACT.cssContract.hostPopups.popups.length, 5);
+  assert.equal(CONTRACT.cssContract.inIframeOverlays.cardCssCanStyle, true);
 });

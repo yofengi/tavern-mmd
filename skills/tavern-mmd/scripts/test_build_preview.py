@@ -7,6 +7,7 @@ import importlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -497,23 +498,362 @@ class TestPanorama(unittest.TestCase):
         ],
     }
 
+    @staticmethod
+    def _panorama_unescaped(four, platform="mmd"):
+        """🚨 全景把聊天壳塞进 `iframe srcdoc`，整块过 `html.escape` —— 页面源码里
+        引号是 `&quot;`/`&#x27;`。所以断言带引号的 JS/HTML 片段前必须先 unescape，
+        否则永远找不到（本文件曾有 4 条断言因此长期红，不是实现回归）。"""
+        return html_mod.unescape(bp.assemble_panorama(four, platform, "t.json"))
+
+    def test_mmd_input_collapse_is_blur_driven_not_outside_click(self):
+        """2026-08-29 实机：收回由主 textarea 失焦驱动，页面没装 outside-click 监听器。
+        对 .chat-body 派合成 click 收不回（真机四个目标全试过）。预览必须照此复刻，
+        否则作者在预览里"点空白能收回"、上真机就静默失效。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        self.assertIn("addEventListener('blur'", mmd)
+        # 不得把收回绑在 .chat-body 的 click 上
+        self.assertNotIn("body.addEventListener('click',function(){setState(false);})", mmd)
+
+    def test_mmd_input_multiline_is_height_based_not_newline_based(self):
+        """is-multiline 是渲染高度判据（实测 120 字零换行同样会加），不是"含换行"判据。
+        另钉两个量法坑：必须量当前可见节点（折叠态 [0] 是 display:none、scrollHeight 恒 0）；
+        量前须把 height 压 0 再还原（textarea 的 scrollHeight 只涨不缩）。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        self.assertIn("var isML=function", mmd)
+        self.assertIn("scrollHeight", mmd)
+        self.assertIn("offsetParent!==null", mmd)      # 挑可见节点量
+        self.assertIn("m.style.height='0px'", mmd)     # 压 0 才能缩回
+        self.assertIn("m.style.height=prev", mmd)      # 同 tick 还原
+
+    def test_mmd_input_syncs_same_tick_on_input_event_plus_poll_fallback(self):
+        """派 input → 同 tick 同步（实测）；裸赋值 → 约 100ms 被轮询采纳。
+        轮询兜底要留着，它复现的是真机那个竞态窗口（窗口内两次写会互相盖）。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        self.assertIn("el.addEventListener('input',function(){syncFrom(el);})", mmd)
+        self.assertIn("setInterval(", mmd)
+        # 不得再用 setTimeout 给 input 事件人为加延迟（旧复刻是错的）
+        self.assertNotIn("setTimeout(function(){syncFrom(el);},120)", mmd)
+
+    def test_mmd_send_buttons_carry_btn_icon_for_visibility_filter(self):
+        """真机发送钮是 uni-image.btn-icon，作者用
+        `.btn-icon:not(.chat-send-proxy)` + offsetParent 筛可见钮（任一状态恰好 1 个）。
+        预览按钮必须带 btn-icon 才能测通；同时要有还原尺寸的规则，
+        否则 `.chat-input-scope .btn-icon`(1.25rem) 特异性更高会把按钮压小。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        self.assertIn('class="pano-send send-btn btn-icon"', mmd)
+        self.assertIn('class="pano-send-expanded send-btn btn-icon"', mmd)
+        self.assertIn(".pano-send.btn-icon", mmd)
+        self.assertIn(".pano-send-expanded.btn-icon", mmd)
+        # proxy 恒隐藏，不能被可见性筛法选中
+        self.assertIn("btn-icon chat-send-proxy", mmd)
+        # 实测两态发送钮都是 1.25rem(20px)。旧版写 1.625rem 并注明"防止被压小"，
+        # 但它要防的那条规则当时根本不存在 —— 对着不存在的规则做补偿。
+        self.assertIn("width:1.25rem;height:1.25rem", mmd)
+
+    def test_mmd_more_panel_sits_after_send_msg_pushing_input_up(self):
+        """🚨 实测 `.more-scope` 在 `.chat-bottom-wapper` 里排在 `.send-msg` **之后** ——
+        面板在输入框**下方**、把输入框整条往上顶（底栏 105px→422px）。
+        旧版预览排在前面，面板会展开在输入框**上方**，与真机相反。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        send_at = mmd.find('<uni-view class="send-msg">')
+        more_at = mmd.find('<uni-view class="more-scope"')
+        self.assertGreater(send_at, 0)
+        self.assertGreater(more_at, send_at)
+        # 两者同为 .chat-bottom-wapper 的子节点（面板不是 fixed 弹窗）
+        wapper_at = mmd.find('<uni-view class="chat-bottom-wapper">')
+        self.assertGreater(send_at, wapper_at)
+
+    def test_mmd_plus_button_stays_outside_input_in_both_states(self):
+        """`+` 是 `.chat-input-scope` 的**兄弟**（`.more-options-scope`），
+        两态都留在输入框右侧外部 —— 不会移到输入框下方。
+        位置靠 padding-bottom 垫片压到视觉中线：折叠 0.96875rem(15.5px)、
+        展开/多行 0.84375rem(13.5px)。旧版预览这个类**一条 CSS 都没有**，
+        `+` 全靠默认流排版，所以两态都不在真机位置上。"""
+        css = bp._mmd_panorama_css()
+        self.assertIn(".chat .chat-bottom .uni-textarea .more-options-scope{", css)
+        self.assertIn("margin-left:0.375rem", css)
+        # 图标尺寸：外面的「+」1.5625rem，比输入框内的发送钮(1.25rem)大一档
+        self.assertIn(".more-options-scope .btn-icon{width:1.5625rem;height:1.5625rem}", css)
+        self.assertIn("padding-bottom:0.96875rem", css)
+        self.assertIn("padding-bottom:0.84375rem", css)
+        # 输入框内图标那条规则必须真的存在（旧注释引用了它却没写）
+        self.assertIn(".chat-input-scope .btn-icon{width:1.25rem;height:1.25rem}", css)
+        # `+` 在 DOM 上是 .chat-input-scope 的兄弟，不能嵌在里面
+        mmd = self._panorama_unescaped(self.FOUR)
+        scope_at = mmd.find('<uni-view class="chat-input-scope has-toolbar">')
+        plus_at = mmd.find('<uni-view class="more-options-scope"')
+        self.assertGreater(plus_at, scope_at)
+        self.assertNotIn('class="chat-input-scope has-toolbar"><uni-view class="more-options-scope"', mmd)
+
+    def test_mmd_plus_toggles_glyph_and_data_more_like_real_icon_swap(self):
+        """真机 `+` 随开合换图（ico_more_dark ⇄ ico_more_called_dark，都是"灰圈里的±号"）。
+        预览用 CSS 画灰圈、JS 只换圈内字形 +(43) ⇄ −(8722)，并同步 `data-more`。
+        🚨 字形用**裸** 43/8722，不用带圈的 8854(⊖)：圈已交给 CSS 画，带圈字形会叠成双圈。
+        🚨 判开合请用 `data-more`：真机关态 `.more-scope` 是 **v-if 节点不存在**，
+        预览是 display:none —— 拿 `querySelector('.more-scope')` 判会得到相反结论。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        self.assertIn('class="more-options-scope" data-more="off"', mmd)
+        self.assertIn("mo.setAttribute('data-more',on?'on':'off')", mmd)
+        self.assertIn("String.fromCharCode(8722)", mmd)  # − 展开态（裸减号，CSS 另画圈）
+        self.assertIn("String.fromCharCode(43)", mmd)    # + 折叠态（裸加号，CSS 另画圈）
+        # 初始 HTML 用裸 + (&#43;)，不是全角＋(&#65291;)
+        self.assertIn('<uni-view class="btn-icon">&#43;</uni-view>', mmd)
+
+    def test_mmd_plus_button_drawn_as_gray_ring_not_bare_glyph(self):
+        """🚨 真机 `+` 是"灰色描边圆圈里一个加号"（PNG 图标），不是裸字形。
+        预览用 CSS 给 `.more-options-scope .btn-icon` 画 border 圆环 + 居中字形，
+        两态都带圈。旧版退化成飘在边上的裸全角＋（无圈），与真机差最远。"""
+        css = bp._mmd_panorama_css()
+        # 圆环：border + border-radius:50% + 居中
+        self.assertIn("border:0.09375rem solid #6b7079;border-radius:50%", css)
+        # 灰色字形 + flex 居中
+        self.assertIn("color:#9198a1;display:flex;align-items:center;justify-content:center", css)
+
+    def test_mmd_send_button_is_transparent_gray_plane_not_pink_circle(self):
+        """🚨 真机发送钮是 `ico_send_dark.png`（灰色纸飞机）、**背景透明、不变粉**
+        （2026-08-29 实机注入文字前后复验 bg 恒 rgba(0,0,0,0)）。旧版画成粉色实心圆+白箭头是错的。
+        预览覆盖成透明底 + 灰色纸飞机 SVG（currentColor 驱动）。"""
+        css = bp._mmd_panorama_css()
+        # .chat-input-scope 内的发送钮覆盖成透明底 + 灰色（不波及沙盒矩形发送键）
+        self.assertIn("width:1.25rem;height:1.25rem;background:transparent;border-radius:0;\n"
+                      "  color:#9198a1", css)
+        # 纸飞机 SVG（Feather send）出现在两态发送钮
+        mmd = self._panorama_unescaped(self.FOUR)
+        self.assertIn('<polygon points="22 2 15 22 11 13 2 9 22 2">', mmd)
+        self.assertEqual(mmd.count('viewBox="0 0 24 24"'), 2)  # 折叠+展开各一个
+
+    def test_mmd_textarea_padding_lives_on_shell_not_inner(self):
+        """🚨 真机上下 padding 一律挂在 `uni-textarea` **壳**上，内层 `textarea` 恒零上下
+        padding（实测折叠壳 24px/内层 22px；展开壳与内层同 22px）。
+        预览曾把两层压平写在内层，每一态都多 16px：折叠输入框 53→55px、展开主输入 22→43px。
+        另钉 `vertical-align:top` 消 inline 基线间隙 —— 不能改用 `display:block` 修，
+        那会让 rows=1 的高度约束失效（折叠预览 22→67px，本地实测踩过）。"""
+        css = bp._mmd_panorama_css()
+        self.assertIn("padding-top:0;padding-bottom:0;vertical-align:top", css)
+        self.assertNotIn("padding-top:0;padding-bottom:0;display:block", css)
+        # 壳承 padding
+        self.assertIn("padding:0.75rem 0.25rem 0.75rem 0.1875rem", css)
+        # 内层那条共用规则不得再带上下 padding
+        inner = [ln for ln in css.splitlines() if "resize:none" in ln]
+        self.assertTrue(inner, "共用 textarea 规则应存在")
+        self.assertNotIn("padding:0.5rem 0.25rem", "\n".join(inner))
+
+    def test_mmd_expanded_hides_collapsed_row(self):
+        """折叠行与展开行互斥。漏掉这条隐藏规则 → 两行叠加、
+        展开态输入框 125→172px（本地改 CSS 时确实漏抄过一次）。"""
+        css = bp._mmd_panorama_css()
+        self.assertIn(
+            ".chat-input-scope.is-expanded .chat-input-collapsed-row{display:none}", css)
+
+    def test_mmd_collapsed_row_side_cells_follow_multiline_branch(self):
+        """折叠行左右两格（算力数字 / 发送钮）：单行态 `align-self:stretch` 撑满行高居中；
+        `.is-multiline` 时改 `align-self:auto` + `padding-bottom:0.5rem` 沉到底（实测）。
+        展开行两格则是 `padding-top:0.875rem`。"""
+        css = bp._mmd_panorama_css()
+        self.assertIn("align-self:stretch;display:flex;align-items:center;min-height:1.25rem", css)
+        self.assertIn("align-self:auto;padding-bottom:0.5rem", css)
+        self.assertIn("padding-top:0.875rem;min-height:1.25rem", css)
+
     def test_panorama_has_fixed_input_bar_and_send_button(self):
-        html = bp.assemble_panorama(self.FOUR, "mmd", "t.json")
-        self.assertIn("pano-input-bar", html)
-        self.assertIn("position:fixed", html)        # 输入栏固定
-        self.assertIn("bottom:0", html)
-        self.assertIn("pano-send", html)             # 发送按钮
-        self.assertIn("uni-textarea-textarea", html)  # 主输入框（与选项回填选择器一致）
+        """MMD 走实测复刻底栏（.chat-bottom 自己就是 fixed bottom:0）；
+        ST 仍是中性骨架的 .pano-input-bar。两边都必须有可发送的输入框。"""
+        mmd = bp.assemble_panorama(self.FOUR, "mmd", "t.json")
+        self.assertIn("chat-bottom", mmd)
+        self.assertIn("position:fixed", mmd)
+        self.assertIn("bottom:0", mmd)
+        self.assertIn("pano-send", mmd)
+        self.assertIn("uni-textarea-textarea", mmd)  # 主输入框（与选项回填选择器一致）
+        # MMD 已改走实测外壳，不该再出现中性骨架的占位输入栏类名。
+        self.assertNotIn("pano-input-bar", mmd)
+        st = bp.assemble_panorama(self.FOUR, "st", "t.json")
+        self.assertIn("pano-input-bar", st)
+        self.assertIn("pano-send", st)
 
     def test_panorama_has_mmd_chat_runtime_scaffold(self):
         html = bp.assemble_panorama(self.FOUR, "mmd", "t.json")
-        for marker in ("topTabbar", "chat chat-bg pano-chat", "chat-body",
-                       "data-message-role=&quot;user&quot;", "data-message-role=&quot;ai&quot;",
+        for marker in ("topTabbar", "scroll-view dark pano-chat", "chat-body",
+                       "item Ai self", "item Ai avatar-body",
                        "content right", "content left"):
             with self.subTest(marker=marker):
                 self.assertIn(marker, html)
         self.assertIn("#/pages/chat/chat", html)
         self.assertIn("data-pano-runtime-scaffold", html)
+
+    # ── 以下 4 条把「MMD 全景 = 实测真实页」这件事钉死 ──────────────────
+    # 依据：Playwright 进真实 iframe#chatIframe 读 CSSOM + getComputedStyle
+    #      （www.sexyai.ai #/pages/chat/chat，旧聊天页，2026-08-28）。
+    # 契约全文：preview/MMD真实页DOM契约-2026-08-28.md
+    # 这几条防的是"顺手改回好看的臆想值"——沙盒分支早有同类锁
+    # （test_dark_tokens_equal_measured_truth），MMD 分支以前没有，于是骨架
+    # 一路飘到与真机零重合。别为了预览好看放宽它们。
+
+    def test_mmd_panorama_reproduces_measured_dom_layers(self):
+        """真机所有 chat-body 后代规则都以 .chat-scope-box .scroll-view 为前缀。
+        少这两层，作者按文档写的深选择器在预览里会失配（真机却能中）。"""
+        html = html_mod.unescape(bp.assemble_panorama(self.FOUR, "mmd", "t.json"))
+        for frag in (
+            '<uni-view class="chat">',
+            '<uni-view class="chat-scope-box">',
+            '<uni-scroll-view class="scroll-view dark pano-chat" id="pano-chat">',
+            '<div class="uni-scroll-view"><div class="uni-scroll-view-content">',
+            '<uni-view class="chat-body" id="msglistview">',
+            '<uni-view class="touch-scope" id="item0">',
+            '<uni-view class="content left" id="q-1">',
+            # 官方侧边挂载点（悬浮组件靶位）与开场白块
+            '<uni-view class="mm-left-side-container">',
+            '<uni-view class="mm-right-side-container">',
+            '<uni-view class="prologue-scope">',
+        ):
+            with self.subTest(frag=frag):
+                self.assertIn(frag, html)
+        # 三个已证实不存在于真机的臆想类名，不得回归。
+        for dead in ('class="page"', "chat-bg", "data-message-role"):
+            with self.subTest(dead=dead):
+                self.assertNotIn(dead, html)
+
+    def test_mmd_bubble_css_keeps_pre_line_and_measured_opacity(self):
+        """🚨 `white-space:pre-line` 是「换行空白条」的**真因**（实测：注入带换行的
+        HTML，高度 102px vs 子元素合计 51px；p:empty 数量为 0）。少了它，预览就查
+        不出 MMD 头号排版坑。opacity:.9 同理影响实际观感色。"""
+        css = bp._mmd_panorama_css()
+        self.assertIn("white-space:pre-line", css)
+        self.assertIn("opacity:.9", css)
+        # 气泡背景由 --background-color 覆盖 .left/.right 的白底/蓝底（深色下两侧同色）
+        self.assertIn("background:var(--background-color,#17181A)", css)
+        self.assertIn("border-radius:1rem 1rem 1rem 0!important", css)   # AI 尖角
+        self.assertIn("border-radius:1rem 1rem 0!important", css)        # 用户尖角
+        self.assertIn("border-radius:0.5rem!important", css)             # 首条对称圆角
+        self.assertIn("max-width:94%", css)                              # .touch-scope
+        # 旧版那套臆想配色不得回归
+        for fake in ("#f0f0f3", "#3a76f0"):
+            with self.subTest(fake=fake):
+                self.assertNotIn(fake, css)
+
+    def test_mmd_panorama_reproduces_measured_rem_scaling_law(self):
+        """实测两点拟合（误差 <0.001px）：rootFontSize = 16*min(w,375)/375。
+        主聊天页 iframe 宽 1280 → 16px 封顶；编辑页预览 iframe 宽 283 → 12.0747px。
+        真机尺寸全走 rem，少这条则所有 rem 尺寸失真。"""
+        self.assertEqual(bp.MMD_ROOT_FONT_SIZE, "min(16px, calc(100vw * 16 / 375))")
+        self.assertIn("html{font-size:min(16px, calc(100vw * 16 / 375))}",
+                      bp._mmd_panorama_css())
+
+    def test_mmd_panels_also_carry_measured_platform_shell(self):
+        """三面板（单组件诊断）也要有平台底子：checklist 的工作流是"先三面板审单组件、
+        再全景审组合"，第一步没有 pre-line / 主题变量 / rem 基准 = 白审。
+        壳是**扁平**的（静态流、无顶栏底栏弹窗），布局与全景不同但取值一律照抄实测。"""
+        html = html_mod.unescape(bp.assemble_preview(self.FOUR, "mmd", "t.json"))
+        # 气泡容器链与类名照真机
+        for frag in ('<uni-view class="chat"><uni-view class="chat-scope-box">',
+                     '<uni-view class="chat-body" id="msglistview">',
+                     '<uni-view class="content left">'):
+            with self.subTest(frag=frag):
+                self.assertIn(frag, html)
+        shell = bp._mmd_panel_shell_css()
+        # 三样最要紧的实测取值
+        self.assertIn("white-space:pre-line", shell)
+        self.assertIn("html{font-size:min(16px, calc(100vw * 16 / 375))}", shell)
+        self.assertIn("--background-color:#17181A;", shell)
+        # 气泡盒模型与全景一致（同一批实测值）
+        self.assertIn("padding:0.75rem", shell)
+        self.assertIn("border-radius:0.5rem", shell)
+        self.assertIn("max-width:94%", shell)
+        # 扁平：不得带 fixed 定位/视口高度，否则自动撑高的诊断 iframe 会塌。
+        # 只查声明，不查注释文本（注释里会提到 fixed 解释为什么不用它）。
+        decls = re.sub(r"/\*.*?\*/", "", shell, flags=re.S)
+        self.assertIn(".chat .chat-scope-box{position:static", decls)
+        self.assertNotIn("position:fixed", decls)
+        self.assertNotIn("100vh", decls)
+        # 顶栏/底栏/弹窗属于组合审核，不该混进单组件诊断
+        for noise in ("topTabbar", "chat-bottom", "u-popup", "shortcut-btn"):
+            with self.subTest(noise=noise):
+                self.assertNotIn(noise, decls)
+        # ST 分支不受影响（无 ST 实测依据，保持原样）
+        st = html_mod.unescape(bp.assemble_preview(self.FOUR, "st", "t.json"))
+        self.assertNotIn('<uni-view class="chat-scope-box">', st)
+
+    def test_mmd_panorama_simulates_measured_popups(self):
+        """全局美化会打到弹窗面板，全景必须能逐个打开自查（2026-08-28 实机逐个点开抓取）。
+        六个面板 + 两个「不是弹窗」的原地展开状态（更多面板 / 指令栏）。"""
+        html = html_mod.unescape(bp.assemble_panorama(self.FOUR, "mmd", "t.json"))
+        for scope in ("model-setting-scope theme-dark", "conv-style-modal",
+                      "summary-sheet theme-dark", "role-profile-modal",
+                      "share-popup", "alert-scope"):
+            with self.subTest(scope=scope):
+                self.assertIn(scope, html)
+        # 通用外壳三层齐全
+        for frag in ('class="u-popup pano-sheet"', 'class="u-popup__content"',
+                     "u-safe-bottom u-safe-area-inset-bottom",
+                     "u-popup__content__close--top-right"):
+            with self.subTest(frag=frag):
+                self.assertIn(frag, html)
+        # 默认全关（真机也是关的）。只看面板节点自身：脚手架源码里也含
+        # `[data-sheet][data-open=on]` 选择器字符串，不能拿它当"有面板开着"。
+        # 🚨 值用 off/on 而非 0/1：无引号属性选择器 `[data-open=1]` 非法
+        #（CSS 标识符不能以数字开头），而属性内又不能写裸双引号（§2 红线）。
+        panels = re.findall(r'<uni-view class="u-popup pano-(?:sheet|dialog)"[^>]*>', html)
+        self.assertEqual(len(panels), 6)
+        for tag in panels:
+            with self.subTest(tag=tag):
+                self.assertIn('data-open="off"', tag)
+        # 「选择指令」与「+」是原地展开，不是弹窗
+        self.assertIn('class="instruction-bar hidden"', html)
+        self.assertIn("instruction-chip", html)
+        self.assertIn('class="more-scope" data-open="off"', html)
+        self.assertIn("more-options-scope", html)
+        self.assertIn("ai-assistant", html)
+        # 开关脚手架与外层工具栏按钮
+        self.assertIn("data-pano-panel-scaffold", html)
+        self.assertIn("__panoPanels", html)
+        for label in ("模型设置", "对话设置", "总结剧情", "用户人设",
+                      "分享", "AI帮聊说明", "＋更多面板", "指令栏切换"):
+            with self.subTest(label=label):
+                self.assertIn(label, html)
+
+    def test_popup_css_keeps_framework_white_baseline_and_zindex_tiers(self):
+        """两件必须照抄真机的事：
+        ① `.u-popup__content` 基线是**白底**（实测 uview 原文），深色全靠面板 scope 或内联
+           style 覆盖 —— 作者漏改某面板时真机露白，预览要能重现，不能"顺手"改成深色。
+        ② z-index 两档：多数面板 10075，但总结剧情实测 1000000000（差 5 个数量级）。"""
+        css = bp._mmd_panorama_css()
+        self.assertIn(".u-popup__content{background-color:#fff", css)
+        self.assertIn("z-index:10075", css)
+        self.assertIn('.pano-sheet[data-sheet="summary"]{z-index:1000000000}', css)
+        # 遮罩实测取值
+        self.assertIn(".u-overlay{position:fixed", css)
+        self.assertIn("background-color:rgba(0,0,0,.7)", css)
+        # 「+」面板在 .chat-bottom 内展开（不是 fixed 弹窗）
+        self.assertIn(".chat .chat-bottom .more-scope{", css)
+
+    def test_lo_variable_family_is_left_undefined_on_purpose(self):
+        """🚨 `--lo*` 那 18 个变量真机**引用但从未定义**，恒走 `var(--loX, 字面量)` fallback。
+        预览故意也不定义 —— 好让作者在预览阶段就发现"改 --lo* 没反应"，而不是上真机才发现。
+        所以这些名字只能出现在 var() 的引用位置，不得出现在 `--loX:值` 的定义位置。"""
+        css = bp._mmd_panorama_css()
+        self.assertIn("var(--loBackground-color,#17181A)", css)
+        self.assertIn("var(--loPrimary-color,#FF6D97)", css)
+        self.assertIn("var(--loCard-background-color,#1E1F24)", css)
+        # 定义位置零出现（`--loX:` 形态）
+        self.assertNotRegex(css, r"--lo[A-Za-z-]*\s*:\s*#")
+        # 那 29 个真实变量与 --lo* 是两套体系，别混进来
+        for name in bp.MMD_THEME_VARS_DARK:
+            self.assertFalse(name.startswith("--lo"), name)
+
+    def test_mmd_theme_vars_equal_measured_dark_palette(self):
+        """29 个主题变量取值 = 真机 body 内联 style 实测真值，逐字锁定。
+        计数依据：解析真机 body[style] 得 29 对（不是 30——初稿曾误记 30，实测纠正）。
+        浅色一套真机运行时不暴露，**故意不提供**——需要请回真机抓，别臆造。"""
+        self.assertEqual(len(bp.MMD_THEME_VARS_DARK), 29)
+        for name, value in (("--background-color", "#17181A"),
+                            ("--primary-color", "#FF6D97"),
+                            ("--input-background-color", "#33353B"),
+                            ("--card-background-color", "#282A2E"),
+                            ("--chat-content-font-color", "#FFFFFF")):
+            with self.subTest(name=name):
+                self.assertEqual(bp.MMD_THEME_VARS_DARK[name], value)
+        css = bp._mmd_panorama_css()
+        for name, value in bp.MMD_THEME_VARS_DARK.items():
+            with self.subTest(name=name):
+                self.assertIn("%s:%s;" % (name, value), css)
 
     def test_panorama_exposes_dynamic_ai_and_route_test_helpers(self):
         html = bp.assemble_panorama(self.FOUR, "mmd", "t.json")
@@ -922,17 +1262,25 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertIn("width:100%", rendered)
 
     def test_sandbox_css_preserves_platform_defaults_for_sbk_to_fix(self):
-        css = bp.SANDBOX_CHROME_CSS
+        # 读渲染后的 CSS：模板里裸 % 已转义成 %%（要填两套令牌与 rpx 两档）。
+        css = bp._sandbox_chrome_css()
         self.assertIn('height:var(--chat-viewport-height)', css)
-        self.assertIn('max-width:100%;overflow:hidden auto;background-color:var(--chat-bg)', css)
+        self.assertIn('background-color:var(--chat-bg)', css)
         self.assertIn('[data-chat="composer"]{position:static;', css)
         self.assertIn('left:auto;right:auto;bottom:auto', css)
         self.assertNotIn('[data-slot="statusbar"]{position:sticky', css)
         self.assertNotIn('[data-slot="statusbar"]{flex-shrink:0', css)
         self.assertIn('white-space:pre-line;opacity:.9', css)
-        self.assertIn('.pano-compose-icon,.pano-send{flex:0 0 auto;', css)
-        self.assertIn('min-width:0;height:calc(60 * var(--rpx));', css)
-        self.assertIn('padding:0;border:0;border-radius:0;background:transparent', css)
+        # 底栏按钮的平台默认（真机 button reset）走真实钩子，不再用 .pano-* 自造类。
+        self.assertIn('[data-chat="composer"] button{appearance:none;', css)
+        self.assertIn('background:0 0;border:0;margin:0;padding:0;', css)
+        # legacy 自造类不得再带样式（否则与钩子规则打架，行为偏离真机）。
+        # 只查声明，不查注释（注释里会提到这些类名解释为什么不给样式）。
+        decls = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        for legacy in (".pano-input-shell{", ".pano-compose-icon,.pano-send{",
+                       ".pano-shortcut{", ".pano-shortcuts{", ".pano-compose-row{"):
+            with self.subTest(legacy=legacy):
+                self.assertNotIn(legacy, decls)
         self.assertIn('[data-preview-bubble-outline] [data-chat="message-body"]', css)
         # 真实消息附加槽必须存在，动态消息也由模拟器构造同样的子节点。
         self.assertIn('data-slot="message-extra"', html_mod.unescape(
@@ -954,15 +1302,21 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
                          ["message-body", "message-extra", "message-actions"])
 
     def test_panorama_defines_all_sandbox_design_tokens(self):
-        """防回归：14 个实测设计令牌必须全部注入产物。
+        """防回归：29 个实测设计令牌必须全部注入产物（两套主题各一份）。
 
         引用实现里的 SANDBOX_DESIGN_TOKENS 而非另抄一份清单，避免测试与实现漂移。
-        曾漏注入后 5 个（手册也漏记），导致作者写 var(--chat-input-bg) 在预览里
-        解析不到、真机却正常 —— 会误导作者去修不存在的 bug。
+        🚨 2026-08-29 实测把 14 → 29：旧版漏了 15 个，其中整个 --chat-modal-* 族（9 个）
+        与 --chat-composer-*/--chat-shortcut-bg/--chat-input-placeholder/--chat-input-border
+        都是真机可用的（官方手册称「底栏和白名单弹窗」18 个变量，逐个注入醒目色验证生效）。
+        漏注入 → 作者写 var(--chat-modal-bg) 在预览里解析不到、真机却正常，
+        会误导作者去修不存在的 bug。
         """
         html = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
         chrome = html_mod.unescape(html)
-        self.assertEqual(len(bp.SANDBOX_DESIGN_TOKENS), 14)
+        self.assertEqual(len(bp.SANDBOX_DESIGN_TOKENS), 29)
+        # 分组构成：气泡 10 + 白名单 18 + more-item-bg 别名 1
+        self.assertEqual(len(bp.SANDBOX_BUBBLE_TOKENS), 10)
+        self.assertEqual(len(bp.SANDBOX_WHITELIST_TOKENS), 18)
         for var in bp.SANDBOX_DESIGN_TOKENS:
             with self.subTest(var=var):
                 self.assertIn("%s:" % var, chrome)
@@ -987,14 +1341,22 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         整块糊在背景里。这种谎发生在设计决策阶段，代价高于"气泡默认看不见"。
         """
         chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
-        dark = chrome.split('[data-chat="root"][data-theme="dark"]{', 1)[1].split("}", 1)[0]
+        dark = chrome.split('[data-theme="dark"]{', 1)[1].split("}", 1)[0]
         parsed = dict(kv.split(":", 1) for kv in
                       (p.strip() for p in dark.replace("\n", "").split(";")) if kv)
-        self.assertEqual(parsed, bp.SANDBOX_DARK_TOKEN_VALUES)
-        # 实测：两个气泡背景与页面背景同色，预览不得再把它们画成分离的。
+        # 4 个别名必须发 var() 引用形态（真机如此）；其余发实测字面量。
+        # 展开成字面量会让作者改 --chat-bg/--chat-modal-surface 时预览不跟随、真机跟随。
+        expected = {k: bp.SANDBOX_ALIAS_TOKENS.get(k, v)
+                    for k, v in bp.SANDBOX_DARK_TOKEN_VALUES.items()}
+        self.assertEqual(parsed, expected)
         self.assertEqual(parsed["--chat-bg"], "#17181a")
-        self.assertEqual(parsed["--chat-bubble-user-bg"], parsed["--chat-bg"])
-        self.assertEqual(parsed["--chat-bubble-ai-bg"], parsed["--chat-bg"])
+        self.assertEqual(parsed["--chat-bubble-user-bg"], "var(--chat-bg)")
+        self.assertEqual(parsed["--chat-bubble-ai-bg"], "var(--chat-bg)")
+        self.assertEqual(parsed["--chat-bubble-text"], "var(--chat-text)")
+        self.assertEqual(parsed["--chat-more-item-bg"], "var(--chat-modal-surface)")
+        # 解析后仍与页面背景同色（实测），只是这层关系由 var() 表达而非硬编码
+        self.assertEqual(bp.SANDBOX_DARK_TOKEN_VALUES["--chat-bubble-ai-bg"],
+                         bp.SANDBOX_DARK_TOKEN_VALUES["--chat-bg"])
         self.assertEqual(set(parsed), set(bp.SANDBOX_DESIGN_TOKENS))
 
     def test_bubble_outline_is_preview_aid_not_a_color_claim(self):
@@ -1006,7 +1368,7 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertIn("[data-preview-bubble-outline] [data-chat=\"message-body\"]"
                       "{box-shadow:inset 0 0 0 1px var(--chat-border)}", chrome)
         # 描边不得混进令牌定义块（那里只放平台真值）。
-        dark = chrome.split('[data-chat="root"][data-theme="dark"]{', 1)[1].split("}", 1)[0]
+        dark = chrome.split('[data-theme="dark"]{', 1)[1].split("}", 1)[0]
         self.assertNotIn("box-shadow", dark)
         # NOTE 必须告诉作者这是预览辅助、真机气泡与背景同色。
         self.assertIn("预览辅助线", html)
@@ -1022,11 +1384,212 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         只需出现主题相关的差异令牌；此处断言深色覆盖块确实带上了漏记的 5 个。
         """
         chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
-        dark = chrome.split('[data-chat="root"][data-theme="dark"]{', 1)[1].split("}", 1)[0]
+        dark = chrome.split('[data-theme="dark"]{', 1)[1].split("}", 1)[0]
         for var in ("--chat-input-bg", "--chat-input-text", "--chat-shortcut-text",
                     "--chat-more-item-bg", "--chat-share-pick-bg"):
             with self.subTest(var=var):
                 self.assertIn("%s:" % var, dark)
+
+    # ── 以下 5 条锁死 2026-08-29 沙盒实机抓取的结论 ──────────────────────────
+    # 依据：Playwright 进真实卡片 iframe（c<roleId>.sbx.aitchat.org，跨源）读 CSSOM
+    #      + 逐个点开面板 + 注入探针验证变量是否生效。
+    # 契约：references/platforms/mmd-sandbox-real-page-contract-2026-08-29.md
+
+    def test_light_tokens_equal_measured_truth(self):
+        """浅色 29 个也是实测真值（旧注释说"类推、未实测"，那个状态已结束）。
+
+        平台把两套分别定义在 [data-theme=light]/[data-theme=dark]（无 :root）。
+        预览把浅色放基底规则 —— 断言它逐字等于实测表，防有人"顺手调好看"。
+        """
+        self.assertEqual(len(bp.SANDBOX_LIGHT_TOKEN_VALUES), 29)
+        self.assertEqual(set(bp.SANDBOX_LIGHT_TOKEN_VALUES), set(bp.SANDBOX_DESIGN_TOKENS))
+        for name, value in (("--chat-bg", "#fff"), ("--chat-accent", "#17aafd"),
+                            ("--chat-modal-bg", "#fff"), ("--chat-modal-surface", "#f5f8fc"),
+                            ("--chat-shortcut-bg", "#f1f4f9"),
+                            ("--chat-modal-btn-border", "#efefef")):
+            with self.subTest(name=name):
+                self.assertEqual(bp.SANDBOX_LIGHT_TOKEN_VALUES[name], value)
+        # 气泡三色实测是 var(--chat-bg)/var(--chat-text) 的别名 → 解析后必然同色
+        lv = bp.SANDBOX_LIGHT_TOKEN_VALUES
+        self.assertEqual(lv["--chat-bubble-ai-bg"], lv["--chat-bg"])
+        self.assertEqual(lv["--chat-bubble-user-bg"], lv["--chat-bg"])
+        self.assertEqual(lv["--chat-bubble-text"], lv["--chat-text"])
+        # 基底规则（浅色）必须真的带上这些取值
+        chrome = bp._sandbox_chrome_css()
+        base = chrome.split('[data-theme="light"]{', 1)[1].split("}", 1)[0]
+        self.assertIn("--chat-modal-bg:#fff;", base)
+        self.assertIn("--chat-accent:#17aafd;", base)
+
+    def test_sandbox_rpx_matches_measured_breakpoint(self):
+        """--rpx 实测两档：基底 100vw/750，@media(min-width:961px) 封顶 375px/750。
+
+        🚨 旧版写 `@media(min-width:750px){--rpx:1px}` —— 断点与取值双错。桌面档真值
+        是 0.5px 而非 1px，差 2 倍：作者按预览调的尺寸上真机全错一半。
+        实测三点：视口 298→单位 298px、400→400px、1280→375px。
+        """
+        self.assertEqual(bp.SANDBOX_RPX_BASE, "calc(100vw / 750)")
+        self.assertEqual(bp.SANDBOX_RPX_DESKTOP, "calc(375px / 750)")
+        self.assertEqual(bp.SANDBOX_RPX_BREAKPOINT, "961px")
+        css = bp._sandbox_chrome_css()
+        self.assertIn("--rpx:calc(100vw / 750)", css)
+        self.assertIn("@media (min-width:961px){[data-chat=\"root\"]{--rpx:calc(375px / 750)}}", css)
+        # 旧的错值不得回归
+        self.assertNotIn("--rpx:1px", css)
+        self.assertNotIn("min-width:750px", css)
+
+    def test_sandbox_carries_measured_composer_hooks(self):
+        """底栏真实钩子名（旧版是 .pano-* 自造类，作者按手册写选择器会失配）。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        for hook in ('data-chat="shortcut"', 'data-chat="instruction-bar"',
+                     'data-chat="instruction-back"', 'data-chat="instruction-chip"',
+                     'data-chat="assistant"', 'data-chat="model-chip"',
+                     'data-action="more"', 'class="composer-shortcut-wrap"',
+                     'composer-row', 'composer-field'):
+            with self.subTest(hook=hook):
+                self.assertIn(hook, chrome)
+        # 快捷条 6 个按钮带真实 data-action（真机就是这套）
+        for act in ("model", "style", "instructions", "summary", "conversations", "persona"):
+            with self.subTest(act=act):
+                self.assertIn('data-action="%s"' % act, chrome)
+
+    def test_sandbox_simulates_in_iframe_overlays(self):
+        """iframe 内浮层：卡片 CSS 能打到，必须完整仿真且默认全关。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        for node in ('data-chat="more-panel"', 'data-chat="message-menu"',
+                     'data-chat="alert"', 'data-chat="toast"', 'data-chat="alert-ok"',
+                     'data-chat="snack"', 'data-probe="snackbar"',
+                     'data-chat="share-bar"', 'data-chat="share-pick-bar"',
+                     'data-chat="share-shot-loading"', 'data-chat="summary-bubble"',
+                     'data-probe="history-loading"'):
+            with self.subTest(node=node):
+                self.assertIn(node, chrome)
+        # 默认全关。只看节点开标签：CSS 里满是 `[data-open="on"]` 选择器、
+        # 脚手架里也有 'on' 字面量，都不能当"有面板开着"。
+        tags = re.findall(r'<div [^>]*data-open="(on|off)"', chrome)
+        self.assertTrue(tags, "没有找到任何浮层节点")
+        self.assertEqual(set(tags), {"off"})
+        # 「+」面板吃白名单变量（手册说法，实测一致）
+        css = bp._sandbox_chrome_css()
+        self.assertIn('[data-chat="more-panel"]{', css)
+        self.assertIn("background:var(--chat-modal-bg);color:var(--chat-modal-text)", css)
+        self.assertIn("background:var(--chat-more-item-bg)", css)
+        # 舞台三态（旧版只有一个 fixed/z-2000，把 content 也画成盖整屏了）
+        self.assertIn('[data-chat="author-stage"][data-stage="content"]'
+                      '{position:absolute;z-index:2000}', css)
+        self.assertIn('[data-chat="author-stage"][data-stage="full"]'
+                      '{position:fixed;inset:0;z-index:3000}', css)
+        # 开关脚手架必须是经典 script（沙盒禁 img onerror）
+        self.assertIn('data-preview-panels="1"', chrome)
+        self.assertIn("__sbxPanels", chrome)
+
+    def test_token_specificity_lets_author_override_win(self):
+        """🚨 令牌必须挂**单属性** [data-theme=*]，与真机同特异性 0,1,0。
+
+        曾写成 `[data-chat="root"][data-theme="dark"]`（0,2,0）→ 作者按官方手册写
+        `[data-chat="root"]{--chat-modal-bg:X}`（0,1,0）在预览里被压过、看着"没生效"，
+        而真机两边都是 0,1,0、靠文档顺序作者赢（平台 CSS 在前、作者 hoisted style 在后）。
+        这类"预览比真机更严"的假象会让作者去改一个没坏的东西。
+        同理 more-panel 那几条真机不带 composer 前缀，预览也不能多套一层。
+        """
+        css = bp._sandbox_chrome_css()
+        # 只查声明，不查注释（注释里会引用旧的错写法解释为什么不能那样写）
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        self.assertIn('[data-theme="dark"]{', css)
+        self.assertIn('[data-theme="light"]{', css)
+        self.assertNotIn('[data-chat="root"][data-theme=', css)
+        # more-panel 四条保持真机特异性（不带 [data-chat="composer"] 前缀）
+        for sel in ('[data-chat="more-panel"]{', '[data-chat="more-panel"][data-open="on"]{',
+                    '[data-chat="more-panel"] > button{',
+                    '[data-chat="more-panel"] > button > span{'):
+            with self.subTest(sel=sel):
+                self.assertIn("\n" + sel, css)
+                self.assertNotIn('[data-chat="composer"] ' + sel, css)
+        # 别名 4 个发引用形态，作者改基色时能顺着传导
+        self.assertEqual(len(bp.SANDBOX_ALIAS_TOKENS), 4)
+        for name, ref in bp.SANDBOX_ALIAS_TOKENS.items():
+            with self.subTest(name=name):
+                self.assertIn("%s:%s;" % (name, ref), css)
+
+    def test_composer_field_three_states_match_measured_css(self):
+        """输入框三态照实测原文（2026-08-29）：
+
+        折叠 `min-height:82rpx`（旧版漏了，输入行整体矮一截）；
+        多行 is-multiline 换 padding + 底对齐、两侧圆钮 padding-bottom 27rpx；
+        展开 is-expanded 转 grid 三区，工具行「粘贴/清空」才显示、model-chip order 归 0。
+        🚨 font-size 实测在 ::placeholder 规则里而非 input 本体 —— 照抄，别给 input 补字号。
+        """
+        css = bp._sandbox_chrome_css()
+        self.assertIn(".composer-field:not(.is-expanded){min-height:calc(82 * var(--rpx))}", css)
+        self.assertIn('grid-template-areas:"tools tools tools" "input input input" '
+                      '"chip . send"', css)
+        self.assertIn(".composer-field:not(.is-expanded) .composer-tools{display:none}", css)
+        self.assertIn(".composer-field.is-expanded [data-chat=\"model-chip\"]{order:0}", css)
+        self.assertIn("padding-bottom:calc(27 * var(--rpx));align-self:flex-end", css)
+        self.assertIn(".composer-field:not(.is-expanded) [data-chat=\"input\"]"
+                      "{padding:0 calc(12 * var(--rpx))", css)
+        # 字号只在 placeholder 规则里
+        input_rule = css.split('[data-chat="input"]{', 1)[1].split("}", 1)[0]
+        self.assertNotIn("font-size", input_rule)
+        self.assertIn('[data-chat="input"]::placeholder{', css)
+        ph = css.split('[data-chat="input"]::placeholder{', 1)[1].split("}", 1)[0]
+        self.assertIn("font-size:calc(32 * var(--rpx))", ph)
+        # 骨架里工具行与三态切换 API
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn('class="composer-tools"', chrome)
+        self.assertIn('data-chat="paste"', chrome)
+        self.assertIn('data-chat="clear"', chrome)
+        self.assertIn("fieldState", chrome)
+        # 顺序：composer-field 内 composer-tools 在 input 之前（grid 里 tools 区在最上）。
+        # 只在 field 片段里比，否则会撞上前面 CSS 里的同名字符串。
+        field = chrome.split('class="pano-input-shell composer-field">', 1)[1]
+        self.assertLess(field.index('class="composer-tools"'),
+                        field.index('data-chat="input"'))
+
+    def test_more_panel_items_are_clickable_with_measured_actions(self):
+        """「+」面板 11 项的 data-action 照真机，且每项可点。
+
+        面板在 iframe 内 → 作者的全局美化能打到它，所以必须点得开、看得见效果。
+        能开面板的直接开（对话设置/剧情总结/用户人设/新的聊天走宿主占位、
+        自定义指令切指令栏），其余弹 snack 说明是平台侧动作、预览不模拟真实副作用。
+        """
+        self.assertEqual(len(bp.SANDBOX_MORE_ITEMS), 11)
+        actions = [a for a, _g, _l in bp.SANDBOX_MORE_ITEMS]
+        self.assertEqual(actions, ["reset", "export", "conversations", "role-edit",
+                                   "background", "instructions", "persona", "extra",
+                                   "style", "summary", "help"])
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        panel = chrome.split('<div data-chat="more-panel"', 1)[1].split("</div>", 1)[0]
+        for act in actions:
+            with self.subTest(act=act):
+                self.assertIn('data-action="%s"' % act, panel)
+        # 11 个按钮都有图标底 span（吃 --chat-more-item-bg）与文字标签
+        self.assertEqual(panel.count("<button"), 11)
+        self.assertEqual(panel.count("<span>"), 11)
+        # 脚手架里绑了点击 + snack 兜底
+        self.assertIn('[data-chat="more-panel"] > button', chrome)
+        self.assertIn("function snack(", chrome)
+
+    def test_host_popups_are_marked_unstylable_not_faked(self):
+        """🚨 宿主页那 5 个弹窗渲染在 h5 域的 uni-app 里，跨源 iframe 之外。
+
+        探针验证：在卡片 iframe 内注入 --chat-modal-bg:#00ff00 后打开模型设置，
+        它仍是 #17181a，且该变量在其上解析为「未定义」。所以预览**只画层级占位**、
+        明确标注平台侧，绝不套 --chat-modal-* —— 套了就是撒谎，作者会白写选择器。
+        """
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        for name in ("model", "conv", "summary", "role", "share"):
+            with self.subTest(name=name):
+                self.assertIn('data-host-popup="%s"' % name, chrome)
+        self.assertIn("平台侧 · 卡片改不动", chrome)
+        self.assertIn("对它无效", chrome)
+        # 占位壳用硬编码灰底斜纹，不吃白名单令牌（吃了就等于宣称能改）
+        css = bp._sandbox_chrome_css()
+        sheet = css.split(".pano-host-popup .pano-host-sheet{", 1)[1].split("}", 1)[0]
+        self.assertIn("background:#17181a", sheet)
+        self.assertNotIn("--chat-modal", sheet)
+        # 实测 z-index 差异：总结剧情 1000000000，分享 9000（旧聊天页是 10075）
+        self.assertIn('.pano-host-popup[data-host-popup="summary"]{z-index:1000000000}', css)
+        self.assertIn("z-index <b>9000</b>", chrome)
 
     STATUSBAR_NODE = "&lt;div data-slot=&quot;statusbar&quot;"
 
