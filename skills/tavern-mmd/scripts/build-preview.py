@@ -1025,11 +1025,17 @@ uni-view,uni-scroll-view,uni-image,uni-text{display:block}
 .chat .chat-scope-box .scroll-view .chat-body .avatar-body .touch-scope{width:100%%;max-width:100%%}
 .chat .chat-scope-box .scroll-view .chat-body .avatar-body .touch-scope .left{border-radius:0.5rem!important}
 .chat .chat-scope-box .scroll-view .chat-body .select-box{margin-right:0.625rem}
-/* 重开/编辑小圆钮：z-index 只有 2，组件层级要压过它 */
+/* 消息操作小圆钮（实测 2026-08-29）：z-index 只有 2，组件层级要压过它。
+   AI 消息 3 钮（刷新/编辑/分享）靠气泡左下；用户消息 2 钮（编辑/分享）靠右下。
+   真机 .modify-btn 24px、rgba(0,0,0,.5)、圆形、gap 8px；scope position:absolute。
+   第一句话(first_mes)的 scope 存在但按钮 0×0 隐藏 —— 预览首条描述气泡不放 scope 复刻此态。*/
 .modify-btn-scope{position:absolute;left:0;z-index:2;margin-top:0.5rem;display:flex}
 .modify-btn-scope .modify-btn{width:1.5rem;height:1.5rem;display:flex;align-items:center;
   justify-content:center;background:rgba(0,0,0,.5);border-radius:50%%;margin-right:0.5rem;
   font-size:0.75rem;color:#fff}
+.modify-btn-scope .modify-btn svg{width:0.875rem;height:0.875rem;display:block}
+/* 用户消息（.self）圆钮靠右：真机 justify-end、x≈右侧（实测 x=1039 对 1191 宽气泡）*/
+.item.self .modify-btn-scope{left:auto;right:0;justify-content:flex-end}
 
 /* 开场白选择块 */
 .prologue-scope{padding:0 0.96156rem}
@@ -1163,9 +1169,29 @@ uni-view,uni-scroll-view,uni-image,uni-text{display:block}
   padding:0;border-radius:50%%;background:var(--input-background-color,#33353B);
   color:var(--primary-font-color,#FFFFFF);font-size:0.8125rem;cursor:pointer}
 
-/* 长按菜单遮罩：真机 z-index 99999，组件想盖在它上面基本不可能 —— 预览留着做层级参照 */
+/* 长按菜单遮罩：真机 z-index 99999，组件想盖在它上面基本不可能 —— 预览留着做层级参照。
+   实测(2026-08-29)：默认 display:none，长按弹出 → data-open=on。内含 .msg-content-box
+   (被长按消息正文预览) + .msg-options-box(选项列表)。选项按消息类型算：AI/用户常规消息
+   复制/删除/回溯/开启新的故事；first_mes 仅复制(其余项 display:none)。*/
 .msg-option-scope{height:100%%;width:100%%;position:fixed;top:0;left:0;
   background-color:rgba(0,0,0,.7);z-index:99999;backdrop-filter:blur(5px);display:none}
+.msg-option-scope[data-open="on"]{display:block}
+.msg-option-scope .msg-content-box{overflow:auto;margin:5rem 1rem 0;min-height:1rem;max-height:50%%;
+  background:var(--modify-input-bg-color,#1E1F24);box-shadow:0 0 0.25rem rgba(0,0,0,.06);
+  border-radius:1.25rem;padding:1rem;color:var(--primary-font-color,#FFFFFF);white-space:pre-line}
+.msg-option-scope .msg-options-box{margin-left:1rem;padding:0.625rem 1rem;margin-top:0.9375rem;
+  width:9.0625rem;background:var(--modify-input-bg-color,#1E1F24);
+  box-shadow:0 0 0.25rem rgba(0,0,0,.06);border-radius:1.25rem}
+.msg-option-scope .msg-options-box .option-item{display:flex;align-items:center;
+  justify-content:space-between;height:2.5rem;cursor:pointer}
+.msg-option-scope .msg-options-box .option-item uni-text,
+.msg-option-scope .msg-options-box .option-item span{font-weight:500;font-size:0.8125rem;
+  color:var(--primary-font-color,#FFFFFF);line-height:1.6875rem}
+.msg-option-scope .msg-options-box .option-item .opt-icon{width:1.125rem;height:1.125rem;
+  display:flex;align-items:center;justify-content:center;color:var(--primary-font-color,#FFFFFF);
+  opacity:.85;font-size:0.9375rem}
+.msg-option-scope .msg-options-box .option-separator{width:100%%;height:0;
+  border-top:.03125rem solid var(--msg-option-separator-color,#333333)}
 
 /* ── 弹窗体系（实测复刻，全局美化会打到这些面板）───────────────────────────
    通用三层：.u-popup(height:0!) > .u-transition.u-fade-*(遮罩) / .u-slide-up-*(内容)
@@ -2050,6 +2076,45 @@ MMD_PANEL_SCAFFOLD = (
     "if(ai){ai.onclick=function(ev){ev.stopPropagation();open('alert');};}"
     "var bk=D.querySelector('.back-btn');"
     "if(bk){bk.onclick=function(ev){ev.stopPropagation();toggleInstr();};}"
+    # ── 开场白点击填入 + 长按菜单 + 状态流转（复刻 2026-08-29 实测）──
+    # 实测：点 .prologue-content → 开场白正文进输入框；发送一条 → 开场白消失；
+    #       长按消息 → .msg-option-scope 弹出(data-open=on)；回溯 → 开场白重现。
+    "var prologue=D.querySelector('.prologue-scope');"
+    "var pc=D.querySelector('.prologue-content');"
+    "if(pc){pc.style.cursor='pointer';pc.onclick=function(ev){ev.stopPropagation();"
+    "var el=D.querySelector('.uni-textarea-textarea');"
+    "if(el){el.value=(pc.textContent||'').replace(/^\\s+|\\s+$/g,'');"
+    "el.dispatchEvent(new Event('input',{bubbles:true}));}};}"
+    "var hidePrologue=function(){if(prologue){prologue.style.display='none';}};"
+    "var showPrologue=function(){if(prologue){prologue.style.display='';}};"
+    # 长按菜单：first_mes(kind=first) 仅复制，隐藏 data-only-full 项；常规消息 4 项全显
+    "var menu=D.querySelector('.msg-option-scope');"
+    "var openMenu=function(kind,text){if(!menu)return false;"
+    "var tb=menu.querySelector('.msg-content-text');if(tb){tb.textContent=text||'';}"
+    "var full=(kind!=='first');"
+    "var onlys=menu.querySelectorAll('[data-only-full]');"
+    "for(var i=0;i<onlys.length;i++){onlys[i].style.display=full?'':'none';}"
+    "menu.setAttribute('data-open','on');return true;};"
+    "var closeMenu=function(){if(menu){menu.setAttribute('data-open','off');}};"
+    "if(menu){menu.onclick=function(ev){if(ev.target===menu){closeMenu();}};}"
+    # 绑长按到每条消息：描述气泡(avatar-body)=first_mes 仅复制 / .self=用户 / 其余=AI
+    "var bindLong=function(it,kind){var tsc=it.querySelector('.touch-scope')||it;"
+    "var timer=null;var ct=it.querySelector('.content');"
+    "var txt=ct?(ct.textContent||''):'';"
+    "var start=function(){timer=setTimeout(function(){openMenu(kind,txt);},500);};"
+    "var cancel=function(){if(timer){clearTimeout(timer);timer=null;}};"
+    "tsc.addEventListener('mousedown',start);tsc.addEventListener('touchstart',start);"
+    "tsc.addEventListener('mouseup',cancel);tsc.addEventListener('mouseleave',cancel);"
+    "tsc.addEventListener('touchend',cancel);};"
+    "var mitems=D.querySelectorAll('.chat-body .item');"
+    "for(var mi=0;mi<mitems.length;mi++){(function(it){"
+    "var kind=it.className.indexOf('avatar-body')>=0?'first':"
+    "(it.className.indexOf('self')>=0?'self':'ai');bindLong(it,kind);})(mitems[mi]);}"
+    # 回溯项 → 恢复开场白；发送钮 → 隐藏开场白（复刻状态流转，供作者验证美化两态）
+    "var backOpt=menu?menu.querySelector('[data-opt=back]'):null;"
+    "if(backOpt){backOpt.onclick=function(ev){ev.stopPropagation();showPrologue();closeMenu();};}"
+    "var sends=D.querySelectorAll('.pano-send,.pano-send-expanded');"
+    "for(var si=0;si<sends.length;si++){sends[si].addEventListener('click',hidePrologue);}"
     # ── 输入框折叠/展开 + 双 textarea 同步（复刻 2026-08-29 实测行为）──
     # 真机是 Vue model 单一真值源：写任一 textarea + 派发 input，另一个同 tick 跟上。
     # 预览用同名 class 的两个节点 + 手动镜像来复现，好让作者验证回填选择器与美化两态。
@@ -2117,6 +2182,8 @@ MMD_PANEL_SCAFFOLD = (
     "el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));return el.value;}};"
     "window.__panoPanels={open:open,closeAll:closeAll,"
     "toggleMore:toggleMore,toggleInstruction:toggleInstr,"
+    "openMenu:openMenu,closeMenu:closeMenu,"
+    "hidePrologue:hidePrologue,showPrologue:showPrologue,"
     "list:function(){var o=[],l=D.querySelectorAll('[data-sheet]');"
     "for(var i=0;i<l.length;i++){o.push(l[i].getAttribute('data-sheet'));}return o;},"
     "opened:function(){var l=D.querySelectorAll('[data-sheet][data-open=on]');"
@@ -2154,8 +2221,20 @@ def _mmd_panel_tools_html():
         '<button class="preview-tool" type="button" title="「选择指令」原地替换快捷条'
         '（不是弹窗）" onclick="%s.__panoPanels.toggleInstruction()">指令栏切换</button>' % win)
     parts.append(
+        '<button class="preview-tool" type="button" title="长按 AI/用户消息弹出的菜单'
+        '（复制/删除/回溯/开启新的故事；first_mes 仅复制）。也可直接长按消息触发" '
+        'onclick="%s.__panoPanels.openMenu(\'ai\',\'长按菜单预览（AI 消息四项）\')">长按菜单</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="模拟发送：隐藏开场白选择块'
+        '（真机发一条后开场白消失）" '
+        'onclick="%s.__panoPanels.hidePrologue()">发送→隐开场白</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="模拟回溯：开场白重现'
+        '（真机回溯消息后开场白回来）" '
+        'onclick="%s.__panoPanels.showPrologue()">回溯→显开场白</button>' % win)
+    parts.append(
         '<button class="preview-tool" type="button" title="关闭所有弹窗" '
-        'onclick="%s.__panoPanels.closeAll()">全部关闭</button>' % win)
+        'onclick="%s.__panoPanels.closeAll();%s.__panoPanels.closeMenu()">全部关闭</button>' % (win, win))
     return "".join(parts)
 
 
@@ -2203,20 +2282,41 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
         '<uni-view class="touch-scope">'
         '<uni-view class="content left">角色描述气泡（通栏形态：touch-scope 满宽、圆角对称 0.5rem）</uni-view>'
         '</uni-view></uni-view></uni-view>'
-        # 用户消息（.self 右对齐 + .content.right）
+        # 用户消息（.self 右对齐 + .content.right）。实测 2 圆钮（编辑/分享）靠气泡右下，
+        # 无"刷新"钮（用户消息不能重新生成）。图标与 AI 的后两钮同款。
         '<uni-view><uni-view class="item Ai self"%(frame)s>'
         '<uni-view class="touch-scope"%(msg_user)s>'
         '<uni-view class="content right"%(body)s>用户示例消息</uni-view>'
+        '<uni-view class="modify-btn-scope">'
+        '<uni-view class="modify-btn" title="编辑">&#9998;</uni-view>'
+        '<uni-view class="modify-btn" title="分享">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle>'
+        '<circle cx="18" cy="19" r="3"></circle>'
+        '<line x1="8.6" y1="13.5" x2="15.4" y2="17.5"></line>'
+        '<line x1="15.4" y1="6.5" x2="8.6" y2="10.5"></line></svg>'
+        '</uni-view>'
+        '</uni-view>'
         '</uni-view></uni-view></uni-view>'
         # 被测内容：普通 AI 气泡（真机状态栏/组件的落点）
         '<uni-view><uni-view class="item Ai"%(frame)s>'
         '<uni-view class="select-box" style="display:none"></uni-view>'
         '<uni-view class="touch-scope" id="item0"%(msg_ai)s>'
         '<uni-view class="content left" id="q-1"%(body)s>%(tested)s</uni-view>'
+        # AI 消息 3 圆钮（实测 2026-08-29）：刷新(重新生成) / 编辑 / 分享。
+        # 第三钮真机是分享图标（旧预览误画成实心圆 ●）。
         '<uni-view class="modify-btn-scope">'
-        '<uni-view class="modify-btn">&#8635;</uni-view>'
-        '<uni-view class="modify-btn">&#9998;</uni-view>'
-        '<uni-view class="modify-btn">&#9679;</uni-view>'
+        '<uni-view class="modify-btn" title="刷新（重新生成）">&#8635;</uni-view>'
+        '<uni-view class="modify-btn" title="编辑">&#9998;</uni-view>'
+        '<uni-view class="modify-btn" title="分享">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle>'
+        '<circle cx="18" cy="19" r="3"></circle>'
+        '<line x1="8.6" y1="13.5" x2="15.4" y2="17.5"></line>'
+        '<line x1="15.4" y1="6.5" x2="8.6" y2="10.5"></line></svg>'
+        '</uni-view>'
         '</uni-view>%(message_extra)s%(message_actions)s'
         '</uni-view></uni-view></uni-view>'
         # 开场白选择块
@@ -2281,8 +2381,24 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
         '<uni-view class="item-title">游玩教程</uni-view></uni-view>'
         '</uni-view>'
         '</uni-view></uni-view>'
-        # 长按菜单遮罩（层级参照，默认 display:none）
-        '<uni-view class="msg-option-scope"></uni-view>'
+        # 长按菜单（实测 2026-08-29）：默认 display:none，长按消息 → data-open=on 弹出。
+        # 内容框显示被长按消息正文；选项框 4 项。first_mes 长按仅"复制"（其余项 data-only-full
+        # 由 runtime 按消息类型隐藏），常规 AI/用户消息 4 项全显。
+        '<uni-view class="msg-option-scope" data-open="off">'
+        '<uni-view class="msg-content-box"><uni-view class="msg-content-text"></uni-view></uni-view>'
+        '<uni-view class="msg-options-box">'
+        '<uni-view class="option-item" data-opt="copy">'
+        '<uni-text><span>复制</span></uni-text><uni-view class="opt-icon">&#10697;</uni-view></uni-view>'
+        '<uni-view class="option-separator" data-only-full="1"></uni-view>'
+        '<uni-view class="option-item" data-opt="delete" data-only-full="1">'
+        '<uni-text><span>删除</span></uni-text><uni-view class="opt-icon">&#10005;</uni-view></uni-view>'
+        '<uni-view class="option-separator" data-only-full="1"></uni-view>'
+        '<uni-view class="option-item" data-opt="back" data-only-full="1">'
+        '<uni-text><span>回溯</span></uni-text><uni-view class="opt-icon">&#8617;</uni-view></uni-view>'
+        '<uni-view class="option-separator" data-only-full="1"></uni-view>'
+        '<uni-view class="option-item" data-opt="newstory" data-only-full="1">'
+        '<uni-text><span>开启新的故事</span></uni-text><uni-view class="opt-icon">&#9282;</uni-view></uni-view>'
+        '</uni-view></uni-view>'
         # 弹窗体系仿真（默认全关，真机也是关的）
         '%(popupsim)s'
         '</uni-view>'

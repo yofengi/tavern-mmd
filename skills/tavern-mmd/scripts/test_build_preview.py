@@ -620,7 +620,63 @@ class TestPanorama(unittest.TestCase):
         # 纸飞机 SVG（Feather send）出现在两态发送钮
         mmd = self._panorama_unescaped(self.FOUR)
         self.assertIn('<polygon points="22 2 15 22 11 13 2 9 22 2">', mmd)
-        self.assertEqual(mmd.count('viewBox="0 0 24 24"'), 2)  # 折叠+展开各一个
+        # 纸飞机 polygon 是发送钮独有（分享钮用 circle），恰好 2 个：折叠态 + 展开态。
+        # 不数通用 viewBox —— 分享钮 SVG 也用同一 viewBox，会误计。
+        self.assertEqual(mmd.count('<polygon points="22 2 15 22 11 13 2 9 22 2">'), 2)
+
+    def test_mmd_message_action_buttons_ai_three_user_two(self):
+        """🚨 实测 2026-08-29：AI 消息 3 圆钮（刷新/编辑/分享），用户消息 2 圆钮（编辑/分享，无刷新）。
+        分享钮真机是分享图标（旧预览第三钮误画成实心圆 ●）。用户圆钮靠气泡右下。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        # AI 消息三钮 title
+        self.assertIn('title="刷新（重新生成）"', mmd)
+        self.assertIn('title="编辑"', mmd)
+        self.assertIn('title="分享"', mmd)
+        # 分享钮用三圆点连线 SVG（不是实心圆 ●）；AI+用户各一 = 2 个
+        self.assertEqual(mmd.count('<circle cx="18" cy="5" r="3">'), 2)
+        self.assertNotIn('<uni-view class="modify-btn">&#9679;</uni-view>', mmd)  # 旧实心圆已删
+        # 用户消息（.self）有 modify-btn-scope（编辑+分享）
+        self.assertIn('class="item Ai self"', mmd)
+        css = bp._mmd_panorama_css()
+        # 用户圆钮靠右
+        self.assertIn(".item.self .modify-btn-scope{left:auto;right:0;justify-content:flex-end}", css)
+
+    def test_mmd_longpress_menu_four_options_with_beautify_vars(self):
+        """🚨 实测 2026-08-29：长按菜单 4 项（复制/删除/回溯/开启新的故事）。
+        first_mes 仅复制（其余 data-only-full 项 runtime 隐藏）。菜单吃美化变量：
+        内容框/选项框 --modify-input-bg-color、选项字 --primary-font-color、分隔线 --msg-option-separator-color。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        for label in ("复制", "删除", "回溯", "开启新的故事"):
+            self.assertIn("<span>%s</span>" % label, mmd)
+        # 三个 data-only-full 选项项（删除/回溯/开启新的故事）+ 3 分隔线 = first_mes 时隐藏
+        self.assertEqual(mmd.count('data-only-full="1"'), 6)
+        self.assertIn('data-opt="copy"', mmd)
+        self.assertIn('data-open="off"', mmd)  # 菜单默认关
+        css = bp._mmd_panorama_css()
+        self.assertIn(".msg-option-scope[data-open=\"on\"]{display:block}", css)
+        self.assertIn("background:var(--modify-input-bg-color,#1E1F24)", css)
+        self.assertIn("border-top:.03125rem solid var(--msg-option-separator-color,#333333)", css)
+
+    def test_mmd_prologue_click_fills_input_and_state_flow(self):
+        """🚨 实测 2026-08-29：点开场白 .prologue-content → 正文进输入框；
+        发送一条 → 开场白消失；回溯 → 开场白重现。runtime 暴露 hide/showPrologue + openMenu。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        # 开场白点击填入输入框的逻辑
+        self.assertIn("pc.onclick=function", mmd)
+        self.assertIn("el.value=(pc.textContent", mmd)
+        # 状态流转函数 + 暴露
+        self.assertIn("var hidePrologue=function()", mmd)
+        self.assertIn("var showPrologue=function()", mmd)
+        self.assertIn("hidePrologue:hidePrologue,showPrologue:showPrologue", mmd)
+        # 长按绑定 + 按消息类型分 kind（first/self/ai）
+        self.assertIn("var bindLong=function", mmd)
+        self.assertIn("?'first':", mmd)
+        # 发送钮点击隐藏开场白
+        self.assertIn("sends[si].addEventListener('click',hidePrologue)", mmd)
+        # 开场白内容吃美化变量（回归保护）
+        css = bp._mmd_panorama_css()
+        self.assertIn(".prologue-scope .prologue-content{", css)
+        self.assertIn("color:var(--chat-content-font-color,#FFFFFF)", css)
 
     def test_mmd_textarea_padding_lives_on_shell_not_inner(self):
         """🚨 真机上下 padding 一律挂在 `uni-textarea` **壳**上，内层 `textarea` 恒零上下

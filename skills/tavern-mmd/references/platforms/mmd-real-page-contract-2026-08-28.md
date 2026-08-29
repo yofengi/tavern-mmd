@@ -385,6 +385,26 @@ var btn = [].slice.call(scope.querySelectorAll('.btn-icon:not(.chat-send-proxy)'
 - **底栏 `.more-scope`**：点 `+` 才出现（**v-if 节点，关态 DOM 不存在**，不是 `display:none`——拿 `querySelector('.more-scope')` 判开合会得反结论，判开合看 `+` 图标态）。它在 `.chat-bottom-wapper` 里排在 `.send-msg`**之后** → 满宽面板在输入行**下方**撑开、把输入行**顶上去**（输入框 y 660→343，面板自身 317px）。`+` 跟输入行一起上移，仍在右侧。
 - 4 列 `.item`×11：`.item-icon` 高 64.5px、圆角 20px、**底色 `var(--more-item-bg-color,#2C2E32)`**；`.item-title` 13px、**字色 `var(--primary-font-color,#FFFFFF)`**、mt7。**这两个变量吃全局美化**（实测改 `--more-item-bg-color`/`--primary-font-color`，底栏格子底色与标题字色同步变）——底栏是白名单浮层，属官方手册「底栏和白名单弹窗」变量的作用域。
 
+## 5e. 开场白选择区 + 消息圆钮 + 长按菜单（2026-08-29 实测，发消息真机验证）
+
+### 开场白选择区 `.prologue-scope`
+- 位置：在 `#msglistview` 消息列表里，排在 AI 第一条消息（first_mes）**之后**，不是独立浮层。结构 `.prologue-title>span`（"你可以选择开场"，**固定黑底白字** `rgba(0,0,0,.5)`）+ `.prologue-content`（开场白正文选项）。
+- **吃全局美化**（用户强调的核心）：`.prologue-content` 底色 `var(--background-color,#17181A)` + 字色 `var(--chat-content-font-color,#FFFFFF)`，`opacity:.9`。实测改这两个变量 → 开场白选项底色/字色同步变（做美化必须覆盖到这里）。
+- **点击填入输入框**：点 `.prologue-content` → 该开场白正文写进输入框（`.uni-textarea-textarea` + 派 input）。
+- **状态流转**：发送一条消息后开场白**消失**；**回溯**消息后开场白**重现**（实测发消息 `prologueAfter:false` 确认消失）。
+
+### 消息操作圆钮 `.modify-btn-scope`
+- `position:absolute`、`z-index:2`、`margin-top:8px`；内含 `.modify-btn`（24×24、`rgba(0,0,0,.5)`、`border-radius:50%`、gap 8px、图标 inline base64 PNG）。
+- **AI 消息 3 钮**：刷新(重新生成) + 编辑 + 分享，靠气泡**左下**（scope `margin-right:3.125rem`）。
+- **用户消息 2 钮**：编辑 + 分享（**无刷新**，用户消息不能重生成），靠气泡**右下**（`justify-content:flex-end`）。编辑/分享图标与 AI 后两钮**同款**。
+- **first_mes（角色卡第一句话）**：`.modify-btn-scope` 存在但 3 个 `.modify-btn` 全 `visible:false`、0×0 → **无可见圆钮**（这是"第一句话没有三个圆钮"的真相：不是没 scope，是按钮塌陷隐藏）。
+
+### 长按菜单 `.msg-option-scope`
+- **全局单例**（不是 per-message），`fixed`、`z-index:99999`、`bg rgba(0,0,0,.7)`、`backdrop-filter:blur`、默认 `display:none`，长按消息 → 弹出。内含 `.msg-content-box`（被长按消息正文预览，底色 `var(--modify-input-bg-color,#1E1F24)`）+ `.msg-options-box`（选项列表，同底色）。
+- **选项按消息类型算**：常规 AI/用户消息 **4 项**——复制(仅复制文本) / 删除(从上下文删) / 回溯(删这条及下方所有,含AI和用户) / 开启新的故事(保留这条及上文,进新聊天)，图标 `ico_copy/delete/return/fenzhi_dark.png`。**first_mes（第一句话）仅"复制"**（其余项隐藏）。
+- **吃全局美化**：选项文字 `var(--primary-font-color,#FFFFFF)`、分隔线 `var(--msg-option-separator-color,#333333)`、框底 `--modify-input-bg-color`。
+- ⚠️ 合成 touch 事件**触发不了** Vue 的长按计时器（菜单能靠 handler 开但按类型过滤逻辑不跑，落到默认"仅复制"态）——真机勘查用真实长按(touchstart 保持不放)验证菜单确实 `display:block`。
+
 ## 6. 全景预览升级要点（据以上契约）
 
 必须复现的：
