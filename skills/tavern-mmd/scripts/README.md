@@ -52,9 +52,10 @@ python validate.py <文件> [--type regex|card|worldbook] [--platform oldmmd|mmd
 
 审核项：
 - 通用：JSON合法性、UTF-8 BOM、replaceString/HTML内双重转义反斜杠
-- 正则/状态栏：四字段结构、字符数(find≤1000/replace≤20000)、条数≤130、stopPropagation、平台红线、**悬空标记**（statusbar/beginning 里的 `<标记>` 无对应 findRegex → ERROR）
+- 正则/状态栏：MMD 顶层 keys 必须恰好为 `pageDepth/statusbar/beginning/regex_scripts`；每条 keys 必须恰好为 `id/scriptName/findRegex/replaceString`，且 `id=-1`、字段类型严格；字符数(find≤1000/replace≤20000)、条数≤130、stopPropagation、平台红线、**悬空标记**（statusbar/beginning 里的 `<标记>` 无对应 findRegex → ERROR）
+- JS RegExp：优先调用可用的 Node.js `new RegExp(pattern, flags)` 做真实语法门禁，`SyntaxError` → ERROR；Node 不可用时执行保守结构 fallback，并明确 WARN 未经 JS oracle。合法但 Python preview 后端不支持的 JS 正则只 WARN 并跳过模拟
 - 平台红线(oldmmd)：`<script>`→错误、ES6→错误、innerHTML/cssText→错误、内联事件裸换行→错误
-- 平台红线(mmd)：script/ES6 已实测支持→放行；onerror 多行放行；onclick 代码字面量/直接赋值告警；innerHTML/cssText 仍按需提示
+- 平台红线(mmd)：script/ES6 已实测支持→放行；onerror 多行放行；inline onclick 仅允许干净调用、固定 id 的 `eval(getElementById('FUNC').dataset.s)` 与同名 `window.__fn&&__fn()` guard-call，其他代码字面量/赋值/嵌套/sequence → ERROR；innerHTML/cssText 仍按需提示
 - 角色卡：spec/同步；MMD平台强制 v2（spec=chara_card_v2、无 group_only_greetings）
 - 世界书：entries字段、蓝绿灯配置、条目标题 `comment` ≤20字（mmd/oldmmd 报错，st 不查）——`--platform` 省略时默认 oldmmd，审本地酒馆世界书务必显式传 `--platform st`，否则标题会被误报超限
 
@@ -87,7 +88,7 @@ python build-preview.py <文件> --platform oldmmd|mmd|st [--mode panels|panoram
 - `oldmmd`：`<script>`剥离并裸露源码（红框）；onerror/onclick 内 ES6 标黄提示真实旧版会截断；onerror 点火器正常执行
 - `mmd`：script/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行
 
-输出是自包含 HTML 文件，默认落在 `工作/` 下。不能调 Preview 工具的 agent：提示用户用浏览器打开。
+输出是自包含 HTML 文件。默认路径规则：输入文件直属项目 `output/` 时输出到 sibling `工作/`；其他位置输出到输入文件同目录。结构、findRegex、最终 inline onclick 和悬空标记的致命审计全部在写文件前完成，失败不遗留 preview/panorama 文件。不能调 Preview 工具的 agent：提示用户用浏览器打开。
 
 ## make_card_image.py — 角色卡图片导出
 

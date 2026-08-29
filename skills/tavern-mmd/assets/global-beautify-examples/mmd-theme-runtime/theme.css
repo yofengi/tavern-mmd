@@ -1,0 +1,494 @@
+html[data-zmr-mode="day"] {
+  --zmr-page-bg: #f7f0e3;
+  --zmr-surface: #fffaf2;
+  --zmr-surface-2: #f0e4d2;
+  --zmr-input-bg: #fffdf8;
+  --zmr-text: #3b2425;
+  --zmr-text-muted: #6d5555;
+  --zmr-accent: #7b1e2b;
+  --zmr-accent-contrast: #ffffff;
+  --zmr-border: #9b766c;
+  --zmr-focus: #075fb2;
+  --zmr-highlight: #7b1e2b;
+  --zmr-user-bubble: #7b1e2b;
+  --zmr-user-text: #ffffff;
+  --zmr-code-bg: #eee2d1;
+  --zmr-shadow: rgba(59, 36, 37, 0.18);
+  --zmr-reading-text: #3b2425;
+  --zmr-reading-accent: #7b1e2b;
+  --zmr-ai-bubble-rgb: 255 250 242;
+  --zmr-ai-bubble-opacity: 0.96;
+  color-scheme: light;
+}
+
+html[data-zmr-mode="night"] {
+  --zmr-page-bg: #17181b;
+  --zmr-surface: #24262b;
+  --zmr-surface-2: #2d3036;
+  --zmr-input-bg: #202227;
+  --zmr-text: #f3ece2;
+  --zmr-text-muted: #c5b9ad;
+  --zmr-accent: #d58a96;
+  --zmr-accent-contrast: #24161a;
+  --zmr-border: #80736c;
+  --zmr-focus: #ffd166;
+  --zmr-highlight: #efabb5;
+  --zmr-user-bubble: #7d2d3a;
+  --zmr-user-text: #ffffff;
+  --zmr-code-bg: #111216;
+  --zmr-shadow: rgba(0, 0, 0, 0.42);
+  --zmr-reading-text: #f3ece2;
+  --zmr-reading-accent: #efabb5;
+  --zmr-ai-bubble-rgb: 36 38 43;
+  --zmr-ai-bubble-opacity: 0.96;
+  color-scheme: dark;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]),
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) body,
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.page, .chat, .chat-bg, .chat-scope-box, .scroll-view) {
+  background-color: var(--zmr-page-bg) !important;
+  color: var(--zmr-text) !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.topTabbar, .header-scope, .chat-bottom-wapper, .chat-bottom, .shortcut-bar-wrapper, .more-options-scope, .msg-option-scope, .u-popup__content, .u-safe-bottom, .u-picker, .model-setting-scope, .role-setting, .custom-instruction-scope, .history-setting-scope, .share-chat-page, .share-chat-scope, .share-chat-wrapper, .share-chat-topbar, .modify-scope, .confirm-scope, .prologue-scope) {
+  background-color: var(--zmr-page-bg) !important;
+  color: var(--zmr-text) !important;
+  border-color: var(--zmr-border) !important;
+  text-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.chat-input-scope, .textarea-wrapper, .input-wrapper, .custom-textarea-box, .input-scope, .depth-input, .uni-input-wrapper, .uni-textarea-wrapper, .modify-input-box) {
+  background-color: var(--zmr-input-bg) !important;
+  color: var(--zmr-text) !important;
+  border: 1px solid var(--zmr-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(input, textarea, .uni-input-input, .uni-textarea-textarea, .chatMsgTextarea, .chat-input-collapsed-text):not([data-zmr-owned], [data-zmr-owned] *) {
+  background-color: transparent !important;
+  color: var(--zmr-text) !important;
+  -webkit-text-fill-color: var(--zmr-text) !important;
+  caret-color: var(--zmr-reading-accent) !important;
+  border-color: var(--zmr-border) !important;
+  opacity: 1 !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(input, textarea, .uni-input-input, .uni-textarea-textarea):not([data-zmr-owned], [data-zmr-owned] *)::placeholder,
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.uni-input-placeholder, .uni-textarea-placeholder, .input-placeholder, .char-count, .count-text, .limit):not([data-zmr-owned], [data-zmr-owned] *) {
+  color: var(--zmr-text-muted) !important;
+  -webkit-text-fill-color: var(--zmr-text-muted) !important;
+  opacity: 1 !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) .chat-body .content.left {
+  background-color: rgb(var(--zmr-ai-bubble-rgb) / var(--zmr-ai-bubble-opacity)) !important;
+  color: var(--zmr-reading-text) !important;
+  border: 1px solid var(--zmr-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px var(--zmr-shadow) !important;
+  font-size: var(--zmr-reading-font-size, 16px) !important;
+  line-height: var(--zmr-reading-line-height, 1.65) !important;
+  opacity: 1 !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) .content.left :is(.msg-content, .msg-text, p, li, blockquote, span, font, strong, em, h1, h2, h3, h4, h5, h6):not([data-zmr-owned], [data-zmr-owned] *, [data-sid], [data-sid] *, [data-g3v], [data-g3v] *, .g3-host, .g3-host *, .z-status-box, .z-status-box *, [data-statusbar], [data-statusbar] *, [data-status-bar], [data-status-bar] *, [data-zsf-ball], [data-zsf-ball] *, [data-zsf-drawer], [data-zsf-drawer] *) {
+  color: inherit !important;
+  -webkit-text-fill-color: inherit !important;
+  line-height: inherit !important;
+  text-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) .content.left :is(a, .zmr-hdm):not([data-zmr-owned], [data-zmr-owned] *, [data-sid], [data-sid] *, [data-g3v], [data-g3v] *, .g3-host, .g3-host *, .z-status-box, .z-status-box *, [data-statusbar], [data-statusbar] *, [data-status-bar], [data-status-bar] *, [data-zsf-ball], [data-zsf-ball] *, [data-zsf-drawer], [data-zsf-drawer] *) {
+  color: var(--zmr-reading-accent) !important;
+  -webkit-text-fill-color: var(--zmr-reading-accent) !important;
+  text-decoration-color: currentColor !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) .content.left :is(pre, code, kbd, samp):not([data-zmr-owned], [data-zmr-owned] *, [data-sid], [data-sid] *, [data-g3v], [data-g3v] *, .g3-host, .g3-host *, .z-status-box, .z-status-box *, [data-statusbar], [data-statusbar] *, [data-status-bar], [data-status-bar] *, [data-zsf-ball], [data-zsf-ball] *, [data-zsf-drawer], [data-zsf-drawer] *) {
+  background-color: var(--zmr-code-bg) !important;
+  color: var(--zmr-reading-text) !important;
+  border-color: var(--zmr-border) !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) .chat-body .content.right {
+  background-color: var(--zmr-user-bubble) !important;
+  color: var(--zmr-user-text) !important;
+  border: 1px solid var(--zmr-user-bubble) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px var(--zmr-shadow) !important;
+  opacity: 1 !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) .content.right :is(.msg-content, .msg-text, p, span, font, strong, em, a) {
+  color: var(--zmr-user-text) !important;
+  -webkit-text-fill-color: var(--zmr-user-text) !important;
+  text-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.prologue-content, .msg-content-box, .msg-options-box, .model-item, .conversation-item, .history-item, .modify-item, .option-item, .instruction-chip, .shortcut-btn, .chat-input-tool-btn, .gender-item, .cs-style-item, .mp-preset-item, .mp-preset-card) {
+  color: var(--zmr-text) !important;
+  border-color: var(--zmr-border) !important;
+  text-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.model-item, .conversation-item, .history-item, .modify-item, .instruction-chip, .shortcut-btn, .chat-input-tool-btn, .gender-item, .cs-style-item, .mp-preset-item, .mp-preset-card) {
+  background-color: var(--zmr-surface) !important;
+  border: 1px solid var(--zmr-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 7px var(--zmr-shadow) !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.header-roleName, .page-title, .card-title, .model-title, .prologue-title, .confirm-title, .cs-header-title, .confirm-edit-title) {
+  color: var(--zmr-reading-accent) !important;
+  -webkit-text-fill-color: var(--zmr-reading-accent) !important;
+  text-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.model-intro, .sub-title, .des-scope, .tips, .card-desc, .remark, .depth-desc) {
+  color: var(--zmr-text-muted) !important;
+  -webkit-text-fill-color: var(--zmr-text-muted) !important;
+  text-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.send-msg, .ok-btn, .save-btn, .modify-btn, .gen-link-btn, .token.selected, .token-scope .selected, .model-filter-tab.active, .gender-item.active, .cs-style-item.active, .u-switch--on) {
+  background-color: var(--zmr-accent) !important;
+  color: var(--zmr-accent-contrast) !important;
+  -webkit-text-fill-color: var(--zmr-accent-contrast) !important;
+  border-color: var(--zmr-accent) !important;
+  text-shadow: none !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(.send-msg, .ok-btn, .save-btn, .modify-btn, .gen-link-btn, .token.selected, .token-scope .selected, .model-filter-tab.active, .gender-item.active, .cs-style-item.active) :is(span, uni-text) {
+  color: var(--zmr-accent-contrast) !important;
+  -webkit-text-fill-color: var(--zmr-accent-contrast) !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) :is(button, input, textarea, select, [tabindex]):not([data-zmr-owned], [data-zmr-owned] *):focus-visible {
+  outline: 3px solid var(--zmr-focus) !important;
+  outline-offset: 2px !important;
+}
+
+:is(html[data-zmr-mode="day"], html[data-zmr-mode="night"]) ::selection {
+  background-color: var(--zmr-highlight) !important;
+  color: var(--zmr-accent-contrast) !important;
+}
+
+[data-zmr-owned="runtime-ui"] {
+  --zmr-ui-bg: #ffffff;
+  --zmr-ui-surface: #f2f4f7;
+  --zmr-ui-text: #20242a;
+  --zmr-ui-muted: #5d6672;
+  --zmr-ui-border: #66717f;
+  --zmr-ui-accent: #7b1e2b;
+  --zmr-ui-accent-text: #ffffff;
+  --zmr-ui-focus: #075fb2;
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+
+html[data-zmr-mode="day"] [data-zmr-owned="runtime-ui"],
+html[data-zmr-mode="night"] [data-zmr-owned="runtime-ui"] {
+  --zmr-ui-bg: var(--zmr-surface);
+  --zmr-ui-surface: var(--zmr-surface-2);
+  --zmr-ui-text: var(--zmr-text);
+  --zmr-ui-muted: var(--zmr-text-muted);
+  --zmr-ui-border: var(--zmr-border);
+  --zmr-ui-accent: var(--zmr-accent);
+  --zmr-ui-accent-text: var(--zmr-accent-contrast);
+  --zmr-ui-focus: var(--zmr-focus);
+}
+
+[data-zmr-owned="runtime-ui"],
+[data-zmr-owned="runtime-ui"] * {
+  box-sizing: border-box;
+  letter-spacing: 0;
+}
+
+.zmr-settings-toggle {
+  position: fixed;
+  z-index: 2147483000;
+  top: 50%;
+  right: max(0px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  border: 1px solid var(--zmr-ui-border);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  background: var(--zmr-ui-bg);
+  color: var(--zmr-ui-accent);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+  font: 700 15px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.zmr-settings-toggle:hover {
+  background: var(--zmr-ui-surface);
+}
+
+.zmr-settings-toggle:focus-visible,
+.zmr-settings-panel :is(button, input):focus-visible {
+  outline: 3px solid var(--zmr-ui-focus);
+  outline-offset: 2px;
+}
+
+.zmr-settings-panel {
+  position: fixed;
+  z-index: 2147483001;
+  top: 50%;
+  right: calc(12px + env(safe-area-inset-right));
+  width: min(360px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+  max-height: calc(100vh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow: auto;
+  transform: translateY(-50%);
+  padding: 16px;
+  border: 1px solid var(--zmr-ui-border);
+  border-radius: 8px;
+  background: var(--zmr-ui-bg);
+  color: var(--zmr-ui-text);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  font-size: 15px;
+  line-height: 1.45;
+  overscroll-behavior: contain;
+}
+
+.zmr-settings-panel[hidden] {
+  display: none !important;
+}
+
+.zmr-settings-header,
+.zmr-settings-actions,
+.zmr-settings-field {
+  display: flex;
+  align-items: center;
+}
+
+.zmr-settings-header {
+  min-height: 44px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.zmr-settings-heading {
+  margin: 0;
+  color: var(--zmr-ui-text);
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+.zmr-icon-button {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--zmr-ui-text);
+  font: 700 24px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.zmr-mode-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: 14px;
+  border: 1px solid var(--zmr-ui-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.zmr-mode-button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 6px;
+  border: 0;
+  border-right: 1px solid var(--zmr-ui-border);
+  border-radius: 0;
+  background: var(--zmr-ui-bg);
+  color: var(--zmr-ui-text);
+  font: 600 14px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.zmr-mode-button:last-child {
+  border-right: 0;
+}
+
+.zmr-mode-button[aria-pressed="true"] {
+  background: var(--zmr-ui-accent);
+  color: var(--zmr-ui-accent-text);
+}
+
+.zmr-tuning-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.zmr-settings-field {
+  min-height: 44px;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--zmr-ui-text);
+}
+
+.zmr-settings-field + .zmr-settings-field {
+  border-top: 1px solid var(--zmr-ui-surface);
+}
+
+.zmr-settings-field label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  font-weight: 600;
+}
+
+.zmr-settings-field input {
+  flex: 0 0 auto;
+  width: 112px;
+  min-height: 36px;
+  padding: 5px 8px;
+  border: 1px solid var(--zmr-ui-border);
+  border-radius: 6px;
+  background: var(--zmr-ui-bg);
+  color: var(--zmr-ui-text);
+  font: 400 16px/1.2 system-ui, sans-serif;
+}
+
+.zmr-settings-check-field input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0 6px;
+  padding: 0;
+  accent-color: var(--zmr-ui-accent);
+  cursor: pointer;
+}
+
+.zmr-settings-field input[type="color"] {
+  width: 56px;
+  padding: 3px;
+  cursor: pointer;
+}
+
+.zmr-settings-field input[type="range"] {
+  width: 132px;
+  padding: 0;
+  border: 0;
+  accent-color: var(--zmr-ui-accent);
+}
+
+.zmr-opacity-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zmr-opacity-output {
+  width: 42px;
+  color: var(--zmr-ui-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.zmr-tuning-group:disabled,
+.zmr-tuning-group[aria-disabled="true"] {
+  opacity: 0.55;
+}
+
+.zmr-tuning-group :disabled {
+  cursor: not-allowed;
+}
+
+.zmr-settings-actions {
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--zmr-ui-border);
+}
+
+.zmr-command-button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--zmr-ui-border);
+  border-radius: 6px;
+  background: var(--zmr-ui-bg);
+  color: var(--zmr-ui-text);
+  font: 600 14px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.zmr-command-button:hover:not(:disabled),
+.zmr-icon-button:hover {
+  background: var(--zmr-ui-surface);
+}
+
+.zmr-command-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .zmr-settings-toggle {
+    top: auto;
+    bottom: calc(92px + env(safe-area-inset-bottom));
+    transform: none;
+  }
+
+  .zmr-settings-panel {
+    top: auto;
+    right: calc(8px + env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    left: calc(8px + env(safe-area-inset-left));
+    width: auto;
+    max-height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    transform: none;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .zmr-settings-panel {
+    top: calc(6px + env(safe-area-inset-top));
+    bottom: calc(6px + env(safe-area-inset-bottom));
+    max-height: none;
+    transform: none;
+  }
+
+  .zmr-settings-header {
+    margin-bottom: 6px;
+  }
+
+  .zmr-settings-actions {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-zmr-owned="runtime-ui"],
+  [data-zmr-owned="runtime-ui"] * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

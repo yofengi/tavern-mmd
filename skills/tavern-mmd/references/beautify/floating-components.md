@@ -4,7 +4,13 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 
 本文档给出**两个平台都验证过**的认证写法，供后续直接调用/改配色。预览验证用 `scripts/build-preview.py`（悬浮组件会被自动归入"悬浮组件预览"面板，全景预览里与其他组件组合显示）。
 
-> 💡 **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（无空白条）；代价：多一层 `attachShadow` 包装。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住——这正是"开场白里球被消息盖住"的根因）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 双引号包裹、内部全单引号、**禁内部裸双引号**（裸 `<`/`>` 经实机证实无害，见 ../platforms/mmd.md §2）。本文档下方 light DOM 写法仍是跨版本最稳基线；shadow 变体用于需要强隔离的场景。全局美化**不可** shadow 化（它要穿透改平台元素，与隔离相反）。
+> **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（无空白条）；代价：多一层 `attachShadow` 包装。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 双引号包裹、内部全单引号、禁内部裸双引号。本文下方 light DOM 写法仍是跨版本基线；shadow 变体用于需要强隔离的组件。全局主题 CSS 本身不可 shadow 化，因为它必须作用于平台 light DOM。
+
+### 主题切换 / 设置 UI 的职责边界
+
+主题按钮或设置面板可以放在 Shadow DOM 隔离自身样式，但 Shadow DOM 内部状态不能直接给平台页面换肤。每个动作最终必须调用全局主题 runtime API，由它修改 `html` / `body` 等 **light DOM 根节点**上的自有主题属性或运行时 CSS 变量；不得只给 shadow host 加 `day/night` 类后宣称全局主题已切换。
+
+需要 day/night/native、玩家微调或持久偏好时，优先复用 `theme-runtime.md` 与 `../../assets/global-beautify-examples/mmd-theme-runtime/` 提供的 runtime 面板。不要另造第二套悬浮球 / 侧栏引擎、MutationObserver、route supervisor 或 localStorage schema；附加入口只能调用同一 owner 的公开 API。
 
 ---
 
@@ -45,20 +51,20 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 
 ```css
 .z-float-ball{position:fixed;left:18px;bottom:90px;width:48px;height:48px;border-radius:50%;
-  background:var(--ac);color:#fff;border:none;font-size:22px;z-index:99999;cursor:grab;
+  background:var(--z-float-accent,#B38F5C);color:#fff;border:none;font-size:22px;z-index:99999;cursor:grab;
   box-shadow:0 3px 10px rgba(0,0,0,.3);touch-action:none}
-.z-float-menu{position:fixed;display:none;background:var(--cb);color:var(--fc);
-  border:1px solid var(--ac);border-radius:8px;padding:6px;z-index:99999;
+.z-float-menu{position:fixed;display:none;background:var(--z-float-surface,#fff);color:var(--z-float-text,#2b2b2b);
+  border:1px solid var(--z-float-accent,#B38F5C);border-radius:8px;padding:6px;z-index:99999;
   box-shadow:0 3px 10px rgba(0,0,0,.3);min-width:130px}
 .z-float-menu.z-open{display:block}
 .z-float-menu-item{padding:7px 10px;cursor:pointer;white-space:nowrap;border-radius:6px}
-.z-float-menu-item:hover{background:var(--cbm)}
+.z-float-menu-item:hover{background:var(--z-float-surface-hover,#f2eadf)}
 ```
 
 ### 点火器（正则 replaceString，单行；此处为可读分行，交付须脚本序列化成单行）
 
 ```js
-// findRegex: <悬浮球>   replaceString:
+// findRegex: /<悬浮球>/   replaceString:
 <img src="x" data-float-ball="1" style="display:none" onerror="(function(e){
   if(document.getElementById('z-fab')){e.remove();return;}
   var fab=document.createElement('button');fab.id='z-fab';fab.className='z-float-ball';fab.textContent='✦';
@@ -112,23 +118,23 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 ### CSS 类
 
 ```css
-.z-sidebar-btn{position:fixed;right:0;top:30%;background:var(--cb);color:var(--fc);
-  border:1px solid var(--ac);border-right:none;padding:10px 7px;border-radius:8px 0 0 8px;
-  z-index:99998;cursor:pointer;font-size:18px;box-shadow:-2px 2px 10px var(--ac)}
-.z-drawer{position:fixed;right:0;top:0;height:100%;width:240px;background:var(--cb);color:var(--fc);
-  border-left:1px solid var(--ac);z-index:99997;transform:translateX(100%);transition:transform .35s ease;
+.z-sidebar-btn{position:fixed;right:0;top:30%;background:var(--z-float-surface,#fff);color:var(--z-float-text,#2b2b2b);
+  border:1px solid var(--z-float-accent,#B38F5C);border-right:none;padding:10px 7px;border-radius:8px 0 0 8px;
+  z-index:99998;cursor:pointer;font-size:18px;box-shadow:-2px 2px 10px var(--z-float-shadow,rgba(179,143,92,.35))}
+.z-drawer{position:fixed;right:0;top:0;height:100%;width:240px;background:var(--z-float-surface,#fff);color:var(--z-float-text,#2b2b2b);
+  border-left:1px solid var(--z-float-accent,#B38F5C);z-index:99997;transform:translateX(100%);transition:transform .35s ease;
   padding:46px 16px 16px;box-shadow:-4px 0 16px rgba(0,0,0,.3);overflow-y:auto;box-sizing:border-box}
 .z-drawer.z-open{transform:translateX(0)}
-.z-drawer-title{color:var(--ac);font-weight:700;font-size:16px;margin-bottom:12px;
-  border-bottom:1px solid var(--ac);padding-bottom:6px}
+.z-drawer-title{color:var(--z-float-accent,#B38F5C);font-weight:700;font-size:16px;margin-bottom:12px;
+  border-bottom:1px solid var(--z-float-accent,#B38F5C);padding-bottom:6px}
 .z-drawer-item{padding:8px 6px;border-radius:6px;cursor:pointer;margin-bottom:4px}
-.z-drawer-item:hover{background:var(--cbm)}
+.z-drawer-item:hover{background:var(--z-float-surface-hover,#f2eadf)}
 ```
 
 ### 点火器
 
 ```js
-// findRegex: <侧边栏>   replaceString（单行）:
+// findRegex: /<侧边栏>/   replaceString（单行）:
 <img src="x" data-sidebar="1" style="display:none" onerror="(function(e){
   if(document.getElementById('z-drawer')){e.remove();return;}
   var tg=document.createElement('button');tg.id='z-drawer-btn';tg.className='z-sidebar-btn';tg.textContent='☰';
@@ -191,11 +197,11 @@ fillTA('请按格式输出：'+F('姓名')+F('职业')+L+'HP=当前/上限'+R+' 
 
 ## 调用清单
 
-1. **配色**：上面 CSS 用了 `var(--ac)/--cb/--cbm/--fc`，这些由全局美化（`body.z-enabled` 主题变量，见 global-css.md / style-system.md）提供；无全局美化时给每个 `var()` 加 fallback（如 `var(--ac,#B38F5C)`）。
+1. **配色契约**：上面 CSS 使用组件自有 `--z-float-*` 变量，并为每个 `var()` 提供可独立工作的 fallback；`global-css.md` **不会自动提供**这些变量。若要跟随某个全局主题，必须在组件实际元素上显式写 adapter，例如 `.z-float-ball,.z-float-menu,.z-sidebar-btn,.z-drawer{--z-float-accent:var(--mytheme-accent);--z-float-surface:var(--mytheme-surface);--z-float-text:var(--mytheme-text)}`，其中 `--mytheme-*` 换成该 bundle 的真实前缀。若项目另建共享 wrapper，也可把同一 adapter 放到 wrapper。旧 `--ac/--cb/--cbm/--fc` 只可在 legacy 组件局部 adapter 中出现。
 2. **CSS 类位置**：把上面 `<style>` 拼进美化条/状态栏样式条的 `replaceString`，触发标记进 `statusbar`/`beginning`。
 3. **触发标记**：`<悬浮球>`/`<侧边栏>` 写进第一句话（`beginning`）或 `statusbar`，由对应正则消费——别留**悬空标记**（validate 会报错）。
 4. **菜单动作**：改 `acts` 数组与 `mi.onclick` 分支即可换行为（回填输入框/开抽屉/打开你自己的弹层）。回填输入框统一用选择器 `.uni-textarea-textarea`（与状态栏选项按钮一致）。
 5. **序列化**：`replaceString` 必须脚本序列化成单行（换行转 `\n`、引号转 `\"`、无 BOM），禁手写多行——见 ../output/regex-output.md 2.3。
 6. **验证**：`validate.py --platform <mmd|oldmmd>` 必 0 错 → `build-preview.py`（默认 `--mode both`）看三面板"悬浮组件预览"+全景预览，实测拖动、菜单跟随、翻转、选项点击。oldmmd 与 mmd 同一套写法都已验证通过。
 
-> 现成可跑样例：仓库根 `preview/gen_test_fixture.py` 生成的 `test-fixture-full.json` 含本文档全部组件（全局美化+侧边栏+悬浮球+状态栏），`--platform oldmmd` 与 `mmd` 审核均 0 错。
+> 现成资产与生成器：`../../assets/shadowcast-examples/` 下的 `build_float.py`、`悬浮球侧边栏-影渲法.mmd.json` 和 `README.md`。生成器当前默认输出名以脚本 `--help` / README 为准；用 `../../scripts/build-preview.py` 生成预览，不再引用仓库中不存在的 fixture 脚本。

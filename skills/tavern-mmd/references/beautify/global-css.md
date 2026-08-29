@@ -1,35 +1,44 @@
-# 全局美化（按平台分流）
+# 全局美化（按平台与交付档位分流）
 
 ## 平台分流
 
 | 平台 | 方案 |
 |---|---|
-| MMD（新旧） | 正则注入：img onerror 给 body 加开关类 + uni-app 类名覆盖 CSS（本文档主体）；当前 MMD 可改 script 激活，保留 onerror 回退 |
-| 本地酒馆 | 同样的正则注入 CSS 可用；或建议用户走主题/自定义 CSS（非卡内交付物） |
+| 当前 MMD | 先在“静态换肤 / 运行时主题包”二档中选型；运行时档必须再读 `theme-runtime.md` |
+| 旧版 MMD | 只走静态换肤；不得套用当前 MMD 的运行时主题协议 |
+| 本地 SillyTavern | 优先使用原生主题 / 自定义 CSS；卡内注入另按本地平台能力设计 |
+
+## 两档交付
+
+| 档位 | 适用需求 | 交付边界 |
+|---|---|---|
+| **静态换肤** | 一套固定外观，不需要日夜切换、`native`、玩家微调或持久偏好 | 一条正则可注入激活器 + 公共 CSS + 单套 token；本文后续单规则骨架只适用于本档 |
+| **运行时主题包** | `day / night / native` 三态、玩家分主题微调、重置、持久偏好候选、路由离开/重入或 `destroy()` | 仅适用于当前 MMD；必须遵守 `theme-runtime.md` 的 owner/version 租约、生命周期、单例资源、增量恢复与测试矩阵 |
+
+默认规则：用户提出“日夜”“跟随偏好”“原生模式”“设置面板”“记住选择”或任何玩家微调时，不再向静态骨架叠加按钮，直接选择运行时主题包。日夜共享同一份公共选择器，只切根状态与 token；禁止复制两套长选择器。
 
 ---
 
-## MMD 激活机制
+## MMD 静态换肤激活机制
 
-> 旧版 MMD `<script>` 被过滤，必须 img onerror 执行 JS。**当前 MMD（/mmd）`<script>` 已实测可执行**：全局美化激活是"给 body 加一次开关类"的一次性操作（不是 per-message 自渲染，不踩 `<script>` 去重/`currentScript` 限制），因此 `<script>` 与 img onerror 两种激活器都可用，推荐仍保留 img onerror 版作跨版本回退。所有覆盖样式以 `body.z-enabled` 为前缀，便于一键还原。
+> 本节只描述**静态换肤**。旧版 MMD `<script>` 被过滤，必须用 img onerror；当前 MMD `<script>` 虽可执行，但静态激活只是给 body 加一次开关类，推荐保留 img onerror 作为跨版本写法。运行时主题包不得在此骨架上继续堆切换逻辑，改读 `theme-runtime.md`。
 
 | 部件 | 写法 | 说明 |
 |---|---|---|
-| 激活开关 | `<img src="x" style="display:none" onerror="document.body.classList.add('z-enabled');this.remove()">` | img onerror 注入 JS，执行后自毁 |
-| 总开关类 | `body.z-enabled` | 所有覆盖样式都以它为前缀，便于一键还原 |
-| 夜间模式类 | `body.z-enabled.z-dark-mode` | 覆盖同名 CSS 变量即换色，选择器不动 |
-| 悬浮切换按钮 | `.z-sidebar-btn` + `.z-btn-text` | fixed 贴边按钮，点击循环 原/日/夜。**切换逻辑走合法路径**：/oldmmd 用轻主板 `eval(dataset.s)`；/mmd 用 `window.__fn()` 或 `el.onclick=function(){}`（img onerror 里赋值）——inline onclick 直接写 `classList.toggle` 在 /mmd 会被净化 |
-| 正则配合类 | `.z-q` 等 | 留给正则把正文关键词包成 `<span class="z-q">`，复用全局样式 |
+| 激活开关 | `<img src="x" style="display:none" onerror="document.body.classList.add('z-enabled');this.remove()">` | img onerror 执行后自毁 |
+| 总开关类 | `body.z-enabled` | 静态覆盖样式都以它为前缀，停用时移除该类 |
+| 正则触发 | `/<beautify>/` | 当前 MMD 的 `findRegex` 必须是 slash literal |
+| 正文配合类 | `.z-q` 等 | 留给正则把正文关键词包成自有前缀元素，复用静态样式 |
 
-自定义类一律加自己的前缀（样本用 `z-`），避免撞平台类名。
+自定义类、ID、属性和变量一律使用项目自有前缀（样本用 `z-`），避免撞平台类名。静态换肤不宣称提供 `native` 完整恢复：移除开关类只能停用自身 CSS，不能撤销第三方脚本或不可逆 DOM 改写。
 
-> **可拖动悬浮球 / 侧边栏抽屉 / 带菜单的悬浮按钮**（运行时 img onerror 注入、菜单跟随本体+翻转避裁+选项可点击、两版分流的认证写法）见 `floating-components.md`。本表的"悬浮切换按钮"仅是 fixed 贴边的主题切换按钮，不可拖动。
+> 可拖动悬浮球与抽屉见 `floating-components.md`。运行时主题的设置入口优先复用主题包自带面板，不另造一套侧栏引擎。
 
 ---
 
 ## MMD 页面结构类名清单（基础层）
 
-> 来源：用户补充的页面结构逆向清单。与下节"完整层"速查表有少量出入，两者都收录并标注。
+> 来源：用户提供的社区文档快照。作者、原 URL 与许可证未记录，仅作兼容研究参考，不宣称原创。它与下节“完整层”速查表有少量出入，两者都收录并标注。
 
 ### 容器层级
 
@@ -102,7 +111,7 @@
 
 ## MMD 界面类名速查（完整层）
 
-> 来源：实际生效样本逆向整理。类名是逆向成果，完整保留。
+> 来源：用户提供的实际生效社区样本快照逆向整理。作者、原 URL 与许可证未记录；类名仅作兼容研究参考，完整保留但不宣称原创或当前稳定。
 
 ### 聊天主界面
 
@@ -147,7 +156,7 @@
 ### 图标染色
 
 App 图标是 PNG/背景图，无法用 `color` 改色，只能用 `filter` 重新染色。
-样本做法：定义变量 `--lif`（一串 `brightness/invert/sepia/saturate/hue-rotate` 滤镜），统一打到以下选择器：
+样本做法：定义变量 `--lif`（历史样本变量；新产物对应自有前缀 `--<ns>-icon-filter`），统一打到以下选择器：
 
 - `img[src*='ico_']`、`uni-image img[src*='ico_']`、`uni-image div[style*='background-image']`
 - `.btn-icon` 及其子元素、`.header-meun div`、`.header-icon-meun uni-image`
@@ -156,73 +165,93 @@ App 图标是 PNG/背景图，无法用 `color` 改色，只能用 `filter` 重�
 
 ---
 
-## 主题变量架构
+## 静态换肤变量架构
+
+> 正式交付使用产物自有前缀。以下骨架以 `z` 为示例命名空间，实际项目应替换成稳定的 bundle 前缀；不得把无前缀短变量暴露到 `:root` / `body`。旧 `--lb/--lc/...` 仅是 legacy selector 方言，需要维护旧选择器时才在该旧模块的作用域根上显式做 alias。
 
 ```css
 body.z-enabled {
-  --lb: 页面底色;
-  --lc: 卡片底色;
-  --lcm: 卡片渐变色;
-  --lm: 主题深色（边框）;
-  --lt: 正文色;
-  --lts: 次要文字色;
-  --la: 强调色;
-  --lg: 辅助强调色;
-  --lh: 高亮底色;
-  --ls: 阴影;
-  --lsr: 强调阴影;
-  --lif: 图标染色 filter;
-}
-
-body.z-enabled.z-dark-mode {
-  /* 同名变量换夜间值，选择器不动 */
+  /* 静态换肤只定义一套值；运行时日夜 token 见 theme-runtime.md */
+  --z-bg: 页面底色;
+  --z-surface: 卡片底色;
+  --z-surface-2: 卡片渐变或次级底色;
+  --z-border: 边框色;
+  --z-text: 正文色;
+  --z-text-2: 次要文字色;
+  --z-accent: 强调色;
+  --z-accent-2: 辅助强调色;
+  --z-highlight: 高亮底色;
+  --z-shadow: 阴影;
+  --z-shadow-accent: 强调阴影;
+  --z-icon-filter: 图标染色 filter;
 }
 ```
 
-换主题 = 只改变量值；日/夜切换 = body 加减 `z-dark-mode`，选择器不用动。
+静态换肤只有一套变量值。若要 day/night，两套色板都映射到同一组带自有前缀的运行时 token，由 light DOM 根属性切换；公共选择器仍只写一份，具体协议见 `theme-runtime.md`。
 
-| 变量 | 含义 |
-|---|---|
-| `--lb` | 页面底色（背景色） |
-| `--lc` | 卡片底色 |
-| `--lcm` | 卡片渐变色 |
-| `--lm` | 主题深色，用于边框 |
-| `--lt` | 正文色 |
-| `--lts` | 次要文字色 |
-| `--la` | 强调色 |
-| `--lg` | 辅助强调色 |
-| `--lh` | 高亮底色 |
-| `--ls` | 阴影 |
-| `--lsr` | 强调阴影 |
-| `--lif` | 图标染色 filter 值 |
+| 正式变量 | 含义 | legacy alias（仅兼容旧选择器） |
+|---|---|---|
+| `--z-bg` | 页面底色 | `--lb` |
+| `--z-surface` | 卡片底色 | `--lc` |
+| `--z-surface-2` | 次级底色 / 旧卡片渐变色 | `--lcm` |
+| `--z-border` | 边框色 | `--lm` |
+| `--z-text` | 正文色 | `--lt` |
+| `--z-text-2` | 次要文字色 | `--lts` |
+| `--z-accent` | 主强调色 | `--la` |
+| `--z-accent-2` | 辅助强调色 | `--lg` |
+| `--z-highlight` | 高亮底色 | `--lh` |
+| `--z-shadow` | 常规阴影 | `--ls` |
+| `--z-shadow-accent` | 强调阴影 | `--lsr` |
+| `--z-icon-filter` | 图标染色 filter | `--lif` |
 
+legacy adapter 只放在旧模块自己的作用域根上，例如：
+
+```css
+.z-legacy-selectors {
+  --lb: var(--z-bg);
+  --lc: var(--z-surface);
+  --lt: var(--z-text);
+  --la: var(--z-accent);
+  /* 只映射该模块实际读取的槽位 */
+}
+```
 ---
 
 ## 强制规则
 
-1. 所有覆盖样式必须 `!important`（压过 App 自带样式）
-2. 所有规则以 `body.z-enabled` 前缀开头（一键还原）
-3. 自定义类加自有前缀防撞平台类名（样本用 `z-`）
-4. 交付物 = 1 条正则（findRegex 匹配触发标记，replaceString = 激活器 + `<style>` 全套 CSS），字符数必须 ≤ 20000，超限拆分多条正则
+### 静态换肤
 
-### 交付正则骨架示例
+1. 所有覆盖样式使用 `!important` 压过 App 自带样式。
+2. 所有规则以 `body.z-enabled` 前缀开头；这只能停用自身 CSS，不代表 pristine restore。
+3. 自定义类、ID、属性与变量使用项目自有前缀。
+4. 本档允许 1 条正则交付（`findRegex` 匹配触发标记，`replaceString` 为激活器 + `<style>`）；字符数必须 < 20000，达到 18000 即预警并评估拆分。
+
+### 运行时主题包
+
+1. 遵守 `theme-runtime.md`，不得套用静态档的“一条规则 + 一个 body 类”充当三态运行时。
+2. 公共 CSS、day/night token、玩家 overrides 分层；不复制日夜选择器。
+3. `native`、`destroy`、route leave/reenter、资源单例和非法存储降级必须进入测试矩阵。
+
+### 静态换肤交付骨架
+
+> 以下示例**只适用于静态换肤**，不是运行时主题骨架。
 
 ```
-findRegex:    <beautify>
+findRegex:    /<beautify>/
 replaceString:
   <img src="x" style="display:none"
        onerror="document.body.classList.add('z-enabled');this.remove()">
   <style>
   body.z-enabled {
-    --lb: #1a1a2e; --lc: #16213e; --lcm: #0f3460;
-    --lm: #533483; --lt: #e0e0e0; --lts: #a0a0b0;
-    --la: #e94560; --lg: #ff6b6b; --lh: #2a2a4a;
-    --ls: 0 2px 8px rgba(0,0,0,.5);
-    --lsr: 0 4px 16px rgba(233,69,96,.4);
-    --lif: brightness(0) invert(1) sepia(1) saturate(5) hue-rotate(300deg);
+    --z-bg: #1a1a2e; --z-surface: #16213e; --z-surface-2: #0f3460;
+    --z-border: #533483; --z-text: #e0e0e0; --z-text-2: #a0a0b0;
+    --z-accent: #e94560; --z-accent-2: #ff6b6b; --z-highlight: #2a2a4a;
+    --z-shadow: 0 2px 8px rgba(0,0,0,.5);
+    --z-shadow-accent: 0 4px 16px rgba(233,69,96,.4);
+    --z-icon-filter: brightness(0) invert(1) sepia(1) saturate(5) hue-rotate(300deg);
   }
-  body.z-enabled .content.left { background: var(--lc) !important; color: var(--lt) !important; }
-  body.z-enabled .content.right { background: var(--la) !important; color: #fff !important; }
+  body.z-enabled .content.left { background: var(--z-surface) !important; color: var(--z-text) !important; }
+  body.z-enabled .content.right { background: var(--z-accent) !important; color: #fff !important; }
   /* ... 其余规则 ... */
   </style>
 ```
@@ -231,23 +260,18 @@ replaceString:
 
 ## 换用风格数据库
 
-上方主题变量架构里的 `--lb/--lc/--lcm/--lm/--lt/--lts/--la/--lg/--lh/--ls/--lif` 可由 ../style-db/ 任一风格的配色填充，**变量结构与选择器不动**，只换值：
-1. 按 ../style-system.md 选风格（或混搭）。
-2. 用映射表（style-system.md 第1节）把风格 palettes.md 色板填进 `--lb/--lc/...`。
-3. 圆角/边框/阴影/装饰按 layout-ui.md、decoration.md 该风格取值；日/夜双版用风格的 light/dark 两套色板分别填 `body.z-enabled` 与 `body.z-enabled.z-dark-mode`。
-4. 单点微调按 style-system.md 第5节覆盖协议。
+1. 按 `style-system.md` 选风格（或混搭），先得到制作期规范 token。
+2. 静态换肤新产物直接映射到本页 `--z-*` 示例槽位（实际项目替换为自己的命名空间）；只有嵌入旧选择器时，才在其局部根上显式提供 `--lb/--lc/...` legacy adapter。
+3. 运行时主题必须把规范 token 映射到 bundle 自有前缀变量，并提供成对 light/dark 色板；玩家覆盖只写 overrides，不回写 preset。
+4. 圆角、边框、阴影与装饰按 `style-db/layout-ui.md`、`style-db/decoration.md` 取值；两套主题分别检查对比度与整体性。
 
 ---
 
 ## 现成范例
 
-完整可用的全局美化方案见 `assets/global-beautify-examples/`：
+优先级如下：
 
-- **[mmd-daytime-refined.md](../../assets/global-beautify-examples/mmd-daytime-refined.md)**：MMD 日间模式（米白+酒红），覆盖全界面（聊天页+模型设置+用户人设+对话设置+设定补充+分享页+滚轮+开关），含 MutationObserver 清污引擎 + 引号修复，拿来即用。配色通过 10 个 CSS 变量驱动，换主题只需改变量值。三段式架构：
-  1. 全局美化 CSS（1000+ 行，uni-app 类名覆盖）
-  2. 清污引擎（MutationObserver 常驻监听，自动移除 MMD 原生日夜模式残留污染）
-  3. 引号修复（TreeWalker 遍历文本节点，修复双左引号 bug + 接管 MMD 引号高亮）
+1. **当前 MMD 三态运行时主题包（架构启发后的重写）**：`../../assets/global-beautify-examples/mmd-theme-runtime/`，入口见其 `README.md`。需要 `day/night/native`、玩家微调或路由生命周期时默认选它；验证状态以资产 README 为准，不从本方法论文档虚构实机结论。
+2. **[mmd-daytime-refined.md](../../assets/global-beautify-examples/mmd-daytime-refined.md)（社区快照 legacy selector reference）**：仅保留 2026-06-21 当前 MMD 的历史选择器、配色和旧清污结构。它未完整作用域、清污与文本规范化不可完整恢复，不再作为直接可用默认成品。
 
-这些范例是「交钥匙工程」，可直接导入 MMD 正则系统；本文档（global-css.md）是「方法论指导」，教你从零设计自己的方案。两者互补：范例提供即用成品，文档提供设计能力。
-
-**模块化组件**：清污引擎已提取为独立模块 `assets/global-beautify-examples/mmd_cleanup_core.js`（183 行，含详细注释），所有 MMD 全局美化方案都可复用。
+`../../assets/global-beautify-examples/mmd_cleanup_core.js` 当前是架构启发后重写的 ZMR 2.0 cleanup factory，可供新 runtime owner 作为单 observer、插件总线和 property delta 恢复基础设施；不得脱离 owner 单独重复安装。`mmd-daytime-refined.md` 代码块中的 `_mmd_*` 清污段只是 2026-06-21 社区快照，不代表同名外部 JS 的当前实现。

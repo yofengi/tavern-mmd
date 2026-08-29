@@ -15,7 +15,7 @@ Shadow DOM 悬浮组件生成器 build_float.py
   - 方括号 [ ] 用 String.fromCharCode 拼（避开数据信标转换器啃断）
 
 用法:
-  python build_float.py            # 生成 float-shadow.mmd.json
+  python build_float.py            # 生成 悬浮球侧边栏-影渲法.mmd.json
   python build_float.py --check    # 只跑 guard 校验
 
 退出码: 0=成功  1=guard失败  2=用法错误
@@ -308,9 +308,9 @@ def build_mmd_json():
         "beginning": beginning,
         "regex_scripts": [
             {"id": -1, "scriptName": "悬浮球-shadow",
-             "findRegex": "/<悬浮球>/", "replaceString": ball},
+             "findRegex": "/<悬浮球>/g", "replaceString": ball},
             {"id": -1, "scriptName": "侧边栏-shadow",
-             "findRegex": "/<侧边栏>/", "replaceString": drawer},
+             "findRegex": "/<侧边栏>/g", "replaceString": drawer},
         ],
     }
 
@@ -342,6 +342,19 @@ def run_guards():
         if not (sc["findRegex"].startswith("/") and
                 sc["findRegex"].rstrip("gimsuy").endswith("/")):
             errs.append("%s: findRegex 缺斜杠分隔符" % name)
+
+        # statusbar 与 beginning 会拼成同一条待替换消息。固定 marker 若重复出现，
+        # 非 g 规则只消费首个 occurrence，后一个会悬空裸露。
+        source = obj["statusbar"] + obj["beginning"]
+        marker = "<悬浮球>" if name == "悬浮球-shadow" else "<侧边栏>"
+        occurrences = source.count(marker)
+        flags = sc["findRegex"].rsplit("/", 1)[1]
+        if occurrences > 1 and "g" not in flags:
+            errs.append("%s: %s 出现 %d 次，findRegex 必须带 g" %
+                        (name, marker, occurrences))
+        if occurrences <= 1 and "g" in flags:
+            errs.append("%s: %s 仅出现 %d 次，不应盲目加 g" %
+                        (name, marker, occurrences))
     try:
         json.dumps(obj, ensure_ascii=True)
     except (TypeError, ValueError) as e:
@@ -352,7 +365,7 @@ def run_guards():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
-    ap.add_argument("-o", "--out", default="float-shadow.mmd.json")
+    ap.add_argument("-o", "--out", default="悬浮球侧边栏-影渲法.mmd.json")
     args = ap.parse_args()
 
     errs, obj = run_guards()
@@ -364,7 +377,8 @@ def main():
 
     for sc in obj["regex_scripts"]:
         print("%s: replaceString %d / 20000" % (sc["scriptName"], len(sc["replaceString"])))
-    print("guard 通过：无裸双引号、无字面 [键=值]、字符数达标、findRegex 带斜杠")
+    print("guard 通过：无裸双引号、无字面 [键=值]、字符数达标、"
+          "findRegex 带斜杠且重复 marker 使用 g")
 
     if args.check:
         print("--check 模式：未写文件")

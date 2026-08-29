@@ -1,11 +1,11 @@
 # 混合态雷达法状态栏（MMD首选方案）
 
-> 基于特征嗅探与响应式动态DOM的状态栏架构（改五版，by 黑洞猫）。MMD平台**动态/自创NPC状态栏首选本方案**；固定字段可走原生 `$field` 或 KV V4.0（statusbar.md）。
-> 现成可用的开源示例资产在 `../../assets/radar-examples/`，新做状态栏时**改造示例远快于从零写引擎**。
+> 基于特征嗅探与响应式动态DOM的状态栏架构（社区快照保留署名：黑洞猫）。原 URL 与许可证未记录，仅作兼容研究参考，不据此宣称仓库原创或开源授权。MMD平台**动态/自创NPC状态栏首选本方案**；固定字段可走原生 `$field` 或 KV V4.0（statusbar.md）。
+> 现成社区示例资产在 `../../assets/radar-examples/`，新做状态栏时可优先改造其中的状态栏案例；旧日夜集成包仍按 legacy 边界处理。
 >
 > 🆕 **另一选项——影渲法（ShadowCast，statusbar-shadowcast.md）**：把 UI 渲进 Shadow DOM，markdown 空白条/平台染色/CSS 冲突全免疫（本方案那些防御补丁都不需要），含固态+情境双轨代谢，有生成器。二者数据恢复地基相同（扫历史 light DOM）；雷达法成熟、示例多、支持嗅探未知键名，影渲法隔离更干净、维护更省。追求干净隔离选影渲法，需嗅探涌现选雷达法。
 
-> ⚠️ **载体红线（当前 MMD 实测）：per-message 状态栏引擎只能用 `<img onerror>`，不能用 `<script>`。** 即便当前 MMD 已解禁 `<script>`，把雷达引擎改成 `<script>` 载体会导致**状态栏整块空白**——原因：①`<script>` 拿不到自身位置（`document.currentScript` 在 MMD 不可用），无法 per-message 自定位；②同一段 `<script>` 只加载一次（官方原文），每条消息带同一份引擎会被去重、不逐条执行。`<script>` 仅适合定义 `window.__fn` 供 onclick 调（交互），不适合自渲染。详见 ../platforms/mmd.md §4。
+> ⚠️ **载体红线（当前 MMD 实测）：per-message 状态栏引擎只能用 `<img onerror>`，不能用 `<script>`。** 即便当前 MMD 已解禁 `<script>`，把雷达引擎改成 `<script>` 载体会导致**状态栏整块空白**——原因：①`<script>` 拿不到自身位置（`document.currentScript` 在 MMD 不可用），无法 per-message 自定位；②同一段 `<script>` 只加载一次（官方原文），每条消息带同一份引擎会被去重、不逐条执行。document-level 一次性 `<script>` bootstrap 或全局 handler 定义仍可用，但属于全局单例职责，不是状态栏引擎的替代载体。详见 ../platforms/mmd.md §4。
 
 > 💡 **引擎语法（当前 MMD）：默认用 ES6 版引擎，ES5 版作兜底回退。** 当前 MMD 在 img onerror 载体下实测全支持 ES6（见 ../platforms/mmd.md §1），引擎用 ES6 重写后更短、可读可改。`../../assets/radar-examples/` 下 ES6 版引擎为默认资产；若实机异常，切回 ES5 版引擎（逻辑等价、仅语法降级）。旧版 MMD（/oldmmd）仍只能 ES5。
 
@@ -54,14 +54,14 @@
 
 | 优先级 | 名称 | findRegex | replaceString | 作用 |
 |---|---|---|---|---|
-| 1 | 对抗代码 | `<代码>` | img onerror + MutationObserver（~1.9K字符） | 反平台强制染色注入，净化font标签为span.hl-dialogue，修复MMD全角引号bug。轻量场景可省 |
-| 2 | 响应式CSS | `<css>` | `<style>`全套样式（~5.5K字符） | 排版/颜色/悬浮气泡/媒体查询折叠，与逻辑层彻底剥离 |
+| 1 | 对抗代码 | `/<代码>/` | img onerror + MutationObserver（~1.9K字符） | 反平台强制染色注入，净化font标签为span.hl-dialogue，修复MMD全角引号bug。轻量场景可省 |
+| 2 | 响应式CSS | `/<css>/` | `<style>`全套样式（~5.5K字符） | 排版/颜色/悬浮气泡/媒体查询折叠，与逻辑层彻底剥离 |
 | 3 | 数据信标转换器 | `/\[([^=\]]+)=([^\]]+)\]\s*/g` | `<span style="display:none">[$1=$2]</span>` | 把键值对包进隐形标签，尾部`\s*`吞噬换行防排版空隙 |
-| 4 | 雷达引擎 | `<ztl>` | img onerror 引擎主体（~13K字符） | 剪枝探针→全量历史扫描→嗅探路由→内存装配→挂载→防劫持巡检 |
+| 4 | 雷达引擎 | `/<ztl>/` | img onerror 引擎主体（~13K字符） | 剪枝探针→全量历史扫描→嗅探路由→内存装配→挂载→防劫持巡检 |
 
 模型第一句话/正文只需含触发标记：`<css><代码>`（部署样式与哨兵）+ 每轮末尾 `<ztl>` + 键值对数据块。
 
-**完整可运行示例**见 `../../assets/radar-examples/西幻RPG-正则与第一句话.json`（4条正则+测试正文）与 `完整美化-日夜主题与雷达.json`（9条正则：雷达法+日夜双主题全局美化+侧边栏切换的集成案例）。
+**状态栏可运行示例**见 `../../assets/radar-examples/西幻RPG-正则与第一句话.json`（4 条正则 + 测试正文）。同目录 `完整美化-日夜主题与雷达.json` 是用户提供的社区快照启发的 **legacy 集成案例**（作者、原 URL 与许可证未完整记录）：虽已迁移 slash findRegex，并把当前 MMD 不接受的复杂 inline handler 改为动态绑定后通过校验，但它复制日夜选择器、缺少 native/destroy/route 生命周期，不再作为新全局主题的推荐集成方案；三态全局主题改读 `theme-runtime.md` 与 `../../assets/global-beautify-examples/mmd-theme-runtime/README.md`。
 
 ## MMD导入json格式（实测可导入）
 
@@ -71,7 +71,7 @@
   "statusbar": "<css><代码>",
   "beginning": "第一句话正文……<ztl>\n[键名=键值]……",
   "regex_scripts": [
-    {"id": -1, "scriptName": "规则名", "findRegex": "<css>", "replaceString": "……"}
+    {"id": -1, "scriptName": "规则名", "findRegex": "/<css>/", "replaceString": "……"}
   ]
 }
 ```
@@ -95,7 +95,7 @@
 
 ## 状态栏规则Prompt写法（模型侧协议）
 
-完整范例见 `../../assets/radar-examples/完整美化-状态栏规则.txt` 与 `西幻RPG-状态栏规则世界书.json`。骨架：
+完整范例见 `../../assets/radar-examples/完整美化-状态栏规则.txt` 与 `../../assets/radar-examples/西幻RPG-状态栏规则世界书.json`。骨架：
 
 1. **全局红线**：正文完毕后另起一行输出`<ztl>`锚点；严格`[键名=键值]`格式；**严禁键值内嵌套方括号**（多项用换行/全角冒号/竖线`|`分割）；解释性快照穿插正文，严禁堆在数据块区
 2. **核心区（每轮强制）**：逐字段列出键名、格式、示例（地点用`-`连字符层级、时间含时段词、数值`当前/最大`、`[回复轮次=N]`每轮+1、`[任务目标=...]`无目标输出"暂无"）
@@ -116,7 +116,7 @@
 ## 制作工作流（给用户做雷达法状态栏时）
 
 1. **需求与分类**：和用户确定状态栏字段清单 → 逐字段做五级分类（写进plan.md）
-2. **基底选择**：优先从 `radar-examples/` 选近似示例改造；全新需求才从零设计HTML原型
+2. **基底选择**：优先从 `../../assets/radar-examples/` 选近似状态栏示例改造；全新需求才从零设计HTML原型。该目录中的旧日夜集成包仍仅作 legacy 兼容参考。
 3. **改造CSS**（优先级2正则）：换配色/布局，保留媒体查询折叠与悬浮气泡类
 4. **改造引擎**（优先级4正则）：调整兜底白名单（一/二/五类键名入名单，四类排除）、嗅探特征字典（装备/技能/背包路由词）、UI面板映射。**逐条对照防御体系表核查**：零双引号、无星号、全半角兼容、剪枝探针、自毁巡检
    - 平台差异：上述"零双引号/无星号"是**旧版 MMD（/oldmmd）**的 onerror 净化规避手段；**当前 MMD（/mmd）实测 onerror 可多行、可用双引号**，引擎可用 ES6 正常书写双引号，不必再统一单引号或乘号改除法。剪枝探针/自毁巡检/全半角兼容（防虚拟DOM劫持与符号集幻觉）两版都要保留，与净化器无关。
@@ -165,9 +165,9 @@
 
 ## 换用风格数据库
 
-雷达法默认的暗色配色只是**默认风格之一**。状态栏的全部视觉（配色/圆角/边框/阴影/字体/装饰）可整套替换为 ../style-db/ 里任一风格：
-1. 按 ../style-system.md 选风格（或混搭维度）。
-2. 把该风格 palettes.md 的色板填进雷达法 CSS 的 `--bg/--bg2/--border/--t1/--t2/--t3/--accent` 等变量（变量名映射见 style-system.md 第1节）。
+雷达法默认的暗色配色只是**默认风格之一**。状态栏的全部视觉（配色/圆角/边框/阴影/字体/装饰）可整套替换为 `style-db/` 里任一风格：
+1. 按 `style-system.md` 选风格（或混搭维度）。
+2. 把该风格 palettes.md 的色板按 style-system.md 的旧方言兼容表填进雷达法 CSS 的 `--bg/--bg2/--border/--t1/--t2/--t3/--accent` 等变量。
 3. 圆角/边框/阴影/装饰按 layout-ui.md 与 decoration.md 的该风格取值替换对应 CSS。
 4. 雷达嗅探引擎、正则结构、JS 解析逻辑**完全不动**——只换样式值。
-5. 用户要单独微调（换主色、改圆角等）按 style-system.md 第5节项目级覆盖处理。
+5. 用户要单独微调（换主色、改圆角等）按 style-system.md 的项目级制作覆盖处理。

@@ -18,6 +18,10 @@ import sys
 import json
 import argparse
 import re
+import html as html_mod
+import shutil
+import subprocess
+from html.parser import HTMLParser
 
 # Windows 控制台默认 GBK，强制 UTF-8 输出，避免中文报告乱码
 try:
@@ -28,6 +32,19 @@ except (AttributeError, ValueError):
 
 # MMD 世界书条目标题（comment）硬上限，按字符数计，中文一字算 1。本地酒馆无此限制。
 MAX_COMMENT_LEN = 20
+
+MMD_TOP_LEVEL_KEYS = ("pageDepth", "statusbar", "beginning", "regex_scripts")
+MMD_SCRIPT_KEYS = ("id", "scriptName", "findRegex", "replaceString")
+
+_NODE_REGEX_ORACLE = (
+    "const fs=require('fs');"
+    "const x=JSON.parse(fs.readFileSync(0,'utf8'));"
+    "try{new RegExp(x.pattern,x.flags);"
+    "process.stdout.write(JSON.stringify({ok:true}));}"
+    "catch(e){process.stdout.write(JSON.stringify({ok:false,name:e&&e.name||'',"
+    "message:String(e&&e.message||e)}));}"
+)
+_NODE_REGEX_CACHE = {}
 
 ERRORS = []
 WARNS = []
@@ -87,24 +104,97 @@ def load_json(rawb):
 
 # ============ 平台红线检查（作用于解析后的 HTML/JS 字符串） ============
 
+class _EventAttributeParser(HTMLParser):
+    """只收集真实开始标签上的事件属性；script/style 文本不会被当属性扫描。"""
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.attrs = []
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            low = name.lower()
+            if low in ("onerror", "onclick"):
+                self.attrs.append((low, value or ""))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+
 def _extract_event_handler_attrs(s):
-    """提取所有 onerror=/onclick= 属性值（JS 代码体），返回 [(attr_name, quote, body), ...]。
-    尊重引号边界：onerror="..." 或 onerror='...'，取引号内整段。"""
-    out = []
-    for m in re.finditer(r"\b(onerror|onclick)\s*=\s*(\"|')", s, re.I):
-        attr = m.group(1).lower()
-        quote = m.group(2)
-        start = m.end()
-        end = s.find(quote, start)
-        if end == -1:
-            continue
-        out.append((attr, quote, s[start:end]))
-    return out
+    """返回真实 HTML 标签上的 [(attr_name, body), ...]，支持单双/未引号属性。"""
+    parser = _EventAttributeParser()
+    try:
+        parser.feed(s)
+        parser.close()
+    except (ValueError, TypeError):
+        return []
+    return parser.attrs
 
 
 def _extract_event_handler_bodies(s):
-    """提取所有 onerror=/onclick= 属性值（JS 代码体），返回 [(attr_name, body), ...]。"""
-    return [(attr, body) for attr, _quote, body in _extract_event_handler_attrs(s)]
+    return list(_extract_event_handler_attrs(s))
+
+
+_JS_IDENT = r"[A-Za-z_$][A-Za-z0-9_$]*"
+_INTERNAL_IDENT = r"__[A-Za-z_$][A-Za-z0-9_$]*"
+_CLEAN_WINDOW_GUARD_CALL = re.compile(
+    r"^window\.(?P<guard>" + _INTERNAL_IDENT + r")\s*&&\s*"
+    r"(?:window\.)?(?P<call>" + _INTERNAL_IDENT + r")\(\s*\)\s*;?$"
+)
+_CLEAN_STOP_CALL = re.compile(r"^event\.stopPropagation\(\s*\)\s*;?$")
+_CLEAN_EVAL_ELEMENT_CALL = re.compile(
+    r"^eval\(\s*getElementById\(\s*(?P<quote>['\"])(?P<id>[A-Za-z_$][A-Za-z0-9_$:.-]*)"
+    r"(?P=quote)\s*\)\.dataset\.s\s*\)\s*;?$"
+)
+
+
+def _mask_js_strings(s):
+    out = []
+    quote = None
+    escaped = False
+    for ch in s:
+        if quote:
+            out.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+        elif ch in ("'", '"', "`"):
+            quote = ch
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def classify_mmd_onclick(body):
+    """当前 MMD inline onclick allowlist；返回 (allowed, reason)。"""
+    source = html_mod.unescape(body or "").strip()
+    if not source:
+        return False, "空 onclick"
+    if "\n" in source or "\r" in source:
+        return False, "含裸换行/多行代码"
+    if "`" in source:
+        return False, "含模板字符串/动态代码"
+    if re.search(r"\beval\s*\(\s*['\"`]", source) or re.search(
+            r"\beval\s*\([^)]*\beval\s*\(\s*['\"`]", source):
+        return False, "含 eval 直接或嵌套代码字符串"
+    masked = _mask_js_strings(source)
+    if re.search(r"(?<![=!<>])=(?!=|>)", masked):
+        return False, "含直接 DOM/属性赋值"
+    trimmed = masked[:-1].rstrip() if masked.endswith(";") else masked
+    if ";" in trimmed or "," in trimmed or "{" in masked or "}" in masked:
+        return False, "含 sequence、多语句或代码块"
+    if _CLEAN_STOP_CALL.fullmatch(source):
+        return True, ""
+    if _CLEAN_EVAL_ELEMENT_CALL.fullmatch(source):
+        return True, ""
+    guard_call = _CLEAN_WINDOW_GUARD_CALL.fullmatch(source)
+    if guard_call and guard_call.group("guard") == guard_call.group("call"):
+        return True, ""
+    return False, "不属于已实测的 canonical 干净调用"
 
 
 def _scan_tag_end(s, start):
@@ -254,31 +344,34 @@ def check_double_escape(s, where):
 
 
 def check_interactive_event_newlines(s, where, platform):
-    """检查内联事件处理器内是否有裸换行。
-    旧版MMD：onerror/onclick 均须单行（CSP破坏多行JS）。
-    当前MMD：onerror 实测可多行，放行；onclick 仍应为干净单行调用（禁代码字面量/赋值），多行警告。"""
+    """检查内联事件处理器，并执行 MMD 当前版 onclick 净化规则。"""
     if platform not in ("oldmmd", "mmd"):
         return
     if platform == "oldmmd":
-        bad = re.findall(r'on\w+\s*=\s*"[^"]*\n[^"]*"', s)
+        bodies = [body for _attr, body in _extract_event_handler_attrs(s)]
+        bad = [body for body in bodies if "\n" in body or "\r" in body]
         if bad:
             err("%s 有 %d 个内联事件处理器(onclick/onerror)含裸换行——旧版MMD的CSP会破坏多行JS，必须单行。" % (where, len(bad)))
         else:
             ok("%s 内联事件处理器均单行" % where)
-    else:  # mmd：onerror 多行放行，仅查 onclick
-        onclick_bad = re.findall(r'onclick\s*=\s*"[^"]*\n[^"]*"', s)
-        if onclick_bad:
-            warn("%s 有 %d 个 onclick 含裸换行——当前MMD onclick 只放行干净单行调用(__fn()/eval(x.dataset.s))，复杂逻辑应进 data-s 或 window.__fn。onerror 多行已放行。" % (where, len(onclick_bad)))
+        return
+
+    onclicks = [body for attr, body in _extract_event_handler_attrs(s) if attr == "onclick"]
+    if not onclicks:
+        ok("%s 未发现真实 inline onclick（onerror 当前MMD可多行）" % where)
+        return
+
+    clean = 0
+    for body in onclicks:
+        allowed, reason = classify_mmd_onclick(body)
+        if allowed:
+            clean += 1
         else:
-            ok("%s onclick 均单行（onerror 当前MMD可多行）" % where)
-    # 当前MMD onclick 净化：属性内禁代码字面量/直接DOM赋值
-    if platform == "mmd":
-        # onclick="eval('...')" 代码字符串塞进属性 → 被净化
-        if re.search(r"onclick\s*=\s*\"[^\"]*eval\s*\(\s*['`]", s):
-            warn("%s onclick 内 eval 直接吃代码字符串字面量——当前MMD会净化。改为 eval(getElementById('FUNC').dataset.s) 这种干净调用（代码存进 data-s）。" % where)
-        # onclick="this.xxx=..." 直接赋值 → 被净化
-        if re.search(r"onclick\s*=\s*\"[^\"]*\b(this|document|window)\.[\w.]+\s*=[^=]", s):
-            warn("%s onclick 内含直接DOM赋值语句——当前MMD会净化（比旧版收紧）。改走 window.__fn() 或轻主板 eval(dataset.s)。" % where)
+            err("%s onclick 会被当前MMD净化：%s。属性内仅保留 window.__name(event/this 等简单引用)、"
+                "window.__fn&&__fn() 同名纯 guard-call、event.stopPropagation() 或 "
+                "eval(getElementById('固定ID').dataset.s)。未列出的调用即使语法简单，也没有当前 MMD 实测认证。" % (where, reason))
+    if clean == len(onclicks):
+        ok("%s onclick 均为 allowlist 内的干净单一调用（onerror 当前MMD可多行）" % where)
 
 
 # ============ 类型专项校验 ============
@@ -297,73 +390,483 @@ def looks_like(obj):
     return None
 
 
-HTML_TAGS = set("""a audio b big body br button code del details div em font form h1 h2 h3 h4 h5 h6
-head hr html i iframe img input ins label li link mark meta nav ol option p pre script section select small span
-strong style sub summary sup table tbody td textarea th thead title tr u ul video""".split())
+HTML_TAGS = set("""a abbr address area article aside audio b base bdi bdo blockquote body br button canvas
+caption cite code col colgroup data datalist dd del details dfn dialog div dl dt em embed fieldset figcaption
+figure footer form h1 h2 h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label legend li
+link main map mark menu meta meter nav noscript object ol optgroup option output p picture pre progress q rp rt
+ruby s samp script search section select slot small source span strong style sub summary sup svg table tbody td
+template textarea tfoot th thead time title tr track u ul var video wbr""".split())
+
+
+def _split_findregex_literal(fr):
+    """解析 JS `/pattern/flags` 字面量；尊重转义与字符类中的斜杠。"""
+    if not isinstance(fr, str) or not fr.startswith("/"):
+        return None
+    escaped = False
+    in_class = False
+    end = None
+    for i in range(1, len(fr)):
+        ch = fr[i]
+        if ch in "\r\n" or ord(ch) in (0x2028, 0x2029):
+            return None
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == "[":
+            in_class = True
+        elif ch == "]" and in_class:
+            in_class = False
+        elif ch == "/" and not in_class:
+            end = i
+            break
+    if end is None:
+        return None
+    flags = fr[end + 1:]
+    if not re.fullmatch(r"[dgimsuvy]*", flags):
+        return None
+    if len(set(flags)) != len(flags) or ("u" in flags and "v" in flags):
+        return None
+    return fr[1:end], flags
+
+
+def _node_js_regex_error(pattern, flags):
+    """返回 (oracle_available, syntax_error)。Node 仅经 stdin 接收 JSON，不拼接用户正则。"""
+    node = shutil.which("node")
+    cache_key = (node, pattern, flags)
+    if cache_key in _NODE_REGEX_CACHE:
+        return _NODE_REGEX_CACHE[cache_key]
+    if not node:
+        result = (False, None)
+        _NODE_REGEX_CACHE[cache_key] = result
+        return result
+    try:
+        proc = subprocess.run(
+            [node, "-e", _NODE_REGEX_ORACLE],
+            input=json.dumps({"pattern": pattern, "flags": flags}, ensure_ascii=False),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+        )
+        data = json.loads(proc.stdout) if proc.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, TypeError, ValueError):
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("ok"), bool):
+        result = (False, None)
+    elif data["ok"]:
+        result = (True, None)
+    elif data.get("name") == "SyntaxError":
+        result = (True, str(data.get("message") or "JS RegExp SyntaxError"))
+    else:
+        result = (False, None)
+    _NODE_REGEX_CACHE[cache_key] = result
+    return result
+
+
+def _js_regex_oracle_available():
+    return _node_js_regex_error("", "")[0]
+
+
+def _exact_key_error(actual, expected, label):
+    expected_order = tuple(expected)
+    actual = set(actual)
+    expected = set(expected_order)
+    if actual == expected:
+        return None
+    parts = []
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing:
+        parts.append("缺少 %s" % "、".join(missing))
+    if extra:
+        parts.append("多出 %s" % "、".join(extra))
+    return "%s keys 必须恰好为 %s（%s）" % (label, "/".join(expected_order), "；".join(parts))
+
+
+def _mmd_regex_top_level_errors(obj):
+    errors = []
+    if not isinstance(obj, dict):
+        return ["MMD/oldmmd 正则导入必须为 pageDepth/statusbar/beginning/regex_scripts 四字段对象，顶层数组仅适用于 ST"]
+    key_error = _exact_key_error(obj.keys(), MMD_TOP_LEVEL_KEYS, "MMD 顶层")
+    if key_error:
+        errors.append(key_error)
+    if "pageDepth" in obj and (isinstance(obj["pageDepth"], bool)
+                                or not isinstance(obj["pageDepth"], (int, float))):
+        errors.append("MMD 顶层 pageDepth 必须为 number，当前为 %s" % type(obj["pageDepth"]).__name__)
+    for field in ("statusbar", "beginning"):
+        if field in obj and not isinstance(obj[field], str):
+            errors.append("MMD 顶层 %s 必须为 string，当前为 %s" % (field, type(obj[field]).__name__))
+    scripts = obj.get("regex_scripts")
+    if "regex_scripts" in obj and not isinstance(scripts, list):
+        errors.append("MMD 顶层 regex_scripts 必须为 array，当前为 %s" % type(scripts).__name__)
+    return errors
+
+
+def _mmd_regex_schema_errors(obj):
+    """返回 MMD 四字段导入结构错误；ST 数组不调用此检查。"""
+    errors = _mmd_regex_top_level_errors(obj)
+    if not isinstance(obj, dict):
+        return errors
+    scripts = obj.get("regex_scripts")
+    if not isinstance(scripts, list):
+        return errors
+    for i, sc in enumerate(scripts):
+        label = "MMD regex_scripts[%d]" % i
+        if not isinstance(sc, dict):
+            errors.append("%s 必须为 object，当前为 %s" % (label, type(sc).__name__))
+            continue
+        key_error = _exact_key_error(sc.keys(), MMD_SCRIPT_KEYS, label)
+        if key_error:
+            errors.append(key_error)
+        if "id" in sc and (type(sc["id"]) is not int or sc["id"] != -1):
+            errors.append("%s id 必须为整数 -1，当前为 %r" % (label, sc["id"]))
+        for field in ("scriptName", "findRegex", "replaceString"):
+            if field in sc and not isinstance(sc[field], str):
+                errors.append("%s %s 必须为 string，当前为 %s" %
+                              (label, field, type(sc[field]).__name__))
+    return errors
+
+
+def _simple_reversed_class_range(pattern):
+    """只判断端点均为未转义字符的明确逆序范围；其余交给 Node。"""
+    i = 0
+    while i < len(pattern):
+        if pattern[i] == "\\":
+            i += 2
+            continue
+        if pattern[i] != "[":
+            i += 1
+            continue
+        tokens = []
+        i += 1
+        escaped = False
+        while i < len(pattern):
+            ch = pattern[i]
+            if escaped:
+                tokens.append((ch, True))
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "]":
+                break
+            else:
+                tokens.append((ch, False))
+            i += 1
+        for j in range(1, len(tokens) - 1):
+            prev_ch, prev_escaped = tokens[j - 1]
+            ch, ch_escaped = tokens[j]
+            next_ch, next_escaped = tokens[j + 1]
+            if (ch == "-" and not ch_escaped and not prev_escaped and not next_escaped
+                    and prev_ch != "-" and next_ch != "-" and ord(prev_ch) > ord(next_ch)):
+                return "%s-%s" % (prev_ch, next_ch)
+        i += 1
+    return None
+
+
+def _js_regex_structure_error(fr):
+    """先做保守结构 fallback；Node 可用时再以真实 JS RegExp 语法为准。"""
+    parsed = _split_findregex_literal(fr)
+    if parsed is None:
+        return "必须为 /pattern/flags 形式，且分隔符、字符类、换行和 flags 合法"
+    pattern, flags = parsed
+    escaped = False
+    in_class = False
+    depth = 0
+    for i, ch in enumerate(pattern):
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif in_class:
+            if ch == "]":
+                in_class = False
+        elif ch == "[":
+            in_class = True
+        elif ch == "(":
+            if pattern.startswith("?P<", i + 1) or pattern.startswith("?P=", i + 1):
+                return "含 Python 专有命名组语法 (?P<...>)/(?P=...)，不是 JS RegExp 语法"
+            if pattern.startswith("?(", i + 1):
+                return "含 Python 专有条件组语法 (?(...))，不是 JS RegExp 语法"
+            if pattern.startswith("?<", i + 1) and i + 3 < len(pattern) and pattern[i + 3] not in ("=", "!"):
+                end = pattern.find(">", i + 3)
+                if end == -1:
+                    return "命名捕获组名称未闭合"
+                name = pattern[i + 3:end]
+                if (not name or name[0].isdigit() or
+                        (name.isascii() and "\\" not in name and not re.fullmatch(_JS_IDENT, name))):
+                    return "命名捕获组名称 %r 不是合法 JS 标识符" % name
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return "pattern 含无对应开始括号的 )"
+        elif ch == "{":
+            quantifier = re.match(r"\{(\d+),(\d+)\}", pattern[i:])
+            if quantifier and int(quantifier.group(1)) > int(quantifier.group(2)):
+                return "量词下界 %s 大于上界 %s" % (quantifier.group(1), quantifier.group(2))
+    if depth:
+        return "pattern 含未闭合的 ("
+    reversed_range = _simple_reversed_class_range(pattern)
+    if reversed_range:
+        return "字符类范围 [%s] 起点大于终点" % reversed_range
+    oracle_available, oracle_error = _node_js_regex_error(pattern, flags)
+    if oracle_available and oracle_error:
+        return "Node JS RegExp SyntaxError: %s" % oracle_error
+    return None
+
+
+def _translate_js_named_groups(pattern):
+    """只翻译真实 JS named group/backref，返回 (translated, reason)。"""
+    out = []
+    i = 0
+    in_class = False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            if not in_class and pattern.startswith("\\k<", i):
+                end = pattern.find(">", i + 3)
+                if end == -1:
+                    return None, "命名反向引用未闭合"
+                name = pattern[i + 3:end]
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                    return None, "命名反向引用名称超出预览器支持范围"
+                out.append("(?P=%s)" % name)
+                i = end + 1
+                continue
+            out.append(pattern[i:i + 2])
+            i += 2
+            continue
+        if in_class:
+            out.append(ch)
+            if ch == "]":
+                in_class = False
+            i += 1
+            continue
+        if ch == "[":
+            in_class = True
+            out.append(ch)
+            i += 1
+            continue
+        if pattern.startswith("(?<", i) and i + 3 < len(pattern) and pattern[i + 3] not in ("=", "!"):
+            end = pattern.find(">", i + 3)
+            if end == -1:
+                return None, "命名组名称未闭合"
+            name = pattern[i + 3:end]
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                return None, "命名组名称超出预览器支持范围"
+            out.append("(?P<%s>" % name)
+            i = end + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out), None
 
 
 def _parse_findregex(fr):
-    if not (isinstance(fr, str) and fr.startswith("/")):
-        return None
-    end = fr.rfind("/")
-    if end <= 0:
-        return None
+    """兼容旧调用：返回结构解析结果；不再以 Python re.compile 判断 JS 合法性。"""
+    return None if _js_regex_structure_error(fr) else _split_findregex_literal(fr)
+
+
+def _compile_js_regex_for_preview(fr):
+    """编译预览器支持的 JS RegExp 子集，返回 (regex, flags, reason)。
+
+    reason 仅表示 Python 预览器无法可靠模拟，不能据此判断 MMD/JS 规则非法。"""
+    parsed = _split_findregex_literal(fr)
+    if parsed is None or _js_regex_structure_error(fr):
+        return None, "", "findRegex 结构非法"
+    pattern, js_flags = parsed
+    if "v" in js_flags:
+        return None, js_flags, "暂不支持 v flag 的 UnicodeSets 语义"
+    if re.search(r"\\[pP]\{", pattern):
+        return None, js_flags, "暂不支持 Unicode property escape（\\p/\\P）"
+    if re.search(r"\\u\{[0-9A-Fa-f]+\}", pattern):
+        return None, js_flags, "暂不支持 JS code point escape（\\u{...}）"
+    if re.search(r"\\c[A-Za-z]", pattern):
+        return None, js_flags, "暂不支持 JS control escape（\\cX）"
+
+    translated, translate_reason = _translate_js_named_groups(pattern)
+    if translate_reason:
+        return None, js_flags, translate_reason
+    py_flags = 0
+    if "i" in js_flags:
+        py_flags |= re.I
+    if "m" in js_flags:
+        py_flags |= re.M
+    if "s" in js_flags:
+        py_flags |= re.S
     try:
-        return re.compile(fr[1:end])
-    except re.error:
-        return None
+        return re.compile(translated, py_flags), js_flags, None
+    except re.error as exc:
+        return None, js_flags, "Python 预览后端无法模拟：%s" % exc
 
 
-def check_dangling_markers(obj, scripts):
-    """statusbar/beginning 中的自定义 <标记> 必须被 findRegex 消费，否则会裸露。
+def _match_group(m, key):
+    try:
+        return m.group(key) or ""
+    except (IndexError, KeyError, re.error):
+        return ""
 
-    判据=标记在 hay 中的位置是否落入某条 findRegex 的实际匹配区间。
-    （旧逻辑用裸标记 `<g3>` 去 rx.search 试探，对"整段匹配型" findRegex 如
-    /<g3>([\\s\\S]*?)<\\/g3>/ 会误判悬空——影渲法/雷达法常用整段匹配。改为在
-    整段 hay 上跑 finditer 收集覆盖区间，标记落入即被消费。）"""
+
+def _expand_js_replacement(template, m, source):
+    """展开 JS String.replace replacement tokens；反斜杠按字面保留。"""
+    out = []
+    i = 0
+    groups = m.re.groups
+    named = bool(m.re.groupindex)
+    while i < len(template):
+        if template[i] != "$" or i + 1 >= len(template):
+            out.append(template[i])
+            i += 1
+            continue
+        nxt = template[i + 1]
+        if nxt == "$":
+            out.append("$")
+            i += 2
+        elif nxt == "&":
+            out.append(m.group(0))
+            i += 2
+        elif nxt == "`":
+            out.append(source[:m.start()])
+            i += 2
+        elif nxt == "'":
+            out.append(source[m.end():])
+            i += 2
+        elif nxt == "<":
+            end = template.find(">", i + 2)
+            if end == -1 or not named:
+                out.append("$")
+                i += 1
+            else:
+                out.append(_match_group(m, template[i + 2:end]))
+                i = end + 1
+        elif nxt.isdigit():
+            first = int(nxt)
+            if first == 0:
+                if i + 2 < len(template) and template[i + 2].isdigit():
+                    second = int(template[i + 2])
+                    if second and second <= groups:
+                        out.append(_match_group(m, second))
+                        i += 3
+                    else:
+                        out.append(template[i:i + 3])
+                        i += 3
+                else:
+                    out.append("$0")
+                    i += 2
+                continue
+            if i + 2 < len(template) and template[i + 2].isdigit():
+                two_digit = first * 10 + int(template[i + 2])
+                if two_digit <= groups:
+                    out.append(_match_group(m, two_digit))
+                    i += 3
+                    continue
+            if first <= groups:
+                out.append(_match_group(m, first))
+                i += 2
+            else:
+                out.append("$" + nxt)
+                i += 2
+        else:
+            out.append("$")
+            i += 1
+    return "".join(out)
+
+
+def _replace_js_regex(source, regex, js_flags, replacement):
+    """模拟 String.replace 的 g/y 匹配范围和 replacement token。"""
+    matches = []
+    global_mode = "g" in js_flags
+    if "y" in js_flags:
+        pos = 0
+        while pos <= len(source):
+            m = regex.match(source, pos)
+            if m is None:
+                break
+            matches.append(m)
+            if not global_mode:
+                break
+            next_pos = m.end()
+            pos = next_pos if next_pos > pos else pos + 1
+    elif global_mode:
+        matches = list(regex.finditer(source))
+    else:
+        m = regex.search(source)
+        if m is not None:
+            matches = [m]
+    if not matches:
+        return source
+    out = []
+    last = 0
+    for m in matches:
+        out.append(source[last:m.start()])
+        out.append(_expand_js_replacement(replacement, m, source))
+        last = m.end()
+    out.append(source[last:])
+    return "".join(out)
+
+
+def _apply_supported_regex_pipeline(obj):
+    """执行预览器支持的规则；非法或 JS-only 未支持规则保持跳过。"""
     if not isinstance(obj, dict):
-        return
-    hay = ""
-    for k in ("statusbar", "beginning"):
-        v = obj.get(k, "")
-        if isinstance(v, str):
-            hay += v
-    if not hay:
-        return
-    literals = set()
-    covered = []          # findRegex 在 hay 上的实际匹配区间 [(start,end),...]
+        return ""
+    text = "".join(obj.get(k, "") if isinstance(obj.get(k, ""), str) else ""
+                   for k in ("statusbar", "beginning"))
+    scripts = obj.get("regex_scripts", [])
+    if not isinstance(scripts, list):
+        return text
     for sc in scripts:
         if not isinstance(sc, dict):
             continue
         fr = sc.get("findRegex", "")
-        if not isinstance(fr, str) or not fr:
+        rs = sc.get("replaceString", "")
+        if not isinstance(fr, str) or not isinstance(rs, str) or not fr:
             continue
-        rx = _parse_findregex(fr)
-        if rx is None:
-            literals.add(fr)
-            # 字面量 findRegex：收集其在 hay 中所有出现区间
-            start = 0
-            while True:
-                idx = hay.find(fr, start)
-                if idx == -1:
-                    break
-                covered.append((idx, idx + len(fr)))
-                start = idx + len(fr)
-        else:
-            for mm in rx.finditer(hay):
-                covered.append((mm.start(), mm.end()))
-    seen = set()
-    for m in re.finditer(r"<([A-Za-z一-鿿][A-Za-z0-9_.\-一-鿿]*)>", hay):
-        marker = m.group(0)
-        name = m.group(1).lower()
-        if name in HTML_TAGS or marker in seen:
+        regex, js_flags, reason = _compile_js_regex_for_preview(fr)
+        if regex is None or reason:
             continue
-        seen.add(marker)
-        # 标记位置落入任一 findRegex 匹配区间 = 被消费
-        pos = m.start()
-        if any(s <= pos < e for s, e in covered):
+        text = _replace_js_regex(text, regex, js_flags, rs)
+    return text
+
+
+def _custom_marker_occurrences(text):
+    """返回最终文本中的自定义开始/结束标记 occurrence，不按名称去重。"""
+    out = []
+    for m in re.finditer(r"</?([A-Za-z一-鿿][A-Za-z0-9_.\-一-鿿]*)\s*>", text):
+        if m.group(1).lower() not in HTML_TAGS:
+            out.append((m.group(0), m.start()))
+    return out
+
+
+def _preview_unsupported_rules(scripts):
+    out = []
+    for i, sc in enumerate(scripts if isinstance(scripts, list) else []):
+        if not isinstance(sc, dict):
             continue
-        err("悬空标记 %s：出现在 statusbar/beginning 中但无对应 findRegex 消费，渲染时会裸露。" % marker)
+        fr = sc.get("findRegex", "")
+        if not isinstance(fr, str) or not fr or _js_regex_structure_error(fr):
+            continue
+        regex, _flags, reason = _compile_js_regex_for_preview(fr)
+        if regex is None or reason:
+            out.append(str(sc.get("scriptName", sc.get("name", "#%d" % i))))
+    return out
+
+
+def check_dangling_markers(obj, scripts=None):
+    """按受支持规则的最终管线输出逐 occurrence 检查自定义开始/结束标记。"""
+    if not isinstance(obj, dict):
+        return
+    scripts = scripts if isinstance(scripts, list) else obj.get("regex_scripts", [])
+    unsupported = _preview_unsupported_rules(scripts)
+    if unsupported:
+        warn("悬空标记审计已跳过：预览器无法模拟 JS 正则规则 %s。" % "、".join(unsupported))
+        return
+    rendered = _apply_supported_regex_pipeline(obj)
+    for marker, pos in _custom_marker_occurrences(rendered):
+        err("悬空标记 %s：最终管线输出位置 %d 仍有自定义标记，渲染时会裸露。" % (marker, pos))
 
 
 def check_shadowcast(s, platform, where):
@@ -395,21 +898,35 @@ def check_shadowcast(s, platform, where):
 
 
 def validate_regex(obj, platform):
-    """MMD 导入json(4字段) 或 本地酒馆正则数组。"""
+    """MMD 导入 JSON 必须是严格四字段 dict；ST 保持正则数组兼容。"""
     scripts = []
-    if isinstance(obj, dict) and "regex_scripts" in obj:
-        # MMD 4字段格式
-        for k in ("pageDepth", "statusbar", "beginning", "regex_scripts"):
-            if k not in obj:
-                warn("MMD 导入json 缺字段 %s" % k)
+    mmd_platform = platform in ("oldmmd", "mmd")
+    if mmd_platform:
+        schema_errors = _mmd_regex_schema_errors(obj)
+        for message in schema_errors:
+            err(message)
+        if not isinstance(obj, dict):
+            return
         scripts = obj.get("regex_scripts", [])
         if not isinstance(scripts, list):
-            err("MMD 导入json regex_scripts 应为数组，当前为 %s。" % type(scripts).__name__)
             scripts = []
-        sb = obj.get("statusbar", "")
+        if _js_regex_oracle_available():
+            ok("findRegex 已通过 Node.js new RegExp 语法 oracle 门禁")
+        else:
+            warn("未找到可用 Node.js；findRegex 仅执行结构 fallback，未经过真实 JS RegExp oracle。")
         ok("识别为 MMD 导入json 格式（%d 条正则）" % len(scripts))
+        sb = obj.get("statusbar", "")
         if isinstance(sb, str) and sb:
             ok("statusbar 触发标记: %s" % sb)
+    elif isinstance(obj, dict) and "regex_scripts" in obj:
+        scripts = obj.get("regex_scripts", [])
+        if not isinstance(scripts, list):
+            err("正则对象 regex_scripts 应为数组，当前为 %s。" % type(scripts).__name__)
+            scripts = []
+        for k in MMD_TOP_LEVEL_KEYS:
+            if k not in obj:
+                warn("正则对象缺字段 %s" % k)
+        ok("识别为 MMD 导入json 格式（%d 条正则）" % len(scripts))
     elif isinstance(obj, list):
         scripts = obj
         ok("识别为 本地酒馆正则数组（%d 条）" % len(scripts))
@@ -417,10 +934,10 @@ def validate_regex(obj, platform):
         err("无法识别的正则结构")
         return
 
-    if platform in ("oldmmd", "mmd") and isinstance(obj, dict):
+    if mmd_platform and isinstance(obj, dict):
         check_dangling_markers(obj, scripts)
 
-    if platform in ("oldmmd", "mmd"):
+    if mmd_platform:
         if len(scripts) > 130:
             err("正则条数 %d > 130，超出MMD上限。" % len(scripts))
         else:
@@ -431,7 +948,8 @@ def validate_regex(obj, platform):
             err("第%d条正则不是对象" % i)
             continue
         name = sc.get("scriptName", sc.get("name", "#%d" % i))
-        fr = sc.get("findRegex", "")
+        raw_fr = sc.get("findRegex", "")
+        fr = raw_fr
         rs = sc.get("replaceString", "")
         tag = "正则[%s]" % name
 
@@ -443,15 +961,23 @@ def validate_regex(obj, platform):
             warn("%s replaceString 非字符串（%s），已按空串处理" % (tag, type(rs).__name__))
             rs = ""
 
-        if platform in ("oldmmd", "mmd"):
+        if mmd_platform:
+            if isinstance(obj, dict) and raw_fr not in ("", None) and not isinstance(raw_fr, str):
+                err("%s findRegex 非法：MMD 四字段导入 JSON 的非空 findRegex 必须为 /pattern/flags 字符串。" % tag)
+            elif isinstance(obj, dict) and fr:
+                regex_error = _js_regex_structure_error(fr)
+                if regex_error:
+                    err("%s findRegex 非法：%s。" % (tag, regex_error))
             if len(fr) > 1000:
                 err("%s findRegex %d 字符 > 1000" % (tag, len(fr)))
             else:
                 ok("%s findRegex %d 字符 ≤ 1000" % (tag, len(fr)))
             if len(rs) > 20000:
                 err("%s replaceString %d 字符 > 20000" % (tag, len(rs)))
+            elif len(rs) >= 18000:
+                warn("%s replaceString %d 字符，距 MMD 20000 字符上限余量不足。" % (tag, len(rs)))
             else:
-                ok("%s replaceString %d 字符 ≤ 20000" % (tag, len(rs)))
+                ok("%s replaceString %d 字符 < 18000（余量充足）" % (tag, len(rs)))
 
         # 对 replaceString 内容做红线 + 转义 + 单行检查
         if rs:
@@ -459,8 +985,10 @@ def validate_regex(obj, platform):
             check_double_escape(rs, tag)
             check_interactive_event_newlines(rs, tag, platform)
             check_shadowcast(rs, platform, tag)
-            # 容器事件冒泡（仅含交互的美化/状态栏需要）
-            if platform in ("oldmmd", "mmd") and re.search(r"onclick=", rs):
+            # 容器事件冒泡（仅实际内联 onclick 属性需要；动态 el.onclick= 不属于属性）
+            has_inline_onclick = any(attr == "onclick" for attr, _body
+                                     in _extract_event_handler_attrs(rs))
+            if platform in ("oldmmd", "mmd") and has_inline_onclick:
                 if "stopPropagation" not in rs:
                     warn("%s 有 onclick 但未见 stopPropagation——交互模块最外层应加 onclick=\"event.stopPropagation()\" 防事件冒泡。" % tag)
 
