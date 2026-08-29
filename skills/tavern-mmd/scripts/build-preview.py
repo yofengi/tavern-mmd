@@ -1036,6 +1036,11 @@ uni-view,uni-scroll-view,uni-image,uni-text{display:block}
 .modify-btn-scope .modify-btn svg{width:0.875rem;height:0.875rem;display:block}
 /* 用户消息（.self）圆钮靠右：真机 justify-end、x≈右侧（实测 x=1039 对 1191 宽气泡）*/
 .item.self .modify-btn-scope{left:auto;right:0;justify-content:flex-end}
+/* 消息两态互斥（实测状态流转 2026-08-29）：初始态显开场白、发送后显用户+AI回复。
+   顺序恒为 描述→first_mes→开场白(initial)→用户(sent)→AI(sent)，隐藏项塌陷，视觉序自然对。
+   默认 data-chat-state=sent（被测内容落在 AI 回复气泡，作者开预览即见）。*/
+.chat[data-chat-state="sent"] [data-msg-state="initial"]{display:none}
+.chat[data-chat-state="initial"] [data-msg-state="sent"]{display:none}
 
 /* 开场白选择块 */
 .prologue-scope{padding:0 0.96156rem}
@@ -2021,6 +2026,21 @@ MMD_POPUP_SIM = (
     '</uni-view></uni-view>'
     '<uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
     '</uni-view></uni-view></uni-view>'
+    # 「新的聊天」确认弹窗（快捷栏 onShortcutNewChat → 居中 dialog，复用 alert-scope 样式）。
+    # 实测点「新的聊天」是独立动作(非指令栏)；预览用确认框占位，走宿主真实副作用不模拟。
+    '<uni-view class="u-popup pano-dialog" data-sheet="newchat" data-open="off">'
+    '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="newchat"></uni-view>'
+    '<uni-view class="u-transition" style="position:relative">'
+    '<uni-view class="u-popup__content u-popup__content--round-center">'
+    '<uni-view class="alert-scope">'
+    '<uni-view class="alert-title">开启新的聊天</uni-view>'
+    '<uni-view class="alert-content">确定要开启新的聊天吗？当前对话会被保存到历史。</uni-view>'
+    '<uni-view class="alert-bottom alert-bottom-double">'
+    '<uni-view class="cancel-btn" data-pano-sheet-close="newchat">取消</uni-view>'
+    '<uni-view class="ok-btn" data-pano-sheet-close="newchat">确定</uni-view>'
+    '</uni-view></uni-view>'
+    '<uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
+    '</uni-view></uni-view></uni-view>'
 )
 
 
@@ -2065,8 +2085,11 @@ MMD_PANEL_SCAFFOLD = (
     "var l=D.querySelectorAll('[data-pano-sheet-close]');"
     "for(var i=0;i<l.length;i++){l[i].onclick=function(ev){ev.stopPropagation();closeAll();};}"
     "var sc=D.querySelectorAll('.shortcut-btn');"
+    # 快捷按钮点击映射（实测 2026-08-29）：模型设置/对话设置/总结剧情/用户人设 → 各自面板；
+    # 新的聊天 → 独立确认弹窗(onShortcutNewChat，**不是指令栏**)；仅 选择指令 走指令栏(else)。
     "var map={'\\u6a21\\u578b\\u8bbe\\u7f6e':'model','\\u5bf9\\u8bdd\\u8bbe\\u7f6e':'conv',"
-    "'\\u603b\\u7ed3\\u5267\\u60c5':'summary','\\u7528\\u6237\\u4eba\\u8bbe':'role'};"
+    "'\\u603b\\u7ed3\\u5267\\u60c5':'summary','\\u7528\\u6237\\u4eba\\u8bbe':'role',"
+    "'\\u65b0\\u7684\\u804a\\u5929':'newchat'};"
     "for(var j=0;j<sc.length;j++){(function(b){b.onclick=function(ev){ev.stopPropagation();"
     "var t=(b.textContent||'').replace(/^\\s+|\\s+$/g,'');"
     "if(map[t]){open(map[t]);}else{toggleInstr();}};})(sc[j]);}"
@@ -2085,8 +2108,12 @@ MMD_PANEL_SCAFFOLD = (
     "var el=D.querySelector('.uni-textarea-textarea');"
     "if(el){el.value=(pc.textContent||'').replace(/^\\s+|\\s+$/g,'');"
     "el.dispatchEvent(new Event('input',{bubbles:true}));}};}"
-    "var hidePrologue=function(){if(prologue){prologue.style.display='none';}};"
-    "var showPrologue=function(){if(prologue){prologue.style.display='';}};"
+    # 状态流转切 .chat[data-chat-state]（一次控制 开场白/用户/AI 三块互斥）：
+    # sent=发送后(开场白隐、用户+AI显) / initial=初始或回溯后(开场白显、用户+AI隐)。
+    "var chatRoot=D.querySelector('.chat');"
+    "var setChatState=function(s){if(chatRoot){chatRoot.setAttribute('data-chat-state',s);}return s;};"
+    "var hidePrologue=function(){return setChatState('sent');};"
+    "var showPrologue=function(){return setChatState('initial');};"
     # 长按菜单：first_mes(kind=first) 仅复制，隐藏 data-only-full 项；常规消息 4 项全显
     "var menu=D.querySelector('.msg-option-scope');"
     "var openMenu=function(kind,text){if(!menu)return false;"
@@ -2183,7 +2210,8 @@ MMD_PANEL_SCAFFOLD = (
     "window.__panoPanels={open:open,closeAll:closeAll,"
     "toggleMore:toggleMore,toggleInstruction:toggleInstr,"
     "openMenu:openMenu,closeMenu:closeMenu,"
-    "hidePrologue:hidePrologue,showPrologue:showPrologue,"
+    "hidePrologue:hidePrologue,showPrologue:showPrologue,setChatState:setChatState,"
+    "chatState:function(){return chatRoot?chatRoot.getAttribute('data-chat-state'):null;},"
     "list:function(){var o=[],l=D.querySelectorAll('[data-sheet]');"
     "for(var i=0;i<l.length;i++){o.push(l[i].getAttribute('data-sheet'));}return o;},"
     "opened:function(){var l=D.querySelectorAll('[data-sheet][data-open=on]');"
@@ -2201,6 +2229,7 @@ MMD_PANEL_TOOLS = (
     ("role", "用户人设", "slide-up 69vh · 用 --lo* 变量族（实测18个全未定义，恒走fallback）"),
     ("share", "分享", "矮条 · 框架自带右上角关闭钮"),
     ("alert", "AI帮聊说明", "居中 dialog · .alert-scope · round-center"),
+    ("newchat", "新的聊天", "居中确认 dialog · 快捷栏 onShortcutNewChat（独立动作，非指令栏）"),
 )
 
 
@@ -2225,13 +2254,13 @@ def _mmd_panel_tools_html():
         '（复制/删除/回溯/开启新的故事；first_mes 仅复制）。也可直接长按消息触发" '
         'onclick="%s.__panoPanels.openMenu(\'ai\',\'长按菜单预览（AI 消息四项）\')">长按菜单</button>' % win)
     parts.append(
-        '<button class="preview-tool" type="button" title="模拟发送：隐藏开场白选择块'
-        '（真机发一条后开场白消失）" '
-        'onclick="%s.__panoPanels.hidePrologue()">发送→隐开场白</button>' % win)
+        '<button class="preview-tool" type="button" title="发送后态：开场白消失，显示 用户消息+AI回复'
+        '（被测内容在 AI 回复气泡里）。真机发一条后即此态" '
+        'onclick="%s.__panoPanels.setChatState(\'sent\')">发送后态</button>' % win)
     parts.append(
-        '<button class="preview-tool" type="button" title="模拟回溯：开场白重现'
-        '（真机回溯消息后开场白回来）" '
-        'onclick="%s.__panoPanels.showPrologue()">回溯→显开场白</button>' % win)
+        '<button class="preview-tool" type="button" title="初始/回溯态：显示 first_mes+开场白选择'
+        '（用户+AI回复隐藏）。真机回溯消息后回到此态" '
+        'onclick="%s.__panoPanels.setChatState(\'initial\')">初始/回溯态</button>' % win)
     parts.append(
         '<button class="preview-tool" type="button" title="关闭所有弹窗" '
         'onclick="%s.__panoPanels.closeAll();%s.__panoPanels.closeMenu()">全部关闭</button>' % (win, win))
@@ -2256,7 +2285,7 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
     return (
         '%(runtime)s'
         '%(hoisted)s'
-        '<uni-view class="chat"%(root)s>'
+        '<uni-view class="chat" data-chat-state="sent"%(root)s>'
         # ── 顶栏 ──
         '<uni-view class="page-header-scope">'
         '<uni-view class="topTabbar"%(header)s>'
@@ -2282,9 +2311,26 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
         '<uni-view class="touch-scope">'
         '<uni-view class="content left">角色描述气泡（通栏形态：touch-scope 满宽、圆角对称 0.5rem）</uni-view>'
         '</uni-view></uni-view></uni-view>'
-        # 用户消息（.self 右对齐 + .content.right）。实测 2 圆钮（编辑/分享）靠气泡右下，
+        # first_mes（角色卡「第一句话」，莉娜开场）：普通 AI 气泡但**无可见圆钮**
+        # （实测 modify-btn 存在但 0×0 隐藏）。它一直在顶部（描述气泡之下），两态都显示。
+        '<uni-view><uni-view class="item Ai" data-msg="first"%(frame)s>'
+        '<uni-view class="touch-scope">'
+        '<uni-view class="content left">第一句话（角色开场白正文，无三圆钮，长按仅"复制"）</uni-view>'
+        '</uni-view></uni-view></uni-view>'
+        # ── 两态互斥（实测状态流转，2026-08-29）──────────────────────────
+        # 初始态：first_mes 之后是 .prologue-scope（开场白选择）。
+        # 发送一条后：开场白消失，出现 用户消息 + AI回复。回溯则开场白重现。
+        # DOM 顺序 = 描述→first_mes→开场白(initial)→用户(sent)→AI回复(sent)，
+        # 靠 .chat[data-chat-state] 切 display，隐藏项塌陷，视觉顺序天然正确。
+        # 默认 sent（tested 落在 AI 回复气泡里，作者一开预览就看得到被测组件）。
+        # 开场白选择块（仅初始态显示）
+        '<uni-view class="prologue-scope" data-msg-state="initial">'
+        '<uni-view class="prologue-title"><span>你可以选择开场</span></uni-view>'
+        '<uni-view class="prologue-content">开场白示例</uni-view>'
+        '</uni-view>'
+        # 用户消息（.self 右对齐 + .content.right，仅发送后态）。实测 2 圆钮（编辑/分享）靠右下，
         # 无"刷新"钮（用户消息不能重新生成）。图标与 AI 的后两钮同款。
-        '<uni-view><uni-view class="item Ai self"%(frame)s>'
+        '<uni-view data-msg-state="sent"><uni-view class="item Ai self"%(frame)s>'
         '<uni-view class="touch-scope"%(msg_user)s>'
         '<uni-view class="content right"%(body)s>用户示例消息</uni-view>'
         '<uni-view class="modify-btn-scope">'
@@ -2299,8 +2345,8 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
         '</uni-view>'
         '</uni-view>'
         '</uni-view></uni-view></uni-view>'
-        # 被测内容：普通 AI 气泡（真机状态栏/组件的落点）
-        '<uni-view><uni-view class="item Ai"%(frame)s>'
+        # 被测内容：普通 AI 气泡（真机状态栏/组件的落点，仅发送后态）
+        '<uni-view data-msg-state="sent"><uni-view class="item Ai"%(frame)s>'
         '<uni-view class="select-box" style="display:none"></uni-view>'
         '<uni-view class="touch-scope" id="item0"%(msg_ai)s>'
         '<uni-view class="content left" id="q-1"%(body)s>%(tested)s</uni-view>'
@@ -2319,11 +2365,6 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
         '</uni-view>'
         '</uni-view>%(message_extra)s%(message_actions)s'
         '</uni-view></uni-view></uni-view>'
-        # 开场白选择块
-        '<uni-view class="prologue-scope">'
-        '<uni-view class="prologue-title"><span>你可以选择开场</span></uni-view>'
-        '<uni-view class="prologue-content">开场白示例</uni-view>'
-        '</uni-view>'
         '<uni-view id="chatBottom"></uni-view>'
         '</uni-view></div></div></uni-scroll-view></uni-view>'
         # 官方侧边挂载点（悬浮组件靶位）

@@ -387,6 +387,14 @@ var btn = [].slice.call(scope.querySelectorAll('.btn-icon:not(.chat-send-proxy)'
 
 ## 5e. 开场白选择区 + 消息圆钮 + 长按菜单（2026-08-29 实测，发消息真机验证）
 
+### 消息列表两态顺序（实测 DOM 序，发消息真机验证）
+真机 `#msglistview` 消息顺序，**两态**：
+- **初始态**：`描述气泡(.item.Ai.avatar-body)` → `first_mes(.item.Ai，角色第一句话)` → `.prologue-scope(开场白选择)`
+- **发送后**（开场白填充发送 或 打字发送）：`描述气泡` → `first_mes` → `用户消息(.item.self)` → `AI回复(.item.Ai)`；**开场白消失**
+- 回溯消息 → 回到初始态（开场白重现）。
+- 描述气泡（卡片简介）与 first_mes 一直在顶部，两态都在；变的只是其后是开场白还是"用户+AI"。
+- 预览用 `.chat[data-chat-state=initial|sent]` 切两态互斥（DOM 序 描述→first_mes→开场白→用户→AI，隐藏项塌陷，视觉序自然对），默认 `sent`（被测组件落在 AI 回复气泡，作者一开即见）。
+
 ### 开场白选择区 `.prologue-scope`
 - 位置：在 `#msglistview` 消息列表里，排在 AI 第一条消息（first_mes）**之后**，不是独立浮层。结构 `.prologue-title>span`（"你可以选择开场"，**固定黑底白字** `rgba(0,0,0,.5)`）+ `.prologue-content`（开场白正文选项）。
 - **吃全局美化**（用户强调的核心）：`.prologue-content` 底色 `var(--background-color,#17181A)` + 字色 `var(--chat-content-font-color,#FFFFFF)`，`opacity:.9`。实测改这两个变量 → 开场白选项底色/字色同步变（做美化必须覆盖到这里）。
@@ -404,6 +412,12 @@ var btn = [].slice.call(scope.querySelectorAll('.btn-icon:not(.chat-send-proxy)'
 - **选项按消息类型算**：常规 AI/用户消息 **4 项**——复制(仅复制文本) / 删除(从上下文删) / 回溯(删这条及下方所有,含AI和用户) / 开启新的故事(保留这条及上文,进新聊天)，图标 `ico_copy/delete/return/fenzhi_dark.png`。**first_mes（第一句话）仅"复制"**（其余项隐藏）。
 - **吃全局美化**：选项文字 `var(--primary-font-color,#FFFFFF)`、分隔线 `var(--msg-option-separator-color,#333333)`、框底 `--modify-input-bg-color`。
 - ⚠️ 合成 touch 事件**触发不了** Vue 的长按计时器（菜单能靠 handler 开但按类型过滤逻辑不跑，落到默认"仅复制"态）——真机勘查用真实长按(touchstart 保持不放)验证菜单确实 `display:block`。
+
+### 快捷栏按钮 `.shortcut-btn`（输入框上方那栏，2026-08-29 实测）
+6 个按钮：模型设置 / 对话设置 / 选择指令 / 总结剧情 / 新的聊天 / 用户人设。
+- **吃全局美化**（用户强调）：字色 `var(--shortcut-button-font-color,#8D949D)`、wrapper 底 `.shortcut-bar-wrapper` 用 `var(--background-color,#17181A)`。**但按钮底色在深色态是硬编码**：`.shortcut-bar-wrapper.theme-dark .shortcut-btn{background:#2c2e32}`（特异性高于基础规则的 `var(--input-background-color)`，浅色态则 `#f1f4f9`）——即深浅色下按钮底走固定值，字色跟美化变量。做美化改字色有效、想改按钮底色得覆盖 theme-dark/light 那条。
+- **点击动作**（实测 Vue 方法）：模型设置→`.model-setting-scope` 面板、对话设置→`openConvSetting` 面板、总结剧情→summary 面板、用户人设→role 面板、**新的聊天→`onShortcutNewChat`（独立确认弹窗，保存当前对话进历史后开新聊天，`instrHidden` 不变=不切指令栏）**；**仅「选择指令」原地替换快捷条为指令栏**（`.instruction-bar`，不是弹窗）。
+- 🚨 易错点：`新的聊天` 与 `选择指令` 视觉都在快捷栏，但前者开弹窗、后者切指令栏——别把 `新的聊天` 也当指令栏处理。
 
 ## 6. 全景预览升级要点（据以上契约）
 

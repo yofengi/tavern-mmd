@@ -678,6 +678,46 @@ class TestPanorama(unittest.TestCase):
         self.assertIn(".prologue-scope .prologue-content{", css)
         self.assertIn("color:var(--chat-content-font-color,#FFFFFF)", css)
 
+    def test_mmd_message_two_state_layout_order(self):
+        """🚨 实测 2026-08-29：消息顺序 描述→first_mes→[初始:开场白 | 发送后:用户+AI]。
+        DOM 序恒为 描述→first_mes→开场白(initial)→用户(sent)→AI(sent)，靠 .chat[data-chat-state]
+        切两态互斥；默认 sent（被测内容在 AI 回复气泡，作者一开即见）。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        # first_mes 气泡（无三圆钮，data-msg=first），在描述气泡之后、开场白之前
+        self.assertIn('class="item Ai" data-msg="first"', mmd)
+        desc_at = mmd.find("avatar-body")
+        first_at = mmd.find('data-msg="first"')
+        prologue_at = mmd.find('class="prologue-scope"')
+        user_at = mmd.find('class="item Ai self"')
+        ai_at = mmd.find('id="item0"')
+        # 顺序：描述 < first_mes < 开场白 < 用户 < AI回复
+        self.assertLess(desc_at, first_at)
+        self.assertLess(first_at, prologue_at)
+        self.assertLess(prologue_at, user_at)
+        self.assertLess(user_at, ai_at)
+        # 开场白标 initial 态、用户+AI 标 sent 态
+        self.assertIn('class="prologue-scope" data-msg-state="initial"', mmd)
+        # 数元素形态（不数 CSS 选择器 [data-msg-state="sent"]，那是内联样式里的）：用户 + AI回复 = 2
+        self.assertEqual(mmd.count('<uni-view data-msg-state="sent">'), 2)
+        # 两态互斥 CSS + 默认 sent
+        css = bp._mmd_panorama_css()
+        self.assertIn('.chat[data-chat-state="sent"] [data-msg-state="initial"]{display:none}', css)
+        self.assertIn('.chat[data-chat-state="initial"] [data-msg-state="sent"]{display:none}', css)
+        self.assertIn('data-chat-state="sent"', mmd)
+        # setChatState 暴露 + 两态切换绑在发送/回溯
+        self.assertIn("setChatState:setChatState", mmd)
+        self.assertIn("var setChatState=function(s)", mmd)
+
+    def test_mmd_shortcut_newchat_is_dialog_not_instruction_bar(self):
+        """🚨 实测 2026-08-29：快捷栏「新的聊天」是独立动作 onShortcutNewChat（确认弹窗），
+        **不是指令栏**。只有「选择指令」走指令栏(else→toggleInstr)。旧预览误让新的聊天走指令栏。"""
+        mmd = self._panorama_unescaped(self.FOUR)
+        # 映射里「新的聊天」(\u65b0\u7684\u804a\u5929) → newchat
+        self.assertIn("\\u65b0\\u7684\\u804a\\u5929':'newchat'", mmd)
+        # newchat 确认弹窗存在
+        self.assertIn('data-sheet="newchat"', mmd)
+        self.assertIn("开启新的聊天", mmd)
+
     def test_mmd_textarea_padding_lives_on_shell_not_inner(self):
         """🚨 真机上下 padding 一律挂在 `uni-textarea` **壳**上，内层 `textarea` 恒零上下
         padding（实测折叠壳 24px/内层 22px；展开壳与内层同 22px）。
@@ -748,17 +788,18 @@ class TestPanorama(unittest.TestCase):
         少这两层，作者按文档写的深选择器在预览里会失配（真机却能中）。"""
         html = html_mod.unescape(bp.assemble_panorama(self.FOUR, "mmd", "t.json"))
         for frag in (
-            '<uni-view class="chat">',
+            # .chat 根节点带 data-chat-state（两态互斥开关，默认 sent）
+            '<uni-view class="chat" data-chat-state="sent">',
             '<uni-view class="chat-scope-box">',
             '<uni-scroll-view class="scroll-view dark pano-chat" id="pano-chat">',
             '<div class="uni-scroll-view"><div class="uni-scroll-view-content">',
             '<uni-view class="chat-body" id="msglistview">',
             '<uni-view class="touch-scope" id="item0">',
             '<uni-view class="content left" id="q-1">',
-            # 官方侧边挂载点（悬浮组件靶位）与开场白块
+            # 官方侧边挂载点（悬浮组件靶位）与开场白块（开场白带 data-msg-state=initial）
             '<uni-view class="mm-left-side-container">',
             '<uni-view class="mm-right-side-container">',
-            '<uni-view class="prologue-scope">',
+            '<uni-view class="prologue-scope" data-msg-state="initial">',
         ):
             with self.subTest(frag=frag):
                 self.assertIn(frag, html)
@@ -836,6 +877,8 @@ class TestPanorama(unittest.TestCase):
                       "share-popup", "alert-scope"):
             with self.subTest(scope=scope):
                 self.assertIn(scope, html)
+        # 「新的聊天」确认弹窗（快捷栏 onShortcutNewChat，独立动作非指令栏）
+        self.assertIn('data-sheet="newchat"', html)
         # 通用外壳三层齐全
         for frag in ('class="u-popup pano-sheet"', 'class="u-popup__content"',
                      "u-safe-bottom u-safe-area-inset-bottom",
@@ -847,7 +890,8 @@ class TestPanorama(unittest.TestCase):
         # 🚨 值用 off/on 而非 0/1：无引号属性选择器 `[data-open=1]` 非法
         #（CSS 标识符不能以数字开头），而属性内又不能写裸双引号（§2 红线）。
         panels = re.findall(r'<uni-view class="u-popup pano-(?:sheet|dialog)"[^>]*>', html)
-        self.assertEqual(len(panels), 6)
+        # 7 个：model/conv/summary/role/share/alert + newchat（快捷栏「新的聊天」确认框）
+        self.assertEqual(len(panels), 7)
         for tag in panels:
             with self.subTest(tag=tag):
                 self.assertIn('data-open="off"', tag)
