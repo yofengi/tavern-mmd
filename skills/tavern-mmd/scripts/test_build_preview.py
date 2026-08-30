@@ -135,7 +135,7 @@ class TestPipelinePreview(unittest.TestCase):
 
     def test_nested_statusbar_div_is_kept_whole(self):
         rendered = '正文<div class="z-status-box"><div>inner</div><div>tail</div></div>结尾'
-        first, status, _ = bp.split_preview_panels(rendered)
+        first, status, _, _ = bp.split_preview_panels(rendered)
         self.assertIn('<div class="z-status-box"><div>inner</div><div>tail</div></div>', status)
         self.assertNotIn("<div>tail</div></div>", first)
 
@@ -513,6 +513,78 @@ class TestRuntimeFloatingEngines(unittest.TestCase):
         self.assertNotIn("data-sidebar", first)
 
 
+class TestShadowCastPanelClassification(unittest.TestCase):
+    """attachShadow 型自绘组件（标题栏/NPC 状态栏/主角 HUD）应进独立 ShadowCast 面板，
+    不再漏进「第一句话剩余预览」。判据按引擎结构通用，不写死某张卡的命名前缀。"""
+
+    # 标题栏引擎：命名空间化生命周期属性 data-yzt-core-deploy + attachShadow。
+    SC_TITLEBAR = (
+        '<img src="yzt-core-deploy-v1" data-yzt-core-deploy="1" style="display:none" '
+        'onerror="(function(img){var h=img.previousElementSibling;'
+        'h.attachShadow({mode:\'open\'});img.remove()})(this)">')
+    # NPC 状态栏引擎：data-yzr-core-deploy + attachShadow。
+    SC_NPC = (
+        '<img src="yzr-core-deploy-v2" data-yzr-core-deploy="1" style="display:none" '
+        'onerror="(function(e){var host=document.createElement(\'div\');'
+        'host.attachShadow({mode:\'open\'});e.remove()})(this)">')
+    # 主角 HUD 引擎：data-yzh-bootstrap + attachShadow（桌面态会横向挤开页面）。
+    SC_HUD = (
+        '<img src="yzh-render-trigger-v1" data-yzh-bootstrap="renderer" style="display:none" '
+        'onerror="(function(win,doc){var r=win.__YZHUDV1=win.__YZHUDV1||{};'
+        'r.host&&r.host.attachShadow({mode:\'open\'})})(window,document)">')
+    # 影渲法 g3 家族（skill 自带示例）：g3-host 宿主类 + attachShadow。
+    SC_G3 = (
+        '<img src=x style="display:none" data-g3v="1" '
+        'onerror="(function(img){var b=img.closest(\'.g3-host\');'
+        'b.attachShadow({mode:\'open\'});img.remove()})(this)">')
+
+    def _panel_of(self, html, title):
+        after = html.split(title, 1)[1]
+        # 到下一个 frag-label 或 pano-audit 之前
+        return re.split(r'frag-label|pano-audit|issue-report', after, 1)[0]
+
+    def test_shadowcast_titlebar_npc_hud_go_to_shadowcast_panel(self):
+        obj = {"pageDepth": 2, "statusbar": "",
+               "beginning": "正文<t><n><h>",
+               "regex_scripts": [
+                   {"scriptName": "标题栏", "findRegex": "/<t>/", "replaceString": self.SC_TITLEBAR},
+                   {"scriptName": "NPC状态栏", "findRegex": "/<n>/", "replaceString": self.SC_NPC},
+                   {"scriptName": "主角HUD", "findRegex": "/<h>/", "replaceString": self.SC_HUD},
+               ]}
+        html = bp.assemble_preview(obj, "mmd", "t.json")
+        self.assertIn("ShadowCast 组件预览", html)
+        sc = self._panel_of(html, "ShadowCast 组件预览")
+        for marker in ("data-yzt-core-deploy", "data-yzr-core-deploy", "data-yzh-bootstrap"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, sc)
+        # 关键回归：三个组件不得残留在「第一句话剩余预览」
+        first = html.split("状态栏单独预览", 1)[0]
+        for marker in ("data-yzt-core-deploy", "data-yzr-core-deploy", "data-yzh-bootstrap"):
+            with self.subTest(leak=marker):
+                self.assertNotIn(marker, first)
+
+    def test_shadowcast_detector_unit(self):
+        for tag in (self.SC_TITLEBAR, self.SC_NPC, self.SC_HUD, self.SC_G3):
+            with self.subTest(tag=tag[:40]):
+                self.assertTrue(bp._is_shadowcast_engine_tag(tag))
+
+    def test_shadowcast_detector_excludes_scaffold_and_others(self):
+        # 预览自身发送脚手架绝不被当作被测组件
+        scaffold = ('<img src="x" data-pano-scaffold="1" style="display:none" '
+                    'onerror="(function(){document.querySelector(\'.pano-send\')})()">')
+        self.assertFalse(bp._is_shadowcast_engine_tag(scaffold))
+        # 悬浮球 / 雷达状态栏保持各自归属，不被 shadowcast 抢
+        self.assertFalse(bp._is_shadowcast_engine_tag(TestRuntimeFloatingEngines.DRAGGABLE_BALL))
+        self.assertFalse(bp._is_shadowcast_engine_tag(TestRuntimeFloatingEngines.RADAR))
+
+    def test_shadowcast_panel_absent_when_no_such_component(self):
+        """普通卡（无 attachShadow 组件）不凭空多一格空 ShadowCast 面板。"""
+        obj = {"pageDepth": 2, "statusbar": "", "beginning": "只有正文",
+               "regex_scripts": [{"scriptName": "空", "findRegex": "/x/", "replaceString": "y"}]}
+        html = bp.assemble_preview(obj, "mmd", "t.json")
+        self.assertNotIn("ShadowCast 组件预览", html)
+
+
 class TestPanorama(unittest.TestCase):
     """全景预览：所有组件组合进单文档，固定输入栏+发送按钮+占位AI气泡。"""
 
@@ -822,6 +894,10 @@ class TestPanorama(unittest.TestCase):
         少这两层，作者按文档写的深选择器在预览里会失配（真机却能中）。"""
         html = html_mod.unescape(bp.assemble_panorama(self.FOUR, "mmd", "t.json"))
         for frag in (
+            # 真机外层壳：div#app > uni-app > uni-page > uni-page-wrapper > uni-page-body
+            # （实测契约 §1）。少这层，桌面型 HUD 的 pageTarget() 找不到全高祖先 → 退回 .chat
+            # → transform 落在 45px 盒上、fixed 后代塌缩（桌面 HUD 偏差根因）。
+            '<div id="app"><uni-app><uni-page><uni-page-wrapper><uni-page-body>',
             # .chat 根节点带 data-chat-state（两态互斥开关，默认 sent）
             '<uni-view class="chat" data-chat-state="sent">',
             '<uni-view class="chat-scope-box">',
@@ -834,6 +910,8 @@ class TestPanorama(unittest.TestCase):
             '<uni-view class="mm-left-side-container">',
             '<uni-view class="mm-right-side-container">',
             '<uni-view class="prologue-scope" data-msg-state="initial">',
+            # 外层壳正确闭合（顺序与开壳镜像）
+            '</uni-page-body></uni-page-wrapper></uni-page></uni-app></div>',
         ):
             with self.subTest(frag=frag):
                 self.assertIn(frag, html)
@@ -841,6 +919,29 @@ class TestPanorama(unittest.TestCase):
         for dead in ('class="page"', "chat-bg", "data-message-role"):
             with self.subTest(dead=dead):
                 self.assertNotIn(dead, html)
+
+    def test_mmd_panorama_full_height_ancestors_prevent_desktop_hud_collapse(self):
+        """桌面型 HUD（如柚子岛）的 pageTarget() 按 #app→uni-app→uni-page-body→.page 找
+        全高祖先来横向缩窄腾出侧栏位；找不到就退回 .chat。.chat 只有顶栏在流内（≈45px），
+        一旦 HUD 对它 transform，其 fixed 后代（.chat-scope-box/.chat-bottom）改以该 45px
+        盒为包含块 → 桌面预览整体塌缩。修复=补齐全高祖先链，让 pageTarget() 命中全高盒。
+
+        本测试钉死两件事：① DOM 里有这条祖先链且各层可被 pageTarget() 选中；
+        ② CSS 给这几层全高（height:100%），否则补了 DOM 也仍是 0 高盒、面积为 0 被跳过。"""
+        html = html_mod.unescape(bp.assemble_panorama(self.FOUR, "mmd", "t.json"))
+        # ① pageTarget() 的三个主要靶子都在（#app 命中最优先分支）
+        self.assertIn('id="app"', html)
+        self.assertIn('<uni-app>', html)
+        self.assertIn('<uni-page-body>', html)
+        # .chat 位于该祖先内部（uni-page-body 之后才是 .chat）
+        body_at = html.index('<uni-page-body>')
+        chat_at = html.index('<uni-view class="chat"')
+        self.assertLess(body_at, chat_at)
+        # ② CSS 全高链：这几层必须 display:block + height:100%，否则量到面积 0 会被跳过
+        css = bp._mmd_panorama_css()
+        self.assertIn(
+            "#app,uni-app,uni-page,uni-page-wrapper,uni-page-body{display:block;width:100%;height:100%}",
+            css)
 
     def test_mmd_bubble_css_keeps_pre_line_and_measured_opacity(self):
         """🚨 `white-space:pre-line` 是「换行空白条」的**真因**（实测：注入带换行的

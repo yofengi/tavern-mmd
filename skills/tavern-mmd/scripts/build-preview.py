@@ -839,6 +839,39 @@ def _is_statusbar_engine_tag(tag):
             "z-status-box" in low or "insertadjacenthtml" in low or "状态栏" in tag)
 
 
+def _is_shadowcast_engine_tag(tag):
+    """ShadowCast / attachShadow 型组件引擎（标题栏 / NPC 状态栏 / 主角 HUD 等自绘 chrome）。
+    这类 <img onerror> 运行时 attachShadow 把 UI 渲进 shadow root，宿主与数据留 light DOM。
+    它们既不是可拖动悬浮球（不含 pointerdown/translateX 拖动特征），也不匹配雷达/KV 状态栏
+    启发式，旧版三面板因此把它们漏进「第一句话剩余预览」——本函数把它们收进独立面板。
+
+    precedence 铁律：悬浮球/抽屉与雷达/KV 状态栏已按既有精度在前面归类，这里**只收它们
+    没认领的** attachShadow 组件，故对既有分类零回归。判据通用（按引擎结构，不写死某张卡的
+    命名前缀）：① 运行时 attachShadow；② 命名空间化的组件生命周期属性 data-<前缀>-<角色>
+    （owner/bootstrap/deploy/trigger/css-loader…，影渲法组件包普遍用它声明归属）；
+    ③ 影渲法宿主类名约定（g3-host / sc-host / shadowcast）。"""
+    low = tag.lower()
+    if "onerror" not in low:
+        return False
+    # 预览自身的发送脚手架（data-pano-scaffold）不是被测组件，绝不归类。
+    if "data-pano-scaffold" in low:
+        return False
+    # 悬浮/状态栏引擎保持既有归属，这里不抢（precedence）。
+    if _is_floating_engine_tag(tag) or _is_statusbar_engine_tag(tag):
+        return False
+    # ① 强特征：运行时 attachShadow（影渲法地基）。
+    if "attachshadow" in low:
+        return True
+    # ② 命名空间化组件生命周期属性：data-<前缀[可带连字符]>-<角色>。通用匹配，不写死前缀。
+    if re.search(r'data-[a-z0-9-]+-(?:owned|bootstrap|deploy|trigger|'
+                 r'css-loader|renderer|component-host|core|mount)\b', low):
+        return True
+    # ③ 影渲法宿主类名约定。
+    if "g3-host" in low or "sc-host" in low or "shadowcast" in low:
+        return True
+    return False
+
+
 def _extend_hidden_status_spans(html, end):
     """状态栏引擎后常跟一串 display:none 的 [key=value] 信标，一并归入状态栏面板。"""
     m = re.match(r'(?:\s*<span[^>]*display\s*:\s*none[^>]*>\[[\s\S]*?\]</span>)+', html[end:], re.I)
@@ -848,9 +881,14 @@ def _extend_hidden_status_spans(html, end):
 
 
 def split_preview_panels(rendered):
-    """返回 (first_message, statusbar, floating)。轻量文本拆分，供预览定位问题。"""
+    """返回 (first_message, statusbar, floating, shadowcast)。轻量文本拆分，供预览定位问题。
+
+    shadowcast 桶收 attachShadow 型自绘组件（标题栏/NPC 状态栏/主角 HUD 等），它们既非
+    悬浮球也非雷达/KV 状态栏，旧版会漏进 first_message —— 现在单独成面板，见
+    _is_shadowcast_engine_tag。precedence：悬浮 > 状态栏 > shadowcast，对既有分类零回归。"""
     status_parts = []
     floating_parts = []
+    shadowcast_parts = []
     rest = rendered
     # 1) 静态状态栏骨架（KV/已渲染状态栏）。用平衡标签扫描，避免嵌套 div 被截断。
     status_spans = []
@@ -871,6 +909,10 @@ def split_preview_panels(rendered):
     # 2) 运行时引擎（<img onerror>）：一次扫描分类悬浮/状态栏，再从后往前删除，避免删一个就让
     #    后续 start/end 偏移失效。MMD 真正的悬浮球/抽屉是运行时注入的可拖动按钮，position:fixed
     #    由 JS cssText 设，静态扫描看不到，只能靠引擎特征识别（悬浮优先，免被状态栏启发式误吞）。
+    # precedence：悬浮 > 状态栏 > shadowcast。shadowcast 组件的数据同样常跟一串
+    # display:none 信标 span，一并收进同面板（复用状态栏那套扫描）。
+    bucket_of = {"float": floating_parts, "status": status_parts,
+                 "shadow": shadowcast_parts}
     spans = []  # (start, end, bucket, chunk)
     for start, end, tag in _iter_tags(rest, "img"):
         if _is_floating_engine_tag(tag):
@@ -878,8 +920,11 @@ def split_preview_panels(rendered):
         elif _is_statusbar_engine_tag(tag):
             ext_end = _extend_hidden_status_spans(rest, end)
             spans.append((start, ext_end, "status", rest[start:ext_end]))
+        elif _is_shadowcast_engine_tag(tag):
+            ext_end = _extend_hidden_status_spans(rest, end)
+            spans.append((start, ext_end, "shadow", rest[start:ext_end]))
     for start, end, bucket, chunk in sorted(spans, key=lambda x: x[0]):
-        (floating_parts if bucket == "float" else status_parts).append(chunk)
+        bucket_of[bucket].append(chunk)
     for start, end, bucket, chunk in sorted(spans, key=lambda x: x[0], reverse=True):
         rest = rest[:start] + rest[end:]
 
@@ -889,7 +934,8 @@ def split_preview_panels(rendered):
         for m in list(re.finditer(pat, rest, re.I)):
             floating_parts.append(m.group(0))
             rest = rest.replace(m.group(0), "", 1)
-    return rest, "\n".join(status_parts), "\n".join(floating_parts)
+    return (rest, "\n".join(status_parts), "\n".join(floating_parts),
+            "\n".join(shadowcast_parts))
 
 
 def assemble_preview(obj, platform, src_name):
@@ -899,19 +945,24 @@ def assemble_preview(obj, platform, src_name):
         return assemble_html(extract_fragments(obj, platform), platform, src_name,
                              _findregex_audit_html(obj, platform) + _onclick_audit_html(rendered, platform))
     rendered = apply_regex_pipeline(obj, platform)
-    first, status, floating = split_preview_panels(rendered)
+    first, status, floating, shadowcast = split_preview_panels(rendered)
     audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(rendered, platform)
     audit += "".join('<div class="frag-warn">ERROR 悬空标记：%s</div>' % html_mod.escape(x)
                      for x in find_dangling_markers(obj, platform))
     # 沙盒模式：装卡即抽出的 style/script 与匹配无关，每个隔离 iframe 都要带上，
     # 否则「只放 style/script 且谁都不引用」的官方首选写法在预览里等于不存在。
     assets = collect_sandbox_assets(obj) if platform == "mmdsandbox" else ""
-    body = "\n".join([
+    panels = [
         _panel("第一句话剩余预览", first, platform, "beginning remainder", assets),
         _panel("状态栏单独预览", status, platform, "status", assets),
         _panel("悬浮组件预览", floating, platform, "floating/sidebar", assets),
-        audit,
-    ])
+    ]
+    # ShadowCast 组件（标题栏/NPC 状态栏/主角 HUD 等 attachShadow 自绘 chrome）单独成面板。
+    # 仅在被测卡确实含此类组件时才出面板，避免给普通卡凭空多一格空面板。
+    if shadowcast.strip():
+        panels.append(_panel("ShadowCast 组件预览", shadowcast, platform,
+                             "shadowcast (titlebar/npc/hud)", assets))
+    body = "\n".join(panels + [audit])
     banner = make_banner(platform, src_name, _script_count(obj))
     return PAGE_TEMPLATE % {"platform": platform, "banner": banner,
                             "body": body, "marker_css": MARKER_CSS}
@@ -971,6 +1022,12 @@ html,body{margin:0;width:100%%;height:100%%;user-select:none;touch-action:manipu
 body{overflow-x:hidden;font-size:16px;background-color:var(--background-color,#17181A);%(themevars)s}
 *{margin:0;-webkit-tap-highlight-color:transparent}
 uni-view,uni-scroll-view,uni-image,uni-text{display:block}
+/* 真机外层壳（实测契约 §1）。uni-app 系是自定义元素，默认 inline，必须显式 block，
+   否则宽高塌成 0、pageTarget() 量到的面积为 0 会退回 .chat（就是桌面 HUD 偏差的根因）。
+   全高链 height:100%% 逐层继承 html/body 的 100%%，让 #app/uni-app/uni-page-body 都是
+   全视口盒 —— HUD 无论命中链上哪个祖先，transform 都落在全高盒上，其 fixed 后代
+   （.chat-scope-box/.chat-bottom）仍以视口高解析，不再塌成 45px。 */
+#app,uni-app,uni-page,uni-page-wrapper,uni-page-body{display:block;width:100%%;height:100%%}
 
 /* 顶栏：真实 2.8125rem = 45px @16px 基准 */
 .chat .topTabbar{width:100%%;height:2.8125rem;line-height:2.8125rem;display:flex;
@@ -2289,6 +2346,17 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
     return (
         '%(runtime)s'
         '%(hoisted)s'
+        # ── 真机外层壳（实测契约 §1：div#app > uni-app > uni-page > uni-page-wrapper
+        #    > uni-page-body > uni-view.chat）。这层**不是装饰**：桌面型 HUD 的
+        #    pageTarget() 按 #app→uni-app→uni-page-body→.page 顺序找"全高祖先"来横向
+        #    缩窄、给侧栏腾位；找不到就退回 .chat。而 .chat 只有顶栏一个在流内子节点
+        #    （≈45px 高，其余全 fixed），一旦 HUD 对它施加 transform，.chat 就成了
+        #    fixed 后代（.chat-scope-box / .chat-bottom）的包含块 → 整个聊天区塌成 45px。
+        #    补齐这条全高祖先链后 pageTarget() 命中 #app（全高），transform 落在全高盒上，
+        #    fixed 后代仍以视口高解析，桌面 HUD 几何才成立。全高由 MMD_PANORAMA_CSS 里
+        #    `#app,uni-app,uni-page,uni-page-wrapper,uni-page-body{height:100%}` 保证。
+        #    **不要**为绕开此偏差去改被测 JSON。
+        '<div id="app"><uni-app><uni-page><uni-page-wrapper><uni-page-body>'
         '<uni-view class="chat" data-chat-state="sent"%(root)s>'
         # ── 顶栏 ──
         '<uni-view class="page-header-scope">'
@@ -2447,6 +2515,8 @@ def _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold):
         # 弹窗体系仿真（默认全关，真机也是关的）
         '%(popupsim)s'
         '</uni-view>'
+        # 关闭真机外层壳（uni-page-body > uni-page-wrapper > uni-page > uni-app > #app）
+        '</uni-page-body></uni-page-wrapper></uni-page></uni-app></div>'
         '%(sendscaffold)s'
         '%(panelscaffold)s'
     ) % dict(hooks, runtime=runtime, tested=tested_content,
