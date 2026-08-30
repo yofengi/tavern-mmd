@@ -14,8 +14,8 @@ tavern-mmd 预览脚本 build-preview.py
                findRegex 强制 /pattern/flags，裸字面量按结构错误处理
                inline onclick 按当前MMD净化 allowlist 过滤
   mmdsandbox : MMD沙盒模式（新聊天页，chatVersion:1）。<script> 一等公民 + 官方 SDK
-               交付 findRegex 强制 /pattern/flags；worker 裸字面量分支只作逆向事实，实机不生效
-               写成 /…/ 但语法错 → 平台整条静默丢弃，预览判 ERROR
+               交付 findRegex 统一 /pattern/flags（约定）；裸字面量实机也生效（卡 64304 A/B
+               2026-08-30），预览按 worker m() 转义后照常渲染，只有语法错的 /…/ 整条静默丢弃
                不施加当前MMD 的 onclick 净化；改为提示 svg 内 onclick 与自写 data-* 会被净化删除
                <style>/<script> 装卡即抽出，不论规则有没有匹配到都装上
                全景模式复刻真实 dark chat flex 外壳、稳定槽位与 14 个 --chat-* 设计令牌，
@@ -130,11 +130,10 @@ def classify_sandbox_pattern(raw):
     kind 取 empty / literal / regex / bad-regex。
     literal 时 value 是待字面量替换的串；regex 时 value 是规范化后的 /pattern/flags。
 
-    🚨 这是**worker 源码的分类**，不是交付判据。源码确实有 literal 分支
-    （`if(!n)return new RegExp(m(t),'g')`，见事实卡 §5.1），但**实机上裸字面量未生效**：
-    探针最初用 `{{probe}}` 规则完全不触发，改 `/{{probe}}/` 后立即生效（事实卡 §8.21）。
-    说明宿主侧在交给 worker 前另有一层处理。
-    → 本函数只用于解释 worker 行为；交付门禁一律走 sandbox_pattern_delivery_error()。"""
+    worker 源码有 literal 分支（`if(!n)return new RegExp(m(t),'g')`，见事实卡 §5.1），
+    `【实机实测 2026-08-30】`（卡 64304 A/B）确认裸字面量**生效**：裸 `体力` 与 `/灵力/`
+    在真实聊天页同一轮渲染都被替换（事实卡 §8.21），宿主包只把 pattern 原样转发。
+    → 两种形态预览都要渲染；literal 走 m() 等价转义后当全文替换。"""
     if not isinstance(raw, str):
         return "bad-regex", "", "findRegex 必须是字符串"
     trimmed = re.sub(r"^`|`$", "", raw.strip())
@@ -155,36 +154,37 @@ def classify_sandbox_pattern(raw):
     return "regex", canonical, None
 
 
-SANDBOX_BARE_LITERAL_ERROR = (
-    "沙盒交付必须写 slash 形态 /…/：实机裸字面量未生效（探针 {{probe}} 规则完全不触发，"
-    "改 /{{probe}}/ 后立即生效），与 worker 源码 p() 的字面量分支矛盾"
-    "——说明宿主侧在交给 worker 前另有一层处理。裸字面量在页面上什么都不会发生。"
-)
-
-
 def sandbox_pattern_delivery_error(raw):
-    """沙盒**交付**门禁：返回错误原因，合规返回 None。
+    """沙盒**交付**门禁：只拦真正会静默失效的形态，返回错误原因，合规返回 None。
 
-    与 classify_sandbox_pattern（worker 源码分类）分开：那个函数解释 worker 怎么想，
-    这个函数决定预览/交付放不放行。实机结论是 slash 严格模式，故裸字面量判 ERROR。"""
+    与 classify_sandbox_pattern（worker 源码分类）分开：那个解释 worker 怎么想，这个决定
+    预览/交付放不放行。裸字面量实机生效（卡 64304 A/B 2026-08-30），不拦；只有「写成 /…/
+    但正则语法错」才判错（整条静默丢弃）。"""
     if not isinstance(raw, str):
         return "findRegex 必须是字符串"
     kind, _value, reason = classify_sandbox_pattern(raw)
-    if kind == "empty":
-        return None                      # 空匹配式由 validate 的必填校验管
-    if kind == "literal":
-        return SANDBOX_BARE_LITERAL_ERROR
     if kind == "bad-regex":
         return "写成 /…/ 但正则语法错，平台会整条静默丢弃（%s）" % reason
-    return None
+    return None                          # empty 由必填校验管；literal 实机生效，照渲染
+
+
+def _worker_m_escape(literal):
+    """复刻 worker 的 m()：转义正则元字符 `[.*+?^${}()|[\\]\\]`，使字面量按原文匹配。"""
+    return re.sub(r"([.*+?^${}()|\[\]\\])", r"\\\1", literal)
 
 
 def sandbox_delivery_regex(raw):
-    """交付形态下用于预览替换的规范化 /pattern/flags；不合规返回 None。"""
+    """交付形态下用于预览替换的规范化 /pattern/flags；不合规返回 None。
+
+    literal 复刻 worker `new RegExp(m(t),'g')`：元字符转义后当全文字面量替换。"""
     if sandbox_pattern_delivery_error(raw):
         return None
     kind, value, _reason = classify_sandbox_pattern(raw)
-    return value if kind == "regex" else None
+    if kind == "regex":
+        return value
+    if kind == "literal":
+        return "/%s/g" % _escape_for_slash_literal(_worker_m_escape(value))
+    return None
 
 
 def _mmd_top_level_error(obj, platform):
@@ -223,7 +223,7 @@ def extract_fragments(obj, platform=None):
             if regex is None or reason:
                 continue
         if platform == "mmdsandbox" and raw_fr not in ("", None):
-            # 交付门禁：裸字面量与语法错的 /…/ 都不渲染（实机上前者不生效、后者被丢弃）。
+            # 裸字面量与 /…/ 都渲染（实机裸字面量生效）；只有语法错的 /…/ 被丢弃。
             if sandbox_pattern_delivery_error(raw_fr):
                 continue
             value = sandbox_delivery_regex(raw_fr)
@@ -812,12 +812,15 @@ def _is_floating_engine_tag(tag):
     if "onerror" not in low:
         return False
     if ("data-float-ball" in low or "data-sidebar" in low or "data-drawer" in low or
-            "z-float" in low or "z-sidebar" in low or "z-drawer" in low or "z-fab" in low):
+            "data-zsf-ball" in low or "data-zsf-drawer" in low or
+            "z-float" in low or "z-sidebar" in low or "z-drawer" in low or "z-fab" in low or
+            "zsf-ball" in low or "zsf-drawer" in low):
         return True
     # 通用特征：onerror 里出现 position:fixed + 拖动/抽屉关键词。
+    # pointerdown 覆盖 Pointer Events 版悬浮球（旧版 mousedown/touchstart 双绑已弃用）。
     if "position:fixed" in low.replace(" ", "") and (
-            "mousedown" in low or "touchstart" in low or "translatex" in low or
-            "float" in low or "sidebar" in low or "drawer" in low):
+            "pointerdown" in low or "mousedown" in low or "touchstart" in low or
+            "translatex" in low or "float" in low or "sidebar" in low or "drawer" in low):
         return True
     return False
 
@@ -2128,11 +2131,12 @@ MMD_PANEL_SCAFFOLD = (
     "var bindLong=function(it,kind){var tsc=it.querySelector('.touch-scope')||it;"
     "var timer=null;var ct=it.querySelector('.content');"
     "var txt=ct?(ct.textContent||''):'';"
-    "var start=function(){timer=setTimeout(function(){openMenu(kind,txt);},500);};"
     "var cancel=function(){if(timer){clearTimeout(timer);timer=null;}};"
-    "tsc.addEventListener('mousedown',start);tsc.addEventListener('touchstart',start);"
-    "tsc.addEventListener('mouseup',cancel);tsc.addEventListener('mouseleave',cancel);"
-    "tsc.addEventListener('touchend',cancel);};"
+    "var start=function(){cancel();timer=setTimeout(function(){openMenu(kind,txt);},500);};"
+    # harness-only：统一 Pointer Events，避免移动端触摸后补发模拟鼠标二次 start()、残留 timer 误开菜单
+    "tsc.addEventListener('pointerdown',start);"
+    "tsc.addEventListener('pointerup',cancel);tsc.addEventListener('pointerleave',cancel);"
+    "tsc.addEventListener('pointercancel',cancel);};"
     "var mitems=D.querySelectorAll('.chat-body .item');"
     "for(var mi=0;mi<mitems.length;mi++){(function(it){"
     "var kind=it.className.indexOf('avatar-body')>=0?'first':"

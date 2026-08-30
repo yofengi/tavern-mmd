@@ -87,7 +87,20 @@
     return row(f.label, out ? [el, out] : el);
   }
 
-  var syncForm = null;
+  /* 🚨 表单可以【同时存在多份】：dock 形态下 chrome() 把 prefs.form() 直接嵌进导轨
+     抽屉的 pane，而作者仍可能另外调 prefs.panel() 拿独立抽屉。原先这里是单槽
+     （syncForm = refresh），第二份表单一建就把第一份的刷新函数覆盖掉 ——
+     玩家在导轨里改字号，另一份表单的控件停在旧值，下次打开显示的是过期状态。
+     改成登记表 + 每次广播时剔掉已脱离文档的那几份（避免泄漏）。 */
+  var syncForms = [];
+  function syncAll() {
+    for (var i = syncForms.length - 1; i >= 0; i--) {
+      var rec = syncForms[i];
+      /* 已从文档摘掉的表单不再刷新也不再持有 */
+      if (rec.box && rec.box.isConnected === false) { syncForms.splice(i, 1); continue; }
+      try { rec.refresh(); } catch (e) {}
+    }
+  }
   function form() {
     setCss();
     var box = H('div', { 'class': 'sbk-set' }), ctls = [], list, fields, i, sel_ = null, grp, r1, r2;
@@ -123,7 +136,7 @@
       r1.disabled = !prefs.enabled();
     }
     refresh();
-    syncForm = refresh;
+    syncForms.push({ box: box, refresh: refresh });
     return box;
   }
 
@@ -144,9 +157,12 @@
     return setNode;
   }
 
-  kit.onChange(function () { if (syncForm) { try { syncForm(); } catch (e) {} } });
+  kit.onChange(syncAll);
   prefs.form = form;
   prefs.panel = setPanel;
+  /* dock 形态的设置页签用这个：只要一个【可嵌进任意 pane 的节点】，不要独立抽屉外壳。
+     与 prefs.panel() 的区别是它不建 SBK.ui.panel、不建悬浮球 —— 外壳由 dock 提供。 */
+  prefs.pane = form;
   prefs.toggle = function () { var p = setPanel(); if (p) p.toggle(); return p; };
   prefs.open = function () { var p = setPanel(); if (p) p.open(); return p; };
   prefs.close = function () { if (setNode) setNode.close(); return setNode; };

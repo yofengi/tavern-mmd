@@ -649,7 +649,7 @@ def run_sandbox(**overrides):
 
 
 def sandbox_rule(**overrides):
-    # 匹配式默认写 slash 形态：实机裸字面量不生效（事实卡 §8.21），交付一律 /…/。
+    # 匹配式默认写 slash 形态（约定；裸字面量实机也生效，事实卡 §8.21），交付统一 /…/。
     rule = {"id": -1, "scriptName": "kit", "findRegex": "/{{kit}}/", "replaceString": "x"}
     rule.update(overrides)
     return rule
@@ -838,23 +838,24 @@ class TestSandboxRules(unittest.TestCase):
 
 
 class TestSandboxPatternForm(unittest.TestCase):
-    """🚨 原锁定决策 D7（不强制 slash、字面量是官方首选）**已被实机推翻**：
-    探针裸字面量 {{probe}} 规则完全不触发，改 /{{probe}}/ 立即生效（事实卡 §8.21）。
-    沙盒交付与 /mmd 一致，一律 slash 严格模式。"""
+    """🚨 实机复验（卡 64304 A/B，2026-08-30）确认裸字面量**生效**：裸 `体力` 与
+    `/灵力/` 在真实聊天页同一轮渲染都被替换（事实卡 §8.21）。故裸字面量降级为 WARN
+    （仍建议统一写 slash /…/），只有「写成 /…/ 但正则语法错」才判 ERROR。"""
 
-    def test_bare_literal_is_error(self):
+    def test_bare_literal_is_warn_not_error(self):
         for literal in ("{{hud}}", "【图鉴】", "状态面板"):
             with self.subTest(literal=literal):
                 run_sandbox(statusbar=literal,
                             regex_scripts=[sandbox_rule(findRegex=literal)])
-                self.assertTrue(any("实机裸字面量未生效" in m for m in v.ERRORS))
-                # 文案必须点明与 worker 源码矛盾，否则作者会以为是自己写错。
-                self.assertTrue(any("worker 源码" in m for m in v.ERRORS))
+                # 裸字面量实机生效——不再判 ERROR。
+                self.assertFalse(any("裸字面量" in m for m in v.ERRORS))
+                # 但仍出 WARN 建议统一 slash。
+                self.assertTrue(any("裸字面量" in m and "slash" in m for m in v.WARNS))
 
     def test_worker_literal_branch_stays_documented(self):
-        """worker 源码确有 literal 分支，内部函数照实描述；交付门禁另判。"""
+        """worker 源码确有 literal 分支；交付门禁不再拦裸字面量。"""
         self.assertEqual(v.classify_sandbox_pattern("{{hud}}"), ("literal", "{{hud}}"))
-        self.assertIn("实机裸字面量未生效", v.sandbox_pattern_delivery_error("{{hud}}"))
+        self.assertIsNone(v.sandbox_pattern_delivery_error("{{hud}}"))
         self.assertIsNone(v.sandbox_pattern_delivery_error("/{{hud}}/"))
 
     def test_slash_form_is_also_accepted(self):

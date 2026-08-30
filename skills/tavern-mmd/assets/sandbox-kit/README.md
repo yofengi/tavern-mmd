@@ -32,11 +32,25 @@ MMD 沙盒模式的状态栏 / 美化基座：三层运行时（内核 / 主题 
 | `sbk/hud.js` | **HUD 基础**：vnode、十二种控件、归一化、控件注册表 `SBK.ui.hud` |
 | `sbk/hud-render.js` | **HUD 渲染**：section 分组、`snapshot()`、`hydrate()`、`snapshot.auto()` |
 | `sbk/ui.js` | **组件工具层**：CSS、DOM 就绪队列、定位/事件/标题栏工具，导出 `SBK._uiKit` |
-| `sbk/ui-panel.js` | **组件面板层**：浮层/抽屉/悬浮球 `panel` 与功能栏入口 `chrome` |
+| `sbk/ui-panel.js` | **组件面板层**：浮层/抽屉/悬浮球 `panel` 与设置入口 `chrome`（默认路由到导轨） |
+| `sbk/ui-nav.js` | **可选导航栏**：`SBK.ui.nav`，抽屉与气泡共用的分页容器。**单 pane 不渲染导航栏** |
+| `sbk/ui-icon.js` | **图标集**：`SBK.ui.icon(name)` / `icons()`，8 个内联 SVG（`gear/wrench/tools/sliders/map/book/spark/dots`） |
+| `sbk/ui-fan.js` | **扇形第二层**：`SBK.ui.fan.place()`，同一页签下 ≥2 类功能时的快速分流坐标与样式 |
+| `sbk/ui-dock.js` | **侧边图标导轨**：`SBK.ui.dock`，页签 + 两种呈现面（半页抽屉 / 锚定气泡）+ 可选导航栏 |
+| `sbk/ui-bubble.js` | **锚定气泡面**：`SBK.ui.bubble`，贴着导轨页签弹出的轻量气泡，支持专属导航栏 |
+| `sbk/ui-inject.js` | **自动注入**（扩展）：`SBK.ui.inject`，滑块开关 + 输入框，发送时把内容附加到用户输入末尾 |
+| `sbk/ui-codex.js` | **人物图鉴**（扩展）：`SBK.ui.codex`，单列/双列/导航分组/大图左右滑动四种版式 |
+| `sbk/ui-map.js` | **地图**（扩展）：`SBK.ui.map`，图片地图（缩放 + 可点标识 + 气泡）与渲染地图 |
 | `sbk/ui-stage.js` | **舞台层**：`SBK.ui.stage`，依赖 `ui.js` 的工具箱 |
 | `sbk/协议说明.md` | 协议格式、schema、控件类型、模型侧输出约定的完整文档 |
 
-装载顺序固定：`core.js` → `core-store.js` → `core-boot.js` → `theme.js` → `theme-panel.js` → `protocol.js` → `hud.js` → `hud-render.js` → `ui.js` → `ui-panel.js` → `ui-stage.js`。每个文件都是完整经典脚本 IIFE，拥有独立 claim；顺序错了会由依赖检查告警并短路。
+装载顺序固定（19 个模块）：`core.js` → `core-store.js` → `core-boot.js` → `theme.js` → `theme-panel.js` → `protocol.js` → `hud.js` → `hud-render.js` → `ui.js` → `ui-panel.js` → `ui-nav.js` → `ui-icon.js` → `ui-fan.js` → `ui-dock.js` → `ui-bubble.js` → `ui-inject.js` → `ui-codex.js` → `ui-map.js` → `ui-stage.js`。每个文件都是完整经典脚本 IIFE，拥有独立 claim；顺序错了会由依赖检查告警并短路。
+
+侧边栏一族的依赖方向（都是「晚到只会静默退化，不报错」，故顺序不能靠记忆）：
+
+- `ui-nav` / `ui-icon` / `ui-fan` **必须早于** `ui-dock`——dock 消费它们。缺 `ui-icon` 页签退化成一个字符；缺 `ui-nav` 呈现面只铺第一个 pane；缺 `ui-fan` 扇形退化成等距竖列。
+- `ui-dock` **必须晚于** `ui-panel`——`chrome()` 反查 `SBK.ui.dock` 决定入口形态。晚到会静默回落成旧的功能栏按钮排，也就是「设置按钮镶嵌在页面里」那个观感问题。
+- `ui-inject` / `ui-codex` / `ui-map` 只依赖 core + ui kit(+nav/icon)，**互不依赖，可单独裁剪**（不做地图就别打包 `ui-map.js`，省 replaceString 预算）。
 
 ## `modes`：三个职责不同的东西（2.0 语义）
 
@@ -53,19 +67,31 @@ MMD 沙盒模式的状态栏 / 美化基座：三层运行时（内核 / 主题 
 - **为什么这么分**：1.0 的 `{hud, snapshot}` 是两个渲染器渲染同一份 schema，示例配置两个都开 → 实机截图里同时出现**两个一模一样的状态面板**；而且 `hud` 把状态数据放进了功能栏，**违反 MMD 惯例**（功能栏历来放全局美化/侧边栏这类 chrome，状态栏历来在气泡内）。这是 1.0 的头号缺陷，性质是角色分工错，不是代码 bug。
 - **旧键仍被接受**（`core.js` 的 `normModes` 与生成器的 `_alias_modes` 各一份，都会告警）：`snapshot` → `status`（同义）；`hud: true` → `pinned`，但 ⚠ **不是等价替换**——旧 `hud` 是完整面板，新 `pinned` 是单行精简条。要完整面板请开 `status`。`hud: false` 直接忽略。
 
-### `chrome` 层：功能栏入口 + 设置抽屉
+### `chrome` 层：设置入口（默认＝侧边图标导轨）
 
 ```js
-SBK.ui.chrome({ hostId: 'sbk-hud', settings: true, label: '设置', title: '阅读设置',
-                width: '80%', preset: '古卷', entries: [{ label: '档案', onSelect: fn }] });
-// -> { el(), toggle(), panel() }
+SBK.ui.chrome({ hostId: 'sbk-hud', icon: 'wrench', label: '设置', side: 'right' });
+// -> { el(), toggle(), panel(), dock() }
 ```
 
-`boot()` 在 `modes.chrome` 为真时自己调它（传 `{hostId}`），一般不用手写。**模块级单例**：重复调用直接返回已有句柄并告警。它也容错 `chrome(hostEl, opts)` 形态（首参是元素就当宿主）。
+`boot()` 在 `modes.chrome` 为真时自己调它，把 config 的 `chrome` 块（`form/side/icon/label/dockLabel/hoverOpen/settings`）按白名单透传进来，一般不用手写。**模块级单例**：重复调用直接返回已有句柄并告警。它也容错 `chrome(hostEl, opts)` 形态（首参是元素就当宿主，此时强制走 bar）。
 
-- 只负责「功能栏上有个按钮，点了调设置抽屉」。抽屉本体归主题层（`SBK.theme.prefs.panel/toggle`），chrome 不持有引用——单一归属，避免两处状态不同步。
-- 它建的是宿主里的子容器 `<hostId>-chr`，**只清自己这一个子节点**。精简条宿主是 `<hostId>-pin`，两者是兄弟：清整个宿主会把对方擦掉（`core.js` 与 `ui.js` 都就此留了注释）。配置/`chrome()` 的 `hostId` 是派生基名，限 ASCII 字母开头、其后字母数字 `_` `-`、总长 ≤60；追加 4 字符后缀后最终 DOM id 仍 ≤64。
-- 缺主题层时按钮仍在，点了只告警，不抛异常炸整卡。
+**两种形态，默认 dock**：
+
+| `form` | 形态 | 何时用 |
+|---|---|---|
+| `dock`（默认） | 贴视口边缘的一枚**图标**页签，点开是半页抽屉 | 默认全用这个 |
+| `bar` | 旧的功能栏内按钮排（大按钮＋「设置」文字） | 只在作者显式要求、或 `ui-dock.js` 被裁掉时 |
+
+**为什么默认换成 dock**：bar 形态走功能栏行内流，与平台自己的 chrome 挤在一条上，且功能栏实测 `flex-shrink:1` 会被消息区抢高度压扁——观感就是「设置按钮镶嵌在页面里」。dock 把它挪到视口边缘、只留一枚半透明图标把手。
+
+- **设置页签全局唯一**（`role:'settings'`，由 dock 的 dedupe 保证）：玩家找设置时不该在两枚差不多的图标里猜。作者的扩展页签（图鉴/地图）可以多枚。
+- **单功能不做第二层**：设置只有美化一件事时，抽屉里只有一个 pane，`ui-nav` 见 ≤1 pane 就不渲染导航栏，点开即是表单。传 `panes` 才会并列出导航栏。
+- 传旧的 `entries` 仍然可用：它们各自成为导轨上一枚**独立 action 页签**，而不是塞进设置抽屉——`entries` 是「点一下就执行」的扩展动作，与「基础设置」不同类，混进去会让设置变成杂物抽屉。
+- 抽屉里的设置表单归主题层（`SBK.theme.prefs.pane()`，可嵌进任意 pane 的节点；老资产的 `prefs.form()` 也兼容）。chrome 不复制表单逻辑——单一归属。
+- 缺 `ui-dock.js` 时自动回落 bar，既有卡不白屏；显式写 `form:'dock'` 但模块缺失会额外告警一次。
+- bar 形态建的是宿主里的子容器 `<hostId>-chr`，**只清自己这一个子节点**。精简条宿主是 `<hostId>-pin`，两者是兄弟：清整个宿主会把对方擦掉。`hostId` 是派生基名，限 ASCII 字母开头、其后字母数字 `_` `-`、总长 ≤60；追加 4 字符后缀后最终 DOM id 仍 ≤64。
+- 缺主题层时入口仍在，点了只告警，不抛异常炸整卡。
 
 ### `theme` 层：preset + overrides 两层合成
 
@@ -164,7 +190,7 @@ sbk-ui-5     5207  ui-stage.js
 | 2 | **任何 DOM 写入必须在事件回调内**——作者脚本早于 DOM 渲染，顶层 `getElementById` 实测返回 `null` | 事实卡 §4.1 / 硬约束 17 |
 | 3 | **冷启动挂 `message:mount`/`done`，别挂 `ready`**——实测顺序 `new→mount→done→ready`，`ready` 最后到且**无补发** | 事实卡 §4.1 / 硬约束 5 |
 | 4 | **协议标记用方括号 `[状态]`**——尖括号 `<状态>` 会被 worker 剥壳正则当非白名单标签**整个删掉** | 事实卡 §5.4 / 裁决 9 |
-| 5 | **`findRegex` 一律 `/…/` slash 形态**——实机裸字面量 `{{probe}}` 不生效，加斜杠立即生效 | 硬约束 21 |
+| 5 | **`findRegex` 统一 `/…/` slash 形态**（约定，非硬性）——裸字面量实机也生效（卡 64304 A/B 2026-08-30，与 worker 源码一致）；统一 slash 为跨平台一致，校验器对裸字面量出 WARN 不出 ERROR | 事实卡 §8.21 |
 | 6 | **匹配式绝不能匹配空串**——触发 `empty-match` 会让**整条规则回滚**。`/(?!)/` 是恒失败（安全但无用），`/a*/` 才是杀手 | 事实卡 §5.2 / 裁决 6 |
 | 7 | **`status` 面板的根元素必须带 `.sbk-snap`**——否则 `base.css` 对 `message-body` 的 `opacity:.9` 与 `white-space:pre-line` 重置不生效，排版必烂。外壳规则还必须带 `.sbk-snap--raw`，`hydrate()` 靠它找待升级节点 | 事实卡 §7.3 / 裁决 4 |
 | 8 | **零外部依赖**——CSP `style-src` 无 `https:`、`connect-src 'self'`，外部样式表 / 外部字体 / `fetch` 全部封死 | 事实卡 §2 / 硬约束 3 |

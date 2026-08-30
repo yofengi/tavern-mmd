@@ -11,7 +11,7 @@
 | replaceString长度 | 无硬限制 | ≤20000字符 | ≤20000字符（编辑器上限，超了拆条） |
 | `id` 取值 | 平台自管 | 时间戳类 | **必须负数**，导入时重编号 |
 | `scriptName` 长度 | 无硬限制 | 无硬限制 | **保守交付 ≤20**（UI 显示 20；源码归一常量 200，双路径与超限语义待确证） |
-| findRegex 形态 | `/pattern/flags` | **强制** `/pattern/flags`（实测铁律） | **强制** `/pattern/flags`（实机裸字面量不生效；worker 字面量分支只作逆向事实） |
+| findRegex 形态 | `/pattern/flags` | **强制** `/pattern/flags`（实测铁律） | **统一** `/pattern/flags`（约定；裸字面量实机也生效，卡 64304 A/B 2026-08-30，判 WARN 非 ERROR） |
 | random标签 | 不支持（ST用{{random}}宏） | 支持`(random(a\|b\|c))`，多标签独立、可嵌$1捕获组 | 支持官方文字变量 `{{random:甲::乙::丙}}`；`(random(a\|b\|c))` 形态在沙盒模式**官方资料未提及**【待验证】 |
 
 三平台正则json字段结构不同（本地酒馆13字段 vs 当前MMD 4字段 vs 沙盒模式6键顶层+4字段条目），均见 `../output/regex-output.md`。
@@ -20,13 +20,13 @@
 
 **当前 MMD `/mmd`**：`findRegex` 必须写成 `/pattern/flags`。裸模式在平台正则控制台测试能过、实际聊天界面不替换；固定标记也写成 `/<status>/`。
 
-**MMD 沙盒 `/mmdsandbox`**：worker 源码的 `classifyPattern` 确实存在两形态，但实机裸字面量 `{{probe}}` 不生效，改 `/{{probe}}/` 立即生效。宿主交给 worker 前仍有未逆向处理层，因此交付同样强制 slash：
+**MMD 沙盒 `/mmdsandbox`**：worker 源码的 `classifyPattern` 存在两形态，`【实机实测 2026-08-30】`（卡 64304 A/B）确认裸字面量也生效（裸 `体力` 与斜杠 `/灵力/` 同一轮渲染都被替换），与 worker 源码一致。交付仍**统一 slash** 是约定（跨平台一致），非硬性：
 
 | 写法 | 交付判定 | 行为 |
 |---|---|---|
 | `/{{hud}}/`、`/【图鉴】/` | ✅ 固定标记 | 缺 `g` 平台自动补 |
 | `/pattern/flags` | ✅ 正则 | 合法 flags 仅 `gimsuy` |
-| `{{hud}}` | ❌ 裸字面量 | worker 理论支持，实机不生效 |
+| `{{hud}}` | ⚠️ 裸字面量 | 实机生效，建议统一 slash（WARN，非 ERROR） |
 | 语法错误的 `/…/` | ❌ bad-regex | 整条规则静默丢弃 |
 
 固定标记不能重复；`findRegex` 也不要含 HTML 标签或独立保留字 `html/head/body/css`。完整源码与实机冲突见 `../platforms/mmd-sandbox.md` §7.1。

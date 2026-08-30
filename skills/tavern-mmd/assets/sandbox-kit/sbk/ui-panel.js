@@ -284,6 +284,87 @@
     return api;
   }
 
+  /* dock 形态的 chrome：把「设置」做成导轨上唯一的一枚图标页签。
+     ------------------------------------------------------------------
+     页签映射规则（用户口径，逐条对应）：
+     · 设置页签【全局唯一】 → role:'settings'，由 ui-dock.js 的 dedupe 保证。
+     · 【单功能不做第二层】 → 设置只有美化一件事时，pane 只有一个，
+       ui-nav.js 见 ≤1 pane 就不渲染导航栏，点开即是表单。
+     · 作者要集中功能 → 传 o.panes，它们与美化 pane 并列进同一个抽屉，
+       ≥2 个时 nav 自动出现导航栏。
+     · 作者传旧的 entries（动作按钮） → 各自成为导轨上一枚独立 action 页签，
+       而不是塞进设置页签。理由：entries 是「点一下就执行」的扩展动作
+       （图鉴、地图那类），与「基础设置」不同类；混进设置抽屉会让设置变成杂物抽屉。 */
+  function dockChrome(o) {
+    var themePane = {
+      label: o.label || '\u7f8e\u5316',
+      content: function () {
+        var p = prefsOf();
+        if (!p) return h('div', { 'class': 'sbk-pane' }, '\u4e3b\u9898\u5c42\u672a\u88c5\u8f7d');
+        /* prefs.pane 是可嵌入节点（不建独立抽屉外壳）。老版本 theme-panel 只有
+           prefs.form，这里兼容取用，避免旧资产升级时设置页签变空白。 */
+        var mk = typeof p.pane === 'function' ? p.pane : p.form;
+        if (typeof mk !== 'function') return h('div', { 'class': 'sbk-pane' }, '\u8bbe\u7f6e\u8868\u5355\u4e0d\u53ef\u7528');
+        try { return mk(); } catch (e) {
+          SBK.warn('ui.chrome: theme prefs pane threw', e && e.message);
+          return h('div', { 'class': 'sbk-pane' }, '\u8bbe\u7f6e\u8868\u5355\u6784\u5efa\u5931\u8d25');
+        }
+      }
+    };
+    var panes = (o.settings === false ? [] : [themePane])
+      .concat((o.panes || []).filter(function (p) { return p; }));
+    var tabs = [];
+    if (panes.length) {
+      tabs.push({
+        role: 'settings', icon: o.icon || 'wrench',
+        label: o.dockLabel || o.label || '\u8bbe\u7f6e',
+        surface: 'drawer', panes: panes, width: o.width
+      });
+    }
+    (o.entries || []).forEach(function (it) {
+      if (it) tabs.push({ icon: it.icon || 'dots', label: it.label, onSelect: it.onSelect });
+    });
+    if (!tabs.length) { SBK.warn('ui.chrome: nothing to mount (settings off and no entries/panes)'); return null; }
+
+    /* 主题层 start 与 bar 路径保持一致。start() 自己是幂等的（theme.js 明文承诺：
+       boot 信封已 start 过一次，chrome 的第二次不重新读档、不空 resolve 覆盖），
+       这里调它是为了 configure(o) —— 面板标题/宽度这类外观参数只走这条路。
+       漏掉它的后果不是主题不生效（boot 信封恒非空，主题照样起），而是设置面的
+       标题与宽度回落成默认值。 */
+    var t = SBK.theme;
+    if (t && typeof t.start === 'function') {
+      try { t.start(o.preset, o); } catch (e) { SBK.warn('ui.chrome: theme.start threw', e && e.message); }
+    }
+
+    var dk = SBK.ui.dock({ side: o.side === 'left' ? 'left' : 'right',
+                           hoverOpen: o.hoverOpen, tabs: tabs });
+    /* 设置页签在导轨上的下标。settings 恒为我们自己压进 tabs[0]（若没关掉），
+       作者 entries 排在后面 —— toggle() 要开的是设置那一枚，不是第一枚。 */
+    var setIdx = (o.settings === false || !panes.length) ? -1 : 0;
+    /* chrome 的公开面保持不变（el/panel/toggle），既有卡与 boot 的调用点不用改。
+       panel() 在 dock 形态下返回导轨句柄本身 —— 它才是那个「设置面」的持有者。 */
+    chromeApi = {
+      el: function () { return dk && typeof dk.el === 'function' ? dk.el() : null; },
+      dock: function () { return dk; },
+      panel: function () { return dk; },
+      /* ⚠ dockApi 没有 toggle()，只有 open(i)/close()。open() 内部走 hit()，
+         对 drawer 页签本身就是「开着就收、收着就开」，语义正是 toggle。 */
+      toggle: function () {
+        if (dk && setIdx >= 0 && typeof dk.open === 'function') dk.open(setIdx);
+        else { var p = prefsOf(); if (p) p.toggle(); }
+        return chromeApi;
+      }
+    };
+    return chromeApi;
+  }
+
+  function prefsOf() {
+    var t = SBK.theme;
+    if (t && t.prefs && typeof t.prefs.toggle === 'function') return t.prefs;
+    SBK.warn('ui.chrome: theme prefs layer not loaded, settings entry is inert');
+    return null;
+  }
+
   var chromeApi = null;
   function chrome(a, b) {
     var pre = a && a.nodeType === 1 ? a : null;
@@ -293,12 +374,20 @@
     var hid = normBase ? normBase(o.hostId || 'sbk-hud') : String(o.hostId || 'sbk-hud');
     var gid = hid + '-chr';
     var grp = null, built = false;
-    function prefs() {
-      var t = SBK.theme;
-      if (t && t.prefs && typeof t.prefs.toggle === 'function') return t.prefs;
-      SBK.warn('ui.chrome: theme prefs layer not loaded, settings entry is inert');
-      return null;
+    var prefs = prefsOf;
+
+    /* ---- 入口形态分流：dock（默认）/ bar（旧的功能栏内按钮排）----
+       🚨 默认走 dock 是本轮的观感修复：旧 bar 形态把「大按钮＋设置文字」塞进功能栏
+       行内流，与平台自己的 chrome 挤在一条上（且功能栏实测 flex-shrink:1 会被消息区
+       抢高度压扁），观感就是「设置按钮镶嵌在页面里」。dock 形态改成贴视口边缘的
+       一枚【图标】页签，点开是抽屉。
+       只有 ui-dock.js 没装（作者裁剪掉了）或作者显式 form:'bar' 才回落 bar。 */
+    var useDock = o.form !== 'bar' && !pre &&
+      SBK.ui && typeof SBK.ui.dock === 'function';
+    if (o.form === 'dock' && !(SBK.ui && typeof SBK.ui.dock === 'function')) {
+      SBK.warn('ui.chrome: form="dock" needs ui-dock.js, falling back to the toolbar bar form');
     }
+    if (useDock) return dockChrome(o);
     function build() {
       if (built) return true;
       var host = pre || SBK.dom.mountHost(hid);

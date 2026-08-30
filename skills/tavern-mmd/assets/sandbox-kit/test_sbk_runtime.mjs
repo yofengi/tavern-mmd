@@ -1030,6 +1030,205 @@ function testSourceInvariants() {
 }
 
 /* =======================================================================
+   7) 侧边栏一族：chrome→dock 路由 + 数量纪律 + 回落
+   ------------------------------------------------------------------
+   这些不是渲染细节，是【形态契约】：
+   · chrome() 默认必须变成导轨上的一枚图标页签，不再是功能栏里的「大按钮＋设置文字」；
+   · ui-dock.js 被裁掉、或作者显式 form:'bar' 时必须回落旧形态（既有卡不能白屏）；
+   · 单 pane 不出导航栏、单 entry 不出扇形（用户明确点过的两条「不必做第二层」）；
+   · 设置页签全局唯一，扩展页签可多枚。
+   ======================================================================= */
+const DOCK_FILES = [
+  'core.js', 'core-store.js', 'core-boot.js', 'theme.js', 'theme-panel.js',
+  'protocol.js', 'hud.js', 'hud-render.js', 'ui.js', 'ui-panel.js',
+  'ui-nav.js', 'ui-icon.js', 'ui-fan.js', 'ui-dock.js', 'ui-bubble.js',
+  'ui-inject.js', 'ui-codex.js', 'ui-map.js', 'ui-stage.js'
+];
+/* 不含侧边栏一族的最小集：模拟作者把 ui-dock.js 等裁掉的卡 */
+const NO_DOCK_FILES = [
+  'core.js', 'core-store.js', 'core-boot.js', 'theme.js', 'theme-panel.js',
+  'protocol.js', 'hud.js', 'hud-render.js', 'ui.js', 'ui-panel.js', 'ui-stage.js'
+];
+function freshDock(files = DOCK_FILES) {
+  const doc = makeDoc();
+  const root = buildPlatformDom(doc);
+  const sdk = makeSdk();
+  const W = loadKit(files, { sdk, doc });
+  return { W, SBK: W.SBK, doc, root, sdk };
+}
+const clsAll = (doc, re) => doc.querySelectorAll('[class]').filter((n) => re.test(n.className));
+
+async function testChromeRoutesToDock() {
+  const t = group('chrome→dock 路由');
+  const { SBK, doc, sdk } = freshDock();
+  const api = SBK.ui.chrome({ hostId: 'sbk-hud' });
+  sdk._emit('message:mount', {});
+  await flush();
+  t(api && typeof api.dock === 'function', 'dock 形态的 chrome 暴露 .dock() 句柄');
+  const dk = api.dock();
+  t(!!dk, '拿到导轨句柄');
+  t(clsAll(doc, /sbk-dk\b/).length === 1, '导轨已挂载（.sbk-dk）');
+  t(clsAll(doc, /sbk-chr/).length === 0,
+    '🚨 旧的功能栏按钮排必须消失 —— 它正是「设置按钮镶嵌在页面里」的观感根因');
+  const tabs = dk.el().childNodes.filter((n) => /sbk-dk__tab/.test(n.className));
+  t(tabs.length === 1, '默认只有一枚页签（设置）');
+  t(dk.hasRole('settings'), '那一枚带 role:settings');
+  t(tabs[0].textContent === '', '页签是纯图标，不带文字标签');
+  api.toggle();
+  await flush();
+  t(dk.opened() === true, 'toggle() 打开设置抽屉');
+  api.toggle();
+  await flush();
+  t(dk.opened() === false, '再次 toggle() 收起（open(i) 对 drawer 即 toggle 语义）');
+}
+
+async function testChromeFallsBackWhenDockMissing() {
+  const t = group('chrome 回落 bar');
+  const { SBK, doc, sdk } = freshDock(NO_DOCK_FILES);
+  const api = SBK.ui.chrome({ hostId: 'sbk-hud' });
+  sdk._emit('message:mount', {});
+  await flush();
+  t(api && typeof api.dock !== 'function', 'ui-dock.js 缺失时不假装有 dock 句柄');
+  t(clsAll(doc, /sbk-chr/).length === 1, '回落到旧的功能栏按钮组，既有卡不白屏');
+  t(clsAll(doc, /sbk-btn/).some((n) => n.textContent === '\u8bbe\u7f6e'), '设置按钮仍可点');
+}
+
+async function testChromeExplicitBarForm() {
+  const t = group('chrome form=bar');
+  const { SBK, doc, sdk } = freshDock();
+  const api = SBK.ui.chrome({ hostId: 'sbk-hud', form: 'bar' });
+  sdk._emit('message:mount', {});
+  await flush();
+  t(api && typeof api.dock !== 'function', 'form:"bar" 即使 dock 在也不走导轨');
+  t(clsAll(doc, /sbk-chr/).length === 1, '显式 bar 得到旧形态');
+  t(clsAll(doc, /sbk-dk\b/).length === 0, '不应同时出现导轨');
+}
+
+async function testDockNavOnlyWhenMultiplePanes() {
+  const t = group('dock 导航栏数量纪律');
+  {
+    const { SBK, doc, sdk } = freshDock();
+    SBK.ui.chrome({ hostId: 'sbk-hud' }).toggle();
+    sdk._emit('message:mount', {});
+    await flush();
+    t(clsAll(doc, /sbk-nav\b/).length === 0,
+      '🚨 单 pane 不渲染导航栏（一格的导航栏是纯噪音）');
+  }
+  {
+    const { SBK, doc, sdk } = freshDock();
+    const api = SBK.ui.chrome({
+      hostId: 'sbk-hud',
+      panes: [{ label: '\u5173\u4e8e', content: () => SBK.dom.h('div', {}, 'x') }]
+    });
+    sdk._emit('message:mount', {});
+    await flush();
+    api.toggle();
+    await flush();
+    const nav = clsAll(doc, /sbk-nav\b/);
+    t(nav.length === 1, '≥2 pane 才出现导航栏');
+    const labels = nav[0].childNodes.map((b) => b.textContent);
+    t(labels.length === 2 && labels[1] === '\u5173\u4e8e',
+      '作者 pane 与美化 pane 并列进同一抽屉，got ' + JSON.stringify(labels));
+  }
+}
+
+async function testDockEntriesBecomeOwnTabs() {
+  const t = group('dock 作者 entries');
+  const { SBK, sdk } = freshDock();
+  let hit = 0;
+  const api = SBK.ui.chrome({
+    hostId: 'sbk-hud',
+    entries: [{ label: '\u56fe\u9274', icon: 'book', onSelect: () => { hit++; } }]
+  });
+  sdk._emit('message:mount', {});
+  await flush();
+  const dk = api.dock();
+  t(dk.count() === 2, 'entries 各自成为导轨上一枚独立页签（不塞进设置抽屉）');
+  const tabs = dk.el().childNodes.filter((n) => /sbk-dk__tab/.test(n.className));
+  t(tabs.length === 2, '导轨上渲染出两枚页签');
+  dk.open(1);
+  await flush();
+  t(hit === 1, '扩展页签的 onSelect 被调用一次');
+}
+
+async function testSettingsTabStaysUnique() {
+  const t = group('设置页签唯一');
+  const { SBK, sdk } = freshDock();
+  const api = SBK.ui.chrome({ hostId: 'sbk-hud' });
+  sdk._emit('message:mount', {});
+  await flush();
+  const dk = api.dock();
+  /* 作者再往共享导轨里塞一枚 settings：必须被拒，而不是造出两枚长得差不多的图标 */
+  dk.addTab({ role: 'settings', icon: 'gear', label: '\u53c8\u4e00\u4e2a', onSelect() {} });
+  await flush();
+  t(dk.count() === 1, '第二枚 role:settings 被拒');
+  /* 但普通扩展页签可以多枚 */
+  dk.addTab({ icon: 'map', label: '\u5730\u56fe', onSelect() {} });
+  dk.addTab({ icon: 'book', label: '\u56fe\u9274', onSelect() {} });
+  await flush();
+  t(dk.count() === 3, '扩展页签可多枚（图鉴/地图各占一枚）');
+}
+
+async function testThemeFormsAllStayInSync() {
+  const t = group('多份设置表单同步');
+  const { SBK, sdk } = freshDock();
+  sdk._emit('message:mount', {});
+  await flush();
+  const p = SBK.theme.prefs;
+  t(typeof p.pane === 'function', 'theme-panel 暴露可嵌入的 prefs.pane');
+  const f1 = p.form(), f2 = p.form();
+  const cbOf = (box) => box.querySelectorAll('input').filter((i) => i.attributes.type === 'checkbox')[0];
+  const c1 = cbOf(f1), c2 = cbOf(f2);
+  t(c1.checked === true && c2.checked === true, '两份表单初始都反映启用态');
+  p.enabled(false);
+  await flush();
+  /* 🚨 回归点：原先 syncForm 是单槽，第二份表单一建就顶掉第一份的刷新函数，
+     f1 会停在旧值。dock 形态下这正是「导轨里改了字号，另一份表单显示过期状态」。 */
+  t(c1.checked === false && c2.checked === false,
+    '所有存活表单都跟随 prefs 变化刷新，got f1=' + c1.checked + ' f2=' + c2.checked);
+}
+
+function testChromeFontTokensOnBothSurfaces() {
+  const t = group('chrome 字号令牌');
+  /* --sbk-cfs* 三档由【拥有面的 kit】定义：ui.js 给抽屉与浮层，ui-bubble.js 给气泡。
+     消费者（ui-nav / ui-inject / ui-codex / ui-map）只写带兜底的取用，兜底值与定义一致
+     → 缺了不会立刻显形，但风格包想统一调这三档时会改不到抽屉。故在源码层锁死。 */
+  const ui = readFileSync(join(SBK_DIR, 'ui.js'), 'utf8');
+  const bb = readFileSync(join(SBK_DIR, 'ui-bubble.js'), 'utf8');
+  for (const [name, src, surface] of [['ui.js', ui, '.sbk-drw'], ['ui-bubble.js', bb, '.sbk-bb']]) {
+    for (const tok of ['--sbk-cfs:', '--sbk-cfs-sm:', '--sbk-cfs-xs:']) {
+      t(src.includes(tok), name + ' 为 ' + surface + ' 定义 ' + tok.slice(0, -1));
+    }
+  }
+  t(/\.sbk-drw,\.sbk-pop\{--sbk-cfs:/.test(ui), '抽屉与浮层共用同一处三档定义');
+  /* 兜底值必须与定义值一致，否则「缺定义」会变成静默的字号漂移 */
+  const defs = { '--sbk-cfs': '15px', '--sbk-cfs-sm': '13px', '--sbk-cfs-xs': '12px' };
+  for (const f of ['ui-nav.js', 'ui-inject.js', 'ui-codex.js', 'ui-map.js', 'ui.js']) {
+    const src = readFileSync(join(SBK_DIR, f), 'utf8');
+    for (const m of src.matchAll(/var\((--sbk-cfs[a-z-]*),\s*([^)]+)\)/g)) {
+      t(defs[m[1]] === m[2].trim(), f + ' 的 ' + m[1] + ' 兜底值须为 ' + defs[m[1]],
+        'got ' + m[2].trim());
+    }
+  }
+}
+
+function testSidebarModulesExposeApi() {
+  const t = group('侧边栏一族 API 面');
+  const { SBK } = freshDock();
+  for (const k of ['nav', 'icon', 'icons', 'fan', 'dock', 'bubble', 'inject', 'codex', 'map']) {
+    t(SBK.ui[k] !== undefined, 'SBK.ui.' + k + ' 已导出');
+  }
+  t(typeof SBK.ui.dock === 'function', 'dock 是工厂函数');
+  t(typeof SBK.ui.nav === 'function', 'nav 是工厂函数');
+  /* 图标名表与 build_sbk.py 的 CHROME_ICONS 白名单必须同源，否则生成期放过的
+     图标名到运行时才回落 gear，而真机没有控制台可看告警。 */
+  const names = SBK.ui.icons();
+  for (const n of ['gear', 'wrench', 'tools', 'sliders', 'map', 'book', 'spark', 'dots']) {
+    t(names.indexOf(n) >= 0, '图标表含 ' + n + '（与 build_sbk.CHROME_ICONS 对齐）');
+  }
+}
+
+/* =======================================================================
    汇总
    ======================================================================= */
 async function main() {
@@ -1056,6 +1255,15 @@ async function main() {
   testOtherTypesNoGarbage();
   testNewTypes();
   testUnknownType();
+  await testChromeRoutesToDock();
+  await testChromeFallsBackWhenDockMissing();
+  await testChromeExplicitBarForm();
+  await testDockNavOnlyWhenMultiplePanes();
+  await testDockEntriesBecomeOwnTabs();
+  await testSettingsTabStaysUnique();
+  await testThemeFormsAllStayInSync();
+  testChromeFontTokensOnBothSurfaces();
+  testSidebarModulesExposeApi();
   testSourceInvariants();
 
   console.log('\nSBK runtime tests');

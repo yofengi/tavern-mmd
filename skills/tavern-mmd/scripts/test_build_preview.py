@@ -418,6 +418,21 @@ class TestRuntimeFloatingEngines(unittest.TestCase):
     RADAR = (
         "<img src=\"x\" data-radar-engine=\"1\" onerror=\"if(c>0){var k='data-sid';this.rdrNode=1}\">"
     )
+    # Pointer Events 版悬浮球（build_float.py 现产物形状）：data-zsf-ball 标记 + pointerdown，
+    # 无旧的 mousedown/touchstart。锁死"重写后仍归入悬浮面板、不被漏检"。
+    POINTER_BALL = (
+        "<img src=\"x\" data-zsf-ball=\"1\" style=\"display:none\" "
+        "onerror=\"(function(e){var b=document.createElement('div');b.className='zsf-ball';"
+        "b.addEventListener('pointerdown',function(ev){ev.stopPropagation();});"
+        "document.body.appendChild(b);e.remove();})(this)\">"
+    )
+    # 无已知标记、仅靠通用回退（position:fixed + pointerdown）识别的悬浮球。
+    POINTER_BALL_GENERIC = (
+        "<img src=\"x\" style=\"display:none\" "
+        "onerror=\"(function(e){var b=document.createElement('button');"
+        "b.style.cssText='position:fixed;left:18px;bottom:90px';"
+        "b.addEventListener('pointerdown',function(ev){});document.body.appendChild(b);e.remove();})(this)\">"
+    )
 
     def _panels(self, html):
         first = html.split("状态栏单独预览", 1)[0]
@@ -440,6 +455,25 @@ class TestRuntimeFloatingEngines(unittest.TestCase):
         _, status, floating = self._panels(bp.assemble_preview(obj, "mmd", "t.json"))
         self.assertIn("data-sidebar", floating)
         self.assertNotIn("data-sidebar", status)
+
+    def test_pointer_events_ball_routed_to_floating_panel(self):
+        """Pointer Events 版悬浮球（data-zsf-ball + pointerdown）仍归入悬浮面板，不漏检。"""
+        obj = {"pageDepth": 2, "statusbar": "", "beginning": "正文<ball>",
+               "regex_scripts": [{"scriptName": "悬浮球", "findRegex": "/<ball>/",
+                                  "replaceString": self.POINTER_BALL}]}
+        _, status, floating = self._panels(bp.assemble_preview(obj, "mmd", "t.json"))
+        self.assertIn("data-zsf-ball", floating)
+        self.assertNotIn("data-zsf-ball", status)
+
+    def test_pointer_events_ball_detected_by_generic_fallback(self):
+        """无标记的 Pointer Events 悬浮球靠 position:fixed + pointerdown 通用回退识别。"""
+        self.assertTrue(bp._is_floating_engine_tag(self.POINTER_BALL_GENERIC))
+        obj = {"pageDepth": 2, "statusbar": "", "beginning": "正文<ball>",
+               "regex_scripts": [{"scriptName": "悬浮球", "findRegex": "/<ball>/",
+                                  "replaceString": self.POINTER_BALL_GENERIC}]}
+        _, status, floating = self._panels(bp.assemble_preview(obj, "mmd", "t.json"))
+        self.assertIn("pointerdown", floating)
+        self.assertNotIn("pointerdown", status)
 
     def test_all_four_components_each_panel_gets_its_engine(self):
         """全局美化(style) + 侧边栏 + 悬浮球 + 状态栏雷达 同场：各引擎不串台。"""
@@ -1054,25 +1088,30 @@ class TestSandboxPipeline(unittest.TestCase):
         return {"chatVersion": 1, "pageDepth": 2, "statusbar": statusbar,
                 "beginning": beginning, "personality": "", "regex_scripts": scripts}
 
-    def test_bare_literal_is_error_and_never_renders(self):
-        """🚨 实机推翻原 D7：裸字面量在真机上**不生效**（探针 {{probe}} 完全不触发，
-        改 /{{probe}}/ 立即生效）。预览必须判 ERROR 且**绝不替换**——否则作者在预览里
-        看到内容出现、上真机什么都没有，这是最坏的一种谎。"""
+    def test_bare_literal_renders_and_is_not_error(self):
+        """🚨 实机订正（卡 64304 A/B，2026-08-30）：裸字面量**生效**（裸 `体力` 与
+        `/灵力/` 同一轮渲染都被替换）。预览必须照渲染、不判非法——否则作者在预览里
+        看不到内容、以为坏了，反而误导。"""
         obj = self.card("正文 {{hud}} 尾巴", [
             {"id": -1, "scriptName": "hud", "findRegex": "{{hud}}",
-             "replaceString": "<div id='must-not-render'>血量</div>"}])
-        invalid = bp.find_invalid_findregexes(obj, "mmdsandbox")
-        self.assertEqual(len(invalid), 1)
-        self.assertEqual(invalid[0][0], "hud")
-        self.assertIn("实机裸字面量未生效", invalid[0][2])
-        self.assertIn("worker 源码", invalid[0][2])
-        # 不替换：触发串原样留在正文里。
+             "replaceString": "<div class='does-render'>血量</div>"}])
+        # 不判非法（裸字面量实机生效）。
+        self.assertEqual(bp.find_invalid_findregexes(obj, "mmdsandbox"), [])
+        # 照替换：触发串被换掉、替换内容出现。
         rendered = bp.apply_regex_pipeline(obj, "mmdsandbox")
-        self.assertIn("{{hud}}", rendered)
-        self.assertNotIn("must-not-render", rendered)
+        self.assertNotIn("{{hud}}", rendered)
+        self.assertIn("does-render", rendered)
         html = bp.assemble_preview(obj, "mmdsandbox", "t.json")
-        self.assertIn("ERROR 非法 findRegex", html)
-        self.assertTrue(bp.fatal_preview_findings(obj, "mmdsandbox")["findRegex"])
+        self.assertNotIn("ERROR 非法 findRegex", html)
+        self.assertFalse(bp.fatal_preview_findings(obj, "mmdsandbox")["findRegex"])
+
+    def test_bare_literal_metachars_match_literally(self):
+        """裸字面量走 worker m() 转义：`a.b` 只匹配字面 `a.b`，不匹配 `axb`。"""
+        obj = self.card("has a.b and axb", [
+            {"id": -1, "scriptName": "dot", "findRegex": "a.b",
+             "replaceString": "<b>HIT</b>"}])
+        rendered = bp.apply_regex_pipeline(obj, "mmdsandbox")
+        self.assertIn("<b>HIT</b> and axb", rendered)   # 只有 a.b 被换，axb 原样
 
     def test_slash_form_marker_renders_and_is_not_flagged(self):
         """交付形态（slash）必须正常替换且不报非法。"""
@@ -1088,15 +1127,17 @@ class TestSandboxPipeline(unittest.TestCase):
         self.assertNotIn("ERROR 非法 findRegex", html)
         self.assertIn("my-hud", html)
 
-    def test_worker_literal_branch_stays_explainable(self):
-        """worker 源码确有 literal 分支，内部函数要能说明它；但它不是交付判据。"""
+    def test_worker_literal_branch_renders(self):
+        """worker 源码的 literal 分支实机生效：分类为 literal，交付门禁不拦，且能编译成
+        预览用的转义 slash 正则。"""
         self.assertEqual(bp.classify_sandbox_pattern("{{hud}}")[:2], ("literal", "{{hud}}"))
         self.assertEqual(bp.classify_sandbox_pattern("a.b")[:2], ("literal", "a.b"))
-        # 交付门禁与 worker 分类分开：前者对字面量判错，后者仍照实描述 worker。
-        self.assertIn("实机裸字面量未生效", bp.sandbox_pattern_delivery_error("{{hud}}"))
+        # 门禁不再对字面量判错。
+        self.assertIsNone(bp.sandbox_pattern_delivery_error("{{hud}}"))
         self.assertIsNone(bp.sandbox_pattern_delivery_error("/{{hud}}/"))
         self.assertEqual(bp.sandbox_delivery_regex("/{{hud}}/"), "/{{hud}}/g")
-        self.assertIsNone(bp.sandbox_delivery_regex("{{hud}}"))
+        # 字面量编译成转义后的全文替换正则（元字符被转义）。
+        self.assertEqual(bp.sandbox_delivery_regex("a.b"), r"/a\.b/g")
 
     def test_slash_form_without_g_is_still_global(self):
         obj = self.card("aa ba", [
@@ -1271,7 +1312,7 @@ class TestSandboxRendering(unittest.TestCase):
 class TestSandboxPanoramaChrome(unittest.TestCase):
     """沙盒模式全景注入官方稳定钩子与 --chat-* 变量，作者选择器/变量在预览里可解析。"""
 
-    # 匹配式一律 slash 形态：实机裸字面量不生效（事实卡 §8.21），预览判 ERROR。
+    # 匹配式统一 slash 形态（约定；裸字面量实机也生效，事实卡 §8.21）。
     CARD = {"chatVersion": 1, "pageDepth": 2, "statusbar": "{{hud}}",
             "beginning": "正文 {{panel}}", "personality": "",
             "regex_scripts": [

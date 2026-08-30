@@ -7,7 +7,7 @@
   "pageDepth": 2,
   "_pageDepth": "固定 2。",
   "assetDir": "sbk",
-  "_assetDir": "基座源码目录，相对配置文件。须包含 base.css 与 11 个完整经典脚本模块，固定顺序：core.js → core-store.js → core-boot.js → theme.js → theme-panel.js → protocol.js → hud.js → hud-render.js → ui.js → ui-panel.js → ui-stage.js。缺模块表示资产不完整。",
+  "_assetDir": "基座源码目录，相对配置文件。须包含 base.css 与 19 个完整经典脚本模块，固定顺序：core.js → core-store.js → core-boot.js → theme.js → theme-panel.js → protocol.js → hud.js → hud-render.js → ui.js → ui-panel.js → ui-nav.js → ui-icon.js → ui-fan.js → ui-dock.js → ui-bubble.js → ui-inject.js → ui-codex.js → ui-map.js → ui-stage.js。缺模块表示资产不完整。顺序即装载顺序，不可重排：nav/icon/fan 必须早于 ui-dock（dock 消费它们，晚到只会吃到兜底退化路径）；ui-dock 必须晚于 ui-panel（chrome() 反查 SBK.ui.dock 决定入口形态，晚到会静默回落成旧的功能栏按钮排，也就是「设置按钮镶嵌在页面里」那个观感 bug）；inject/codex/map 三个扩展只依赖 core + ui kit，互不依赖，可单独裁剪。",
   "hostId": "sbk-hud",
   "_hostId": "功能栏宿主基名。首字符须为 ASCII 字母，其余只能字母/数字/_/-，总长最多 60；基座会派生 -chr/-pin，最终 DOM id 最多 64。事实卡 §3：document.currentScript 恒为 null，脚本无法自定位，只能靠固定 id 约定。",
   "protocolTag": "状态",
@@ -18,6 +18,12 @@
     "pinned": false
   },
   "_modes": "🚨 2.0 语义（基座2.0设计.md 第二节）：三者【职责不同】，不是同一份 schema 的多个渲染器。status＝气泡内状态面板，是【唯一】的状态数据渲染器（1.0 叫 snapshot），随消息滚动＝天然历史快照，默认开。chrome＝功能栏入口按钮组（主题/设置/侧边栏），【不渲染业务数据】，默认开。pinned＝功能栏常驻精简条，只显示 pinnedFields 的 1..3 项、单行无分组无标签，默认【关】。为什么这么分：1.0 的 {hud, snapshot} 是「两个渲染器渲染同一份 schema」，本示例曾经两个都开 → 实机截图里同时出现【两个一模一样的状态面板】；而且 hud 把状态数据放进功能栏，违反 MMD 惯例（功能栏历来放全局美化/侧边栏这类 chrome，状态栏历来在气泡内）。旧键仍被接受：snapshot→status 自动归一化；hud=true→pinned 并告警——⚠ 那【不是等价替换】，旧 hud 是完整面板，新 pinned 是单行精简条。要完整面板请开 status。",
+  "chrome": {
+    "form": "dock",
+    "side": "right",
+    "icon": "wrench"
+  },
+  "_chrome": "【可选】设置入口的形态。整块省略＝按默认走 dock，行为与本示例一致。form：dock＝贴视口边缘的一枚【图标】页签，点开是半页抽屉（默认，推荐）；bar＝旧的功能栏内按钮排（大按钮＋「设置」文字）。⚠ 之所以默认改成 dock：bar 形态走功能栏行内流，与平台自己的 chrome 挤在一条上，且功能栏实测 flex-shrink:1 会被消息区抢高度压扁，观感就是「设置按钮镶嵌在页面里」。side：导轨贴左还是贴右，默认 right。icon：页签图标名，只能取 gear/wrench/tools/sliders/map/book/spark/dots（与 sbk/ui-icon.js 的 ICONS 表逐字对齐；写表外的名字生成期就报错——运行时只会静默回落 gear 并在 ?sdkDebug=1 里留一行告警，真机没有控制台看不见）。label：设置面标题（≤6 字，默认「设置」）。dockLabel：页签的悬浮提示（≤6 字，默认同 label）。hoverOpen：false 关掉「悬停即滑出」，只允许点击。settings：false 彻底不要设置页签（此时必须自己传 entries/panes，否则整个入口没有内容、生成器会告警）。🚨 边界：本配置只表达【单入口的基础设置】这一种常见情形（一枚图标 → 阅读设置抽屉）。多页签、气泡面、导航栏分页那套富形态需要 pane 内容（DOM 节点或工厂函数），JSON 表达不了——那条路是作者自己写一条只放 <script> 的规则、直接调 SBK.ui.dock({tabs:[…]})。选型规则见 references/beautify/sandbox-kit.md。",
   "_pinnedFields": "精简条要显示的字段名，1..3 项，取 schema.fields 里的 key。仅在 modes.pinned 为 true 时生效（此时必填，否则生成器报错——boot 会跳过整个模式，功能栏上什么都不出现）。上限 3 项是【形态约束】而非性能考虑：精简条必须与气泡面板明显不同，项数一多就又变成「同一份数据渲染两遍」。值一律压成短文本（bar 取 当前/上限，不画进度条），entities/tags 这类结构不进精简条。",
   "_statusbar": "功能栏字段。modes.chrome 或 modes.pinned 任一开启就必须包含 markers.hud，否则宿主容器永远不出现——事实卡 §5.6：功能栏 h_() 只在装载时跑一次，且其正则输入是 statusbar 字段【自身】而非消息内容。这也是「动态状态栏只能靠作者 JS 改 DOM」的根因（硬约束 14）。上限 200 字符。",
   "statusbar": "{{hud}}",
@@ -107,7 +113,7 @@
       }
     ]
   },
-  "_markers": "五个固定规则的触发串。必须是正文里不会出现的字面标记。生成器会把它们转义并包成 /…/ slash 形态——硬约束 21：实机上裸字面量 {{probe}} 不生效，改 /{{probe}}/ 后立即生效。绝不能用 /(?!)/ 这类零宽写法当\"永不匹配\"：那会触发 worker 的 empty-match 判定撤销整条规则（事实卡 §5.2）。",
+  "_markers": "五个固定规则的触发串。必须是正文里不会出现的字面标记。生成器会把它们转义并统一包成 /…/ slash 形态（约定，为跨平台一致；裸字面量实机也生效——卡 64304 A/B 2026-08-30，与 worker 源码一致，生成器对裸字面量出 WARN 不出 ERROR）。绝不能用 /(?!)/ 这类零宽写法当\"永不匹配\"：那会触发 worker 的 empty-match 判定撤销整条规则（事实卡 §5.2）。",
   "markers": {
     "css": "{{sbk-css}}",
     "core": "{{sbk-core}}",

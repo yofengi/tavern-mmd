@@ -17,7 +17,7 @@
       'width:var(--sbk-ball,calc(96 * var(--rpx)));height:var(--sbk-ball,calc(96 * var(--rpx)));' +
       'border-radius:50%;background:var(--chat-surface);color:var(--chat-text);' +
       'border:1px solid var(--chat-border);box-shadow:var(--sbk-shadow,0 2px 12px rgba(0,0,0,.35));' +
-      'font-size:var(--sbk-fs,calc(24 * var(--rpx)));touch-action:none;cursor:pointer;' +
+      'font-size:18px;touch-action:none;cursor:pointer;' +
       'user-select:none;-webkit-user-select:none;overflow:hidden;' +
       'appearance:none;-webkit-appearance:none;font-family:inherit;line-height:1;padding:0;margin:0}',
     '.sbk-pnl__ball:active{opacity:.8}',
@@ -26,17 +26,23 @@
       'outline:2px solid var(--chat-accent);outline-offset:2px}',
     '.sbk-pop{position:fixed;z-index:var(--sbk-z-pop,3600);min-width:calc(200 * var(--rpx));' +
       'max-width:calc(560 * var(--rpx));max-height:70vh;overflow:auto;background:var(--chat-surface);' +
-      'color:var(--chat-text);border:1px solid var(--chat-border);border-radius:var(--sbk-radius,calc(12 * var(--rpx)));' +
+      'color:var(--chat-text);border:1px solid var(--chat-border);border-radius:12px;' +
       'box-shadow:var(--sbk-shadow,0 2px 12px rgba(0,0,0,.35));padding:calc(8 * var(--rpx)) 0}',
     '.sbk-pop--pad{padding:var(--sbk-pad,calc(16 * var(--rpx)))}',
     '.sbk-pop__item{display:block;width:100%;box-sizing:border-box;text-align:left;' +
       'padding:calc(16 * var(--rpx)) var(--sbk-pad,calc(16 * var(--rpx)));cursor:pointer;' +
-      'white-space:nowrap;color:var(--chat-text);font-size:var(--sbk-fs,calc(24 * var(--rpx)));' +
+      'white-space:nowrap;color:var(--chat-text);font-size:var(--sbk-cfs,15px);' +
       'background:transparent;border:0;font-family:inherit;line-height:1.5;' +
       'min-height:max(44px,calc(72 * var(--rpx)))}',
     '.sbk-pop__item:active{background:var(--chat-more-item-bg)}',
     '.sbk-pop__item--off{opacity:.45}',
     '.sbk-pop__item[disabled]{cursor:default}',
+    /* --sbk-cfs* = chrome 级字号三档，px 而非 rpx（--rpx 恒 0.5px 会腰斩，详见 ui-dock.js）。
+       定义在【拥有这两个面的 kit】里，而不是各消费者各写一份兜底：
+       ui-nav / ui-inject / ui-codex / ui-map 都在抽屉或气泡里渲染，它们只写
+       var(--sbk-cfs-sm,13px) 这种带兜底的取用。兜底值与此处一致，所以缺了不会立刻显形——
+       但风格包想统一调这三档字号时，只能改到气泡、改不到抽屉。 */
+    '.sbk-drw,.sbk-pop{--sbk-cfs:15px;--sbk-cfs-sm:13px;--sbk-cfs-xs:12px}',
     '.sbk-drw{position:fixed;top:0;bottom:0;z-index:var(--sbk-z-pop,3600);display:flex;flex-direction:column;' +
       'width:var(--sbk-drw-w,min(calc(560 * var(--rpx)),86%));background:var(--chat-surface);color:var(--chat-text);' +
       'box-shadow:var(--sbk-shadow,0 2px 12px rgba(0,0,0,.35));transition:transform .22s ease;overflow:hidden;' +

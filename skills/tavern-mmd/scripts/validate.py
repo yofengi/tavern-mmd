@@ -1012,12 +1012,12 @@ def classify_sandbox_pattern(raw):
     返回 (kind, payload)：
       ("empty", None) / ("literal", 字面量) / ("regex", None) / ("bad-regex", 错误信息)
 
-    🚨 **这是 worker 怎么想，不是交付判据。** worker 源码确有 literal 分支
-    （`if(!n)return new RegExp(m(t),'g')`），但实机上裸字面量**未生效**：探针用
-    `{{probe}}` 规则完全不触发，改 `/{{probe}}/` 立即生效（事实卡 §8.21）→ 宿主侧
-    在交给 worker 前另有一层处理。
-    → 交付门禁一律走 sandbox_pattern_delivery_error()（slash 严格模式，与 /mmd 一致）。
-    原「锁定决策 D7：不强制 slash、字面量是官方首选」**已被实机推翻**。"""
+    worker 源码有 literal 分支（`if(!n)return new RegExp(m(t),'g')`），实机复验
+    （卡 64304 A/B，2026-08-30）确认**裸字面量确实生效**：裸 `体力` 与 `/灵力/`
+    在真实聊天页同一轮渲染里都被匹配替换（事实卡 §8.21）。宿主包也确认只把 pattern
+    原样转发、不做形态分类。
+    → 交付门禁 sandbox_pattern_delivery_error() 只对「写成 /…/ 但正则语法错」判 ERROR；
+    裸字面量降级为 WARN（仍建议统一写 /…/，见 _validate_sandbox_pattern）。"""
     trimmed = (raw if isinstance(raw, str) else "").strip()
     trimmed = re.sub(r"^`|`$", "", trimmed)      # 先 trim 再剥掉首尾反引号
     if not trimmed:
@@ -1034,28 +1034,24 @@ def classify_sandbox_pattern(raw):
     return "regex", None
 
 
-SANDBOX_BARE_LITERAL_ERROR = (
-    "沙盒交付必须写 slash 形态 /…/：实机裸字面量未生效（探针 {{probe}} 规则完全不触发，"
-    "改 /{{probe}}/ 后立即生效），与 worker 源码 p() 的字面量分支矛盾"
-    "——说明宿主侧在交给 worker 前另有一层处理。裸字面量在页面上什么都不会发生。"
+SANDBOX_BARE_LITERAL_WARN = (
+    "沙盒 findRegex 是裸字面量——实机复验确认裸字面量生效（卡 64304 A/B，2026-08-30），"
+    "但交付仍建议统一写 slash 形态 /…/，与 /mmd 一致、也符合官方校验文案；写斜杠无害。"
 )
 
 
 def sandbox_pattern_delivery_error(raw):
-    """沙盒**交付**门禁：返回错误原因，合规返回 None。
+    """沙盒**交付**门禁：只拦真正会静默失效的形态，返回错误原因，合规返回 None。
 
-    与 classify_sandbox_pattern 分工：那个解释 worker 源码，这个决定放不放行。"""
+    与 classify_sandbox_pattern 分工：那个解释 worker 源码，这个决定放不放行。
+    裸字面量不在此拦（实机生效），改由 _validate_sandbox_pattern 出 WARN。"""
     if not isinstance(raw, str):
         return "findRegex 必须是字符串"
     kind, payload = classify_sandbox_pattern(raw)
-    if kind == "empty":
-        return None                       # 空值由必填校验管
-    if kind == "literal":
-        return SANDBOX_BARE_LITERAL_ERROR
     if kind == "bad-regex":
         return ("写成 /…/ 但正则语法错（%s）——**整条规则会被静默丢弃**，"
                 "不降级成字面量，页面上看不出异常。" % payload)
-    return None
+    return None                           # empty 由必填校验管；literal 实机生效，只 WARN
 
 
 def _translate_js_named_groups(pattern):
@@ -1519,22 +1515,27 @@ _SANDBOX_REGEX_METACHARS = re.compile(r"[.*+?^$()|\[\]\\]")
 
 
 def _validate_sandbox_pattern(fr, label, index, seen_literals, soup_parts, sc):
-    """交付门禁（slash 严格模式）+ 触发串接得上检查 + 重复判罚。"""
+    """触发串接得上检查 + 重复判罚；bad-regex 判 ERROR，裸字面量判 WARN。"""
     check_sandbox_find_regex_content(fr, label)
     delivery_error = sandbox_pattern_delivery_error(fr)
     if delivery_error:
         err("%s findRegex %s" % (label, delivery_error))
         return
-    kind, _payload = classify_sandbox_pattern(fr)
-    if kind != "regex":
-        return
-    # 取 /…/ 里的正则体；只有「纯触发词」形态才继续做可达性与重复检查。
-    body = _SANDBOX_SLASH_FORM.match(re.sub(r"^`|`$", "", fr.strip()))
-    if not body:
-        return
-    literal = body.group(1)
-    if _SANDBOX_REGEX_METACHARS.search(literal):
-        return                       # 真正则：匹配目标是文本模式，不做字面串可达性判断
+    kind, payload = classify_sandbox_pattern(fr)
+    if kind == "literal":
+        # 实机生效，但建议统一 slash；WARN 后仍按字面触发词做可达性/重复检查。
+        warn("%s findRegex %s" % (label, SANDBOX_BARE_LITERAL_WARN))
+        literal = payload
+    elif kind == "regex":
+        # 取 /…/ 里的正则体；只有「纯触发词」形态才继续做可达性与重复检查。
+        body = _SANDBOX_SLASH_FORM.match(re.sub(r"^`|`$", "", fr.strip()))
+        if not body:
+            return
+        literal = body.group(1)
+        if _SANDBOX_REGEX_METACHARS.search(literal):
+            return                   # 真正则：匹配目标是文本模式，不做字面串可达性判断
+    else:
+        return                       # empty：必填校验已管
     # 规则按顺序跑且自动补 g（全文替换）：前一条把全文换完，后一条同触发词永远匹配不到。
     if literal in seen_literals:
         err("%s 触发词 %r 与第 %d 条重复——规则按顺序跑且匹配式自动补 g，"

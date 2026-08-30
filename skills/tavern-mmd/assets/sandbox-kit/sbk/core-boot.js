@@ -152,7 +152,18 @@
     var chromeOn = false;
     if (md.chrome) {
       if (SBK.ui && typeof SBK.ui.chrome === 'function') {
-        try { SBK.ui.chrome({ hostId: baseHost }); chromeOn = true; }
+        /* chrome 形态与文案透传：config.chrome 是可选对象，缺省即 dock 形态。
+           只挑白名单键，不整个 spread —— 避免配置里的脏键混进 UI 层。 */
+        var co = o.chrome && typeof o.chrome === 'object' ? o.chrome : {};
+        var ca = { hostId: baseHost };
+        if (co.form === 'bar' || co.form === 'dock') ca.form = co.form;
+        if (co.side === 'left' || co.side === 'right') ca.side = co.side;
+        if (typeof co.icon === 'string' && co.icon) ca.icon = co.icon;
+        if (typeof co.label === 'string' && co.label) ca.label = co.label;
+        if (typeof co.dockLabel === 'string' && co.dockLabel) ca.dockLabel = co.dockLabel;
+        if (co.hoverOpen === false) ca.hoverOpen = false;
+        if (co.settings === false) ca.settings = false;
+        try { SBK.ui.chrome(ca); chromeOn = true; }
         catch (e) { skipped.push('chrome'); warn('boot: ui.chrome threw', e && e.message); }
       } else { skipped.push('chrome'); warn('boot: SBK.ui.chrome not loaded, toolbar entries disabled'); }
     }

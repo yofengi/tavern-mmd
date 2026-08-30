@@ -125,7 +125,7 @@ light 路径：g3- 前缀类名零冲突，面板照常显示（降级兜底，�
 
 - **挂 body 挣脱气泡 stacking context**：`document.body.appendChild(wrap)`，shadow 内 `position:fixed` + `z-index:2147483647`，浮在消息气泡和输入框之上（解决"放开场白球被消息盖住"）。
 - **单例防重**：`if(document.getElementById('zsf-ball-wrap'))return;`——每条消息 onerror 都触发，但已存在就跳过，屏幕只有一个球。完整 reload 会重建 document，body 注入节点随之消失；后续消息可重新点火创建，这不是 `<script>` 能力或持久性的结论。
-- **拖动**：`mousedown/touchstart` 记起点 → `mousemove` 改 `style.left/top`（单属性放行）→ 移动超 3px 记为拖动、否则算点击展开菜单。本体夹取进视口（`Math.max/min`，注意铁律1 不能用 `<`/`>`）。
+- **拖动（统一 Pointer Events）**：`pointerdown` 记起点 + `setPointerCapture(pointerId)` → `pointermove` 改 `style.left/top`（单属性放行）→ 移动超 3px 记为拖动、否则 `pointerup` 里算点击展开菜单。本体夹取进视口（`Math.max/min`）。**别再 `mousedown`+`touchstart` 双绑**——移动端浏览器会补发模拟鼠标事件，双绑导致 `up()` 二次触发、菜单闪开即关，详见 `floating-components.md`「陷阱 5」。
 - **菜单跟随 + 翻转避裁**：拖动时 `reposition()` 重算菜单坐标；上方放得下放上方、否则翻下方；水平夹取进视口。
 - **回填输入框**：选择器用 `'textarea, input'+LB+'type=text'+RB`（LB/RB 由 `fromCharCode` 拼，避铁律3），`dispatchEvent(new Event('input',{bubbles:true}))`。
 
@@ -135,7 +135,7 @@ light 路径：g3- 前缀类名零冲突，面板照常显示（降级兜底，�
 
 ### 事件绑定
 
-shadow 内 `el.onclick=function(){}` 与 `el.addEventListener` 两种都通（实测靶9）。最外层 `ev.stopPropagation()` 防冒泡到气泡。
+shadow 内 `el.onclick=function(){}` 与 `el.addEventListener` 两种都通（实测靶9）。最外层 `ev.stopPropagation()` 防冒泡到气泡。可拖动本体的按下/移动/抬起统一走 Pointer Events（`pointerdown/pointermove/pointerup/pointercancel`），并额外绑一个 `click`→`stopPropagation` 吸收触摸补发的 click；不要 `mousedown`+`touchstart` 双绑（见 `floating-components.md`「陷阱 5」）。
 
 ---
 

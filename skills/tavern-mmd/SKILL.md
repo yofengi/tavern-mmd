@@ -24,7 +24,7 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | ES6+ 语法 | ✅ | ✅ 实测全支持（img onerror 载体下，7/7 语法探针全绿），**推荐 ES6** | ✅ 实机与官方示例均确认 |
 | 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 创卡页「导入正则」json（**6键格式**，多 `chatVersion`/`personality`）或UI手填；**不能导入整卡** |
 | 正则限额 | 无硬限制 | ≤130条；findRegex≤1000字符；replaceString≤20000字符 | ≤130条；保守交付按 scriptName≤20 / findRegex≤1000 / replaceString≤20000。源码可见归一常量为 200 / 4096 / 100000；只有 replaceString 的编辑器 20000／导入 100000 双路径已确证，scriptName/findRegex 的双路径与超限语义仍待验证；另 statusbar 200 / **beginning 4000** / personality 10000 |
-| `findRegex` 形态 | 任意正则 | **强制 `/pattern/flags` slash literal**，固定标记也要包斜杠 | **交付一律 `/pattern/flags` slash 形态**：实机裸字面量不生效，虽与 worker 源码的字面量分支矛盾，仍以实机为准 |
+| `findRegex` 形态 | 任意正则 | **强制 `/pattern/flags` slash literal**，固定标记也要包斜杠 | **交付统一 `/pattern/flags` slash 形态**（约定，非硬性）：实机复验裸字面量也生效（卡 64304 A/B，2026-08-30），与 worker 源码一致；统一 slash 为跨平台一致，校验器对裸字面量出 WARN 不出 ERROR |
 | 稳定选择器 | 正常 DOM | ❌ 平台 class 名会变 | ✅ `[data-chat]` / `[data-slot]` 承诺不改名（作者自写 `data-*` 会被净化删掉，自己的元素用 class/id） |
 | 状态栏方案 | 雷达法/KV V4.0均可 | **动态/自创NPC：混合态雷达法**；固定字段：原生`$field`（最轻零JS）或 KV V4.0（带骨架），AI 择一 | `<script>` + SDK：`message:done` 取 `msg.content` 解析后渲染；短小可见块可纯规则替换（`$1`/`$名字`）零 JS；长期面板挂舞台 `sdk.stage`；**雷达法/onerror 引擎不可移植** |
 | 全局美化 | 主题/自定义CSS | 静态换肤，或 day/night/native 三态运行时主题包（含玩家微调、route 生命周期） | 改 **14** 个 `--chat-*` 变量换肤，覆盖写 `[data-chat="root"][data-theme=*]`（特异度 (0,2,0)）才不被平台切回；订 `theme:change` 跟随深浅色；舞台承载长期面板。基座见 `assets/sandbox-kit/` |
@@ -103,7 +103,7 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | 世界书 | SillyTavern 世界书 json | 同左 | 独立 json，根对象只留 `entries`；不并入正则 json |
 | 正则 | 正则脚本 json | MMD导入json（pageDepth/statusbar/beginning/regex_scripts四字段，见 regex-output.md）；手填清单 .md 作备选 | 导入正则 json（`chatVersion/pageDepth/statusbar/beginning/personality/regex_scripts` **六键**）；手填清单 .md 作备选 |
 
-当前 MMD 独立正则导入 JSON 的顶层必须恰好且仅有 `pageDepth/statusbar/beginning/regex_scripts` 四键；沙盒模式恰好且仅有上表那六键（`chatVersion` 必须为 `1`）。两者每条 `regex_scripts` 规则都必须恰好且仅有 `id/scriptName/findRegex/replaceString` 四键；沙盒模式的 `id` 必须是负数。**两个 MMD 路线的交付匹配式一律写 `/pattern/flags` slash 形态**：沙盒 worker 源码虽有裸字面量分支，但实机裸标记不生效，以实机为准。所有 json 交付前必须语法校验：`python -m json.tool <文件> > /dev/null`；再跑 `python scripts/validate.py <文件> --platform <mmd|mmdsandbox|st>`（`--platform` 默认 `mmd`）。
+当前 MMD 独立正则导入 JSON 的顶层必须恰好且仅有 `pageDepth/statusbar/beginning/regex_scripts` 四键；沙盒模式恰好且仅有上表那六键（`chatVersion` 必须为 `1`）。两者每条 `regex_scripts` 规则都必须恰好且仅有 `id/scriptName/findRegex/replaceString` 四键；沙盒模式的 `id` 必须是负数。**两个 MMD 路线的交付匹配式统一写 `/pattern/flags` slash 形态**（沙盒是约定而非硬性：实机复验裸字面量也生效，卡 64304 A/B 2026-08-30，与 worker 源码一致；统一 slash 为跨平台一致，校验器对裸字面量出 WARN）。所有 json 交付前必须语法校验：`python -m json.tool <文件> > /dev/null`；再跑 `python scripts/validate.py <文件> --platform <mmd|mmdsandbox|st>`（`--platform` 默认 `mmd`）。
 
 沙盒模式的三件交付物、人设成对标签格式与「必须新建卡」提醒，详见 `references/platforms/mmd-sandbox.md` 第 9 节。
 

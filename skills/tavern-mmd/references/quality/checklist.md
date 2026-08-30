@@ -53,7 +53,7 @@
 - [ ] 总条数≤130
 - [ ] 每条findRegex≤1000字符、replaceString<20000字符（标注实测值）；replaceString达到18000字符即预警并评估拆包
 - [ ] **（/mmd）每条 `findRegex` 都是 `/pattern/flags` slash literal**；固定标记也包斜杠，无裸 `<css>` / `<status>` 值
-- [ ] **（/mmdsandbox）每条 `findRegex` 也写 `/pattern/flags` slash 形态**；实机裸字面量 `{{hud}}` 不生效，虽与 worker 源码的字面量分支矛盾，交付仍以实机为准
+- [ ] **（/mmdsandbox）每条 `findRegex` 统一写 `/pattern/flags` slash 形态**（约定，为跨平台一致）；裸字面量实机也生效（卡 64304 A/B 2026-08-30），校验器对它出 WARN 不出 ERROR，不阻断交付
 - [ ] （/mmd）导入json：顶层恰好且仅有 `pageDepth/statusbar/beginning/regex_scripts` 四键；每条规则恰好且仅有 `id/scriptName/findRegex/replaceString` 四键，且 `id=-1`
 - [ ] （/mmdsandbox）导入json：顶层恰好 `chatVersion/pageDepth/statusbar/beginning/personality/regex_scripts` 六键，`id` 为负数——详见下方「沙盒模式」专节
 - [ ] **导入json通过 `python -m json.tool 文件 > /dev/null` 校验（拦截裸换行/未转义引号）**

@@ -48,6 +48,7 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 ## 一、可拖动悬浮球 + 跟随菜单（核心组件）
 
 要点（用户实测要求）：
+- **统一用 Pointer Events**：`pointerdown/pointermove/pointerup/pointercancel` + `setPointerCapture` 一条指针流处理鼠标与触摸，**不要再 `mousedown`+`touchstart` 双绑**——移动端双绑会被浏览器补发的模拟鼠标事件二次触发，菜单闪开即关（见「陷阱 5」）。
 - **本体可拖动**：按下→移动改 `style.left/top`，移动超过 3px 记为"拖动"。
 - **未拖动的点击 = 切换菜单**；拖动则不触发菜单（用 `moved` 标志区分）。
 - **菜单跟随本体**：拖动时每帧重算菜单位置（`reposition()`），菜单粘在球旁边。
@@ -88,7 +89,7 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
            if(a){a.value=acts[idx];a.dispatchEvent(new Event('input',{bubbles:true}));}}
       menu.classList.remove('z-open');};
     menu.appendChild(mi);})(i);}
-  var moved=false,sx=0,sy=0,ox=0,oy=0,GAP=8;
+  var moved=false,sx=0,sy=0,ox=0,oy=0,GAP=8,on=false,pid=null;
   var reposition=function(){                                  // 菜单跟随本体 + 翻转避裁
     if(!menu.classList.contains('z-open'))return;
     var r=fab.getBoundingClientRect(),mw=menu.offsetWidth,mh=menu.offsetHeight;
@@ -102,17 +103,19 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
     var nx=ox+cx-sx,ny=oy+cy-sy,vw=window.innerWidth,vh=window.innerHeight,bw=fab.offsetWidth,bh=fab.offsetHeight;
     nx=Math.max(0,Math.min(vw-bw,nx));ny=Math.max(0,Math.min(vh-bh,ny));   // 本体夹取进视口
     fab.style.left=nx+'px';fab.style.top=ny+'px';fab.style.bottom='auto';reposition();};
-  var mm=function(ev){onMove(ev.clientX,ev.clientY);};
-  var tm=function(ev){var t=ev.touches[0];onMove(t.clientX,t.clientY);ev.preventDefault();};
-  var up=function(){document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',up);
-    document.removeEventListener('touchmove',tm);document.removeEventListener('touchend',up);fab.style.cursor='grab';
+  var down=function(cx,cy){moved=false;sx=cx;sy=cy;var r=fab.getBoundingClientRect();ox=r.left;oy=r.top;fab.style.cursor='grabbing';};
+  var up=function(){if(!on)return;on=false;pid=null;fab.style.cursor='grab';
     if(!moved){if(menu.classList.contains('z-open')){menu.classList.remove('z-open');}
       else{menu.classList.add('z-open');reposition();}}};   // 未拖动=切换菜单
-  var down=function(cx,cy){moved=false;sx=cx;sy=cy;var r=fab.getBoundingClientRect();ox=r.left;oy=r.top;fab.style.cursor='grabbing';};
-  fab.addEventListener('mousedown',function(ev){ev.stopPropagation();down(ev.clientX,ev.clientY);
-    document.addEventListener('mousemove',mm);document.addEventListener('mouseup',up);});
-  fab.addEventListener('touchstart',function(ev){ev.stopPropagation();var t=ev.touches[0];down(t.clientX,t.clientY);
-    document.addEventListener('touchmove',tm,{passive:false});document.addEventListener('touchend',up);});
+  // 统一 Pointer Events：一条指针流覆盖鼠标+触摸，浏览器不再补发模拟鼠标（见陷阱5）
+  fab.addEventListener('pointerdown',function(ev){ev.stopPropagation();on=true;pid=ev.pointerId;
+    try{fab.setPointerCapture(pid);}catch(er){}down(ev.clientX,ev.clientY);});
+  fab.addEventListener('pointermove',function(ev){if(!on||ev.pointerId!==pid)return;onMove(ev.clientX,ev.clientY);});
+  fab.addEventListener('pointerup',function(ev){if(ev.pointerId!==pid)return;
+    try{fab.releasePointerCapture(pid);}catch(er){}up();});
+  fab.addEventListener('pointercancel',function(ev){if(ev.pointerId!==pid)return;
+    try{fab.releasePointerCapture(pid);}catch(er){}on=false;pid=null;fab.style.cursor='grab';});
+  fab.addEventListener('click',function(ev){ev.stopPropagation();});   // 吸收触摸后补发的 click，防冒泡到气泡
   document.body.appendChild(fab);document.body.appendChild(menu);e.remove();
 })(this)">
 ```
@@ -200,6 +203,26 @@ fillTA('请按格式输出：'+F('姓名')+F('职业')+L+'HP=当前/上限'+R+' 
 /* 错：hover 单个按钮，同列全变宽 */ .z-sidebtns{display:flex;flex-direction:column;gap:8px}
 /* 对：只有 hover 的按钮拉伸 */ .z-sidebtns{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 ```
+
+### 5. 移动端"触摸 + 补发模拟鼠标"双触发（悬浮球点一下就没反应）
+
+可拖动本体若把 `mousedown`+`touchstart` 绑成**两条独立路径**（`up()` 同时挂 `mouseup`+`touchend`），移动端会坏：部分浏览器在一次触摸后，为兼容老代码会**补发一套模拟鼠标事件**（`mousedown`/`mouseup`/`click`）。于是点一下的实际时序是——
+
+```
+touchstart → touchend         // up() 第一次：菜单开
+（浏览器补发）mousedown → mouseup // up() 第二次：菜单又关
+```
+
+净效果：菜单**闪一下就关**，看起来像"点了没反应"；拖动则会被幽灵二次手势打断。`touch-action:none` 只挡滚动/缩放，**挡不住这套补发事件**；在 `touchmove` 里 `preventDefault()` 也只压住"移动"那一下，压不住"静止轻点"的补发。
+
+**避法（本文档采用）**：用 **Pointer Events** 一条流统一鼠标与触摸——`pointerdown/pointermove/pointerup/pointercancel` + `setPointerCapture(pointerId)`。浏览器对同一次指针交互只产生一条 pointer 事件流、**不会再补发模拟鼠标**，双触发从根上消失。要点：
+
+- `pointerdown` 里 `setPointerCapture(ev.pointerId)`，`pointermove`/`pointerup` 按 `ev.pointerId===pid` 过滤，拖动即使划出本体也不丢事件（省掉 document 级 mousemove/touchmove 绑定）。
+- 再给本体加一个 `el.addEventListener('click',ev=>ev.stopPropagation())`：触摸后浏览器仍可能补发一个 `click`，这条只吸收它、防止冒泡到聊天气泡触发编辑/复制。菜单开关已在 `pointerup` 里做，不依赖这个 click。
+- **不要**为"保险"再补一套 `mousedown`/`touchstart`——那正是 bug 来源。Pointer Events 现代浏览器（含移动端 WebView）已普遍支持。
+- 兜底：万一某环境 `setPointerCapture` 异常，改成 `pointerdown` 在本体、`pointermove`/`pointerup` 绑 `document`（不依赖捕获 API），逻辑不变。
+
+> 沙盒基座 `../../assets/sandbox-kit/sbk/ui-panel.js` 的悬浮球早已是这套 Pointer Events 写法，可作参照。侧边栏那种**单 `onclick` 切换**的按钮不受此陷阱影响（浏览器只补发一个 click，无二次翻转）。
 
 ---
 

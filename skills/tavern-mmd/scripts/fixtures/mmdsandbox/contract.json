@@ -408,12 +408,13 @@
   "regexPipeline": {
     "patternPolicy": {
       "delivery": "slash",
-      "severity": "ERROR",
+      "severity": "WARN",
       "accuracy": "exact",
-      "evidence": "实机裸字面量 {{probe}} 未生效，改 /{{probe}}/ 后立即生效（事实卡 §8.21）",
-      "contradiction": "与 worker 源码 p() 的字面量分支矛盾，说明宿主侧在交给 worker 前另有一层处理",
+      "evidence": "实机复验（卡 64304 A/B，2026-08-30）：裸字面量生效——裸 体力 与 /灵力/ 在真实聊天页同一轮渲染都被替换（事实卡 §8.21）",
       "workerHasLiteralBranch": true,
-      "previewRule": "预览不得把裸字面量当会生效的交付规则"
+      "workerBehaviorConfirmed": "宿主包只把 pattern 原样转发、不做形态分类；literal 与 regex 都走 worker p()，两者都生效",
+      "deliveryConvention": "交付统一写 slash /…/ 是约定（跨平台一致、符合官方校验文案），非硬约束；裸字面量判 WARN 不判 ERROR",
+      "previewRule": "预览须照渲染裸字面量（按 worker m() 转义后当全文替换）；只有语法错的 /…/ 整条静默丢弃"
     },
     "outputBudget": {
       "formula": "max(262144, inputLength * 4)",

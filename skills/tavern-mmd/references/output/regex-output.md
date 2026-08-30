@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | 本地酒馆（`/st`） | 正则 JSON 数组（13 字段/条） | **第一节** | 无（数组） | `/pattern/flags` | UUID 字符串 |
 | 当前 MMD（`/mmd`） | 导入 JSON，**4 键顶层** | **第二节** | `pageDepth` `statusbar` `beginning` `regex_scripts` | **强制** `/pattern/flags` slash literal | 固定 `-1` |
-| MMD沙盒模式（`/mmdsandbox`） | 导入正则 JSON，**恰好 6 键顶层** | **第三节** | 上面 4 键 + `chatVersion` + `personality` | **强制 slash 形态**（实机裸字面量不生效） | **任意负数**，导入时重编号 |
+| MMD沙盒模式（`/mmdsandbox`） | 导入正则 JSON，**恰好 6 键顶层** | **第三节** | 上面 4 键 + `chatVersion` + `personality` | **统一 slash 形态**（约定；裸字面量实机也生效，判 WARN） | **任意负数**，导入时重编号 |
 | MMD 两平台的备选 | 手填清单（Markdown 文档） | **第四节** | —— | 同该平台 | 同该平台 |
 
 三者结构互不兼容，**不要把一个平台的 JSON 直接改平台名交付**：第二节与第三节的顶层键数、`findRegex` 铁律、`id` 取值三处全都不同（沙盒模式还多一份独立 persona 文本，见第三节 3.5）。
@@ -129,7 +129,7 @@ python -m json.tool output/正则文件名.json > /dev/null && echo OK
 
 注意：
 - **没有** placement/markdownOnly/promptOnly 等字段（MMD 正则仅作用于显示层）
-- **两条 MMD 路线的交付 `findRegex` 都必须是 `/pattern/flags` slash 形态**：当前 MMD 与沙盒实机都不接受裸字面量交付。沙盒 worker 源码虽有 literal 分支，但实机裸字面量不生效，不能把实现分支当可交付能力。
+- **两条 MMD 路线的交付 `findRegex` 统一写 `/pattern/flags` slash 形态**：当前 MMD 是硬性铁律；沙盒是约定（实机复验裸字面量也生效，卡 64304 A/B 2026-08-30，与 worker literal 分支一致，校验器对裸字面量出 WARN 不出 ERROR），统一 slash 为跨平台一致。
 - 限额仍然适用：≤130条、findRegex≤1000字符、replaceString≤20000字符
 - 现成状态栏范例可参考 `../../assets/radar-examples/西幻RPG-正则与第一句话.json`
 - `../../assets/radar-examples/完整美化-日夜主题与雷达.json` 是 **legacy 日夜集成包**，只作兼容研究，不再推荐作为新全局主题基底；需要 day/night/native 或生命周期管理时，优先使用 `../../assets/global-beautify-examples/mmd-theme-runtime/` 的新 runtime
@@ -317,18 +317,18 @@ role  presentation  worldbook  world_book  lorebook  lore_book  entries  charact
 
 > `replaceString` 有两条录入路径：创卡页编辑器 **20000 硬上限**，超限会无提示拒绝保存整条修改；「导入正则」源码上限为 100000。默认仍按 18000 拆条，保证导入与手工维护都安全。
 
-### 3.3 `findRegex`：worker 有两形态，交付只用 slash
+### 3.3 `findRegex`：两形态都生效，交付统一用 slash
 
-worker 源码的 `classifyPattern` 确实包含裸字面量分支：非空非斜杠串会被转义后全文替换；`/pattern/flags` 编译为正则，缺 `g` 自动补。然而 `【实机实测 2026-08-26】` 裸字面量 `{{probe}}` 完全不生效，改成 `/{{probe}}/` 立即生效，说明宿主交给 worker 前还有未逆向到的处理层。
+worker 源码的 `classifyPattern` 包含裸字面量分支：非空非斜杠串会被转义后全文替换；`/pattern/flags` 编译为正则，缺 `g` 自动补。`【实机实测 2026-08-30】`（卡 64304 A/B）确认**裸字面量确实生效**：裸 `体力` 与斜杠 `/灵力/` 在真实聊天页同一轮渲染都被替换，与 worker 源码一致（宿主包只把 pattern 原样转发、不做形态分类）。
 
-因此交付纪律只有一条：**MMD 沙盒的 `findRegex` 一律写 `/pattern/flags` slash 形态。** worker 字面量分支只作为逆向事实保留，不能作为可交付能力推荐。
+因此交付纪律是一条**约定**（不是硬约束）：**MMD 沙盒的 `findRegex` 统一写 `/pattern/flags` slash 形态**，为的是跨平台一致（与 `/mmd` 铁律一致）、也符合官方校验文案；裸字面量写了也生效，校验器对它出 WARN 不出 ERROR。
 
 | 写法 | 交付判定 | 行为 |
 |---|---|---|
 | `/{{hud}}/`、`/【图鉴】/` | ✅ 固定标记 | `{}` 在非量词位置可不转义；中文照常 |
 | `/血量[:：]\s*(\d+)/` | ✅ 正则 | 合法 flags 仅 `gimsuy`；缺 `g` 平台自动补 |
 | `/[未闭合/` | ❌ bad-regex | 整条规则静默丢弃，不降级字面量 |
-| `{{hud}}` | ❌ 裸字面量 | worker 理论支持，但实机不生效，禁止交付 |
+| `{{hud}}` | ⚠️ 裸字面量 | 实机生效，但建议统一写 `/{{hud}}/`（WARN，非 ERROR） |
 | 空串 | ❌ empty | ERROR |
 
 两条会让规则永久失效、且页面上毫无迹象的坑：
@@ -369,7 +369,7 @@ python <skill>/scripts/build-preview.py output/文件-regex.json --platform mmds
 `--platform mmdsandbox` 下 `validate.py` 换的是一整套沙盒检查，**0 错误才能交付**：
 
 - **结构**：顶层 6 键白名单 + 禁用顶层键；`chatVersion` 必须为 1；`id` 必须为负数；上表全部长度/条数上限。
-- **匹配式**：每条必须是合法 `/pattern/flags`；裸字面量按实机策略判 ERROR；固定标记重复同样判 ERROR。
+- **匹配式**：写 `/…/` 时正则体必须合法（bad-regex 判 ERROR，整条静默丢弃）；裸字面量实机生效、判 WARN（建议统一 slash）；固定标记重复判 ERROR。
 - **SDK**：能力名不在 30 能力表、事件名不在 12 事件表、用了不存在的 `sdk.once` / `sdk.off` → 全部 ERROR（平台侧写错名字**不报错只是永不触发**，只能靠静态校验拦）。
 - **被禁写法**：`img onerror` 点火器与 teapot 系 → ERROR（官方明令，沙盒模式 `<script>` 装卡即执行，点火器不再有意义）。
 - **WARN 项**：作者自写 `data-*`（会被净化删掉）；`iframe` / `link` / `meta` / `form` / `object` / `embed` 等被删标签；全局 CSS（`*{}` / `html{}` / `body{}` / `:root{}` → 改用 `[data-chat="root"]`）；HTML 缩进 4 空格（官方 WARN；实机当前会在 Markdown 前剥掉缩进，不据此断言会变代码块，仍保守顶格写）；`sdk.on` 写进 `message:mount` 回调（每挂一条气泡多订一份）；`message:done` 里 `message.send` 自问自答死循环。
@@ -421,7 +421,7 @@ python <skill>/scripts/build-preview.py output/文件-regex.json --platform mmds
 
 ### 4.2 MMD 平台填写注意事项
 
-- **findRegex 两个 MMD 路线都填 `/pattern/flags` 外层斜杠**，固定标记也写成 `/<标记>/`；沙盒 worker 的字面量分支不能抵消实机裸值不生效的结论
+- **findRegex 两个 MMD 路线都统一填 `/pattern/flags` 外层斜杠**，固定标记也写成 `/<标记>/`；沙盒裸字面量实机也生效（卡 64304 A/B 2026-08-30），统一 slash 是跨平台一致的约定
 - replaceString 字段：如含 HTML，注意转义确认界面接受原始 HTML
 - 每条填写后建议发条测试消息验证效果，再勾选 `- [ ] 已填写`
 - MMD 平台正则仅作用于显示层（等效 markdownOnly=true）

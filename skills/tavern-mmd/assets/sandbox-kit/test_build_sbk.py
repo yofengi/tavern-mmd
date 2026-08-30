@@ -95,6 +95,14 @@ class TestSplitModuleContracts(unittest.TestCase):
         "hud-render.js": "hud-render",
         "ui.js": "ui",
         "ui-panel.js": "ui-panel",
+        "ui-nav.js": "ui-nav",
+        "ui-icon.js": "ui-icon",
+        "ui-fan.js": "ui-fan",
+        "ui-dock.js": "ui-dock",
+        "ui-bubble.js": "ui-bubble",
+        "ui-inject.js": "ui-inject",
+        "ui-codex.js": "ui-codex",
+        "ui-map.js": "ui-map",
         "ui-stage.js": "ui-stage",
     }
 
@@ -195,18 +203,21 @@ class TestMatchesEmpty(unittest.TestCase):
 
 
 class TestSlashForm(unittest.TestCase):
-    """硬约束 21：findRegex 必须 slash 形态（实机裸字面量不生效）。"""
+    """findRegex 形态：裸字面量实机生效（卡 64304 A/B，2026-08-30）→ 只 WARN 建议统一
+    slash；空值仍 ERROR。"""
 
     def test_slash_ok(self):
         d = B.Diag()
         B.check_slash_form({"findRegex": "/\\{\\{hud\\}\\}/"}, d, "T")
         self.assertEqual(d.errors, [])
+        self.assertEqual(d.warns, [])
 
-    def test_bare_literal_is_error(self):
+    def test_bare_literal_is_warn_not_error(self):
         d = B.Diag()
         B.check_slash_form({"findRegex": "{{hud}}"}, d, "T")
-        self.assertEqual(len(d.errors), 1)
-        self.assertIn("21", d.errors[0])
+        self.assertEqual(d.errors, [])            # 实机生效，不再判 ERROR
+        self.assertEqual(len(d.warns), 1)
+        self.assertIn("slash", d.warns[0])
 
     def test_empty_is_error(self):
         d = B.Diag()
@@ -1938,6 +1949,12 @@ class TestExampleConfig(unittest.TestCase):
             "theme-panel.js": "theme-panel ready", "protocol.js": "protocol ready",
             "hud.js": "hud ready", "hud-render.js": "hud-render ready",
             "ui.js": "ui ready (kit)", "ui-panel.js": "ui-panel ready",
+            "ui-nav.js": "ui-nav ready (nav)", "ui-icon.js": "ui-icon ready (icon)",
+            "ui-fan.js": "ui-fan ready (fan.place)", "ui-dock.js": "ui-dock ready (dock",
+            "ui-bubble.js": "ui-bubble ready (bubble)",
+            "ui-inject.js": "ui-inject ready (inject)",
+            "ui-codex.js": "ui-codex ready (codex)",
+            "ui-map.js": "ui-map ready (map)",
             "ui-stage.js": "stage ready",
         }
         seen = []
@@ -2052,13 +2069,29 @@ class TestExampleConfig(unittest.TestCase):
         self.assertEqual(B.CORE_ASSETS,
                          ("core.js", "core-store.js", "core-boot.js", "theme.js", "theme-panel.js"))
         self.assertEqual(B.UI_ASSETS,
-                         ("protocol.js", "hud.js", "hud-render.js", "ui.js", "ui-panel.js", "ui-stage.js"))
+                         ("protocol.js", "hud.js", "hud-render.js", "ui.js", "ui-panel.js",
+                          "ui-nav.js", "ui-icon.js", "ui-fan.js", "ui-dock.js", "ui-bubble.js",
+                          "ui-inject.js", "ui-codex.js", "ui-map.js",
+                          "ui-stage.js"))
         self.assertEqual(B.ASSET_ORDER, B.CORE_ASSETS + B.UI_ASSETS)
         self.assertLess(B.CORE_ASSETS.index("core-store.js"), B.CORE_ASSETS.index("core-boot.js"))
         self.assertLess(B.CORE_ASSETS.index("theme.js"), B.CORE_ASSETS.index("theme-panel.js"))
         self.assertLess(B.UI_ASSETS.index("hud.js"), B.UI_ASSETS.index("hud-render.js"))
         self.assertLess(B.UI_ASSETS.index("ui.js"), B.UI_ASSETS.index("ui-panel.js"))
         self.assertLess(B.UI_ASSETS.index("ui-panel.js"), B.UI_ASSETS.index("ui-stage.js"))
+        # 侧边栏一族的依赖方向。dock 消费 nav/icon/fan，且 chrome() 在 ui-panel 里
+        # 反查 SBK.ui.dock 决定入口形态 —— dock 必须晚于 ui-panel 装载，否则
+        # chrome() 静默回落成旧的功能栏按钮排（正是「设置按钮镶嵌在页面里」那个观感 bug）。
+        for dep in ("ui-nav.js", "ui-icon.js", "ui-fan.js"):
+            self.assertLess(B.UI_ASSETS.index(dep), B.UI_ASSETS.index("ui-dock.js"),
+                            "%s 必须早于 ui-dock.js，否则 dock 只能吃到兜底退化路径" % dep)
+        self.assertLess(B.UI_ASSETS.index("ui-panel.js"), B.UI_ASSETS.index("ui-dock.js"))
+        # bubble 是 dock 的 surface:'bubble' 呈现面提供者，也必须先到。
+        self.assertLess(B.UI_ASSETS.index("ui-bubble.js"), B.UI_ASSETS.index("ui-stage.js"))
+        # 三个扩展组件只依赖 core + ui kit(+nav/icon)，互不依赖，可单独裁剪。
+        for ext in ("ui-inject.js", "ui-codex.js", "ui-map.js"):
+            self.assertLess(B.UI_ASSETS.index("ui.js"), B.UI_ASSETS.index(ext))
+            self.assertLess(B.UI_ASSETS.index(ext), B.UI_ASSETS.index("ui-stage.js"))
 
 
 class TestModes20(unittest.TestCase):

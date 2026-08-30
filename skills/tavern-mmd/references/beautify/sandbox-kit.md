@@ -288,9 +288,31 @@ SBK.parse.struct(type, raw)     // 结构类型强制适配（path/level/stats/k
 SBK.ui.snapshot(state, schema)  // -> HTML 字符串（status 面板，拼给 replaceString）
 SBK.ui.snapshot.auto(schema)    // 装一次，自动升级所有气泡（订阅 mount/done）
 SBK.ui.snapshot.hydrate(root, schema)          // 手动升级某个气泡根
-SBK.ui.chrome(opts)             // 功能栏入口 -> {el, toggle, panel}
+SBK.ui.chrome(opts)             // 设置入口 -> {el, toggle, panel, dock}（默认 dock 形态）
 SBK.ui.panel(opts)              // -> {el, ball, box, open, close, toggle, opened, setContent, move, destroy}
 SBK.ui.stage(opts)              // -> {open, close, toggle, visible, el, box, mode, rebuild, render, destroy}
+```
+
+**侧边栏一族**（见第 7.5 节的选型规则）
+
+```js
+SBK.ui.dock(opts)               // 侧边图标导轨 -> {el, tabs, tabAt, icons, opened, sync,
+                                //   open(i), close, entries, setTabs, addTab, removeTab,
+                                //   hasRole, count, destroy}
+                                // opts: {side:'right'|'left', hoverOpen, tabs:[…]}
+                                // tab:  {icon, label, role, surface:'drawer'|'bubble',
+                                //        panes:[{label,content}], entries:[{label,onSelect}],
+                                //        onSelect, active, width}
+SBK.ui.bubble(opts)             // 锚定气泡面 -> {el, open, close, toggle, opened, destroy}
+SBK.ui.nav(panes, opts)         // 可选导航栏 -> {el, bar, body, show(i), index, count}
+                                // 🚨 panes ≤1 时 bar() 返 null（单 pane 不渲染导航栏）
+SBK.ui.icon(name)               // -> SVG 节点。gear/wrench/tools/sliders/map/book/spark/dots
+SBK.ui.icons()                  // -> 图标名数组（与 build_sbk.CHROME_ICONS 白名单同源）
+SBK.ui.fan.place(nodes, rect, side)   // 扇形第二层坐标；只在 ≥2 类功能时用
+
+SBK.ui.inject(opts)             // 自动注入：滑块 + 输入框，发送时附加到用户输入末尾
+SBK.ui.codex(opts)              // 人物图鉴：单列/双列/导航分组/大图滑动
+SBK.ui.map(opts)                // 地图：图片地图（缩放+标识+气泡）或渲染地图
 
 SBK.ui.hud.type(name, fn)       // 注册自定义控件（仍是公开入口）
 SBK.ui.hud.types()              // -> 已注册类型名数组
@@ -451,6 +473,40 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 
 **偏好读档 + 合成 + 落地必须在首个入口按钮出现之前做完**，否则玩家上次存的字号/配色要等他打开一次面板才生效。
 
+### 7.5 两种侧边栏：怎么选、什么时候不做第二层
+
+`chrome()` 默认不再往功能栏里放「大按钮＋设置文字」，而是路由到 `SBK.ui.dock`——**贴视口边缘的一枚图标页签**。原因是形态冲突：bar 形态走功能栏行内流，与平台自己的 chrome 挤在一条上，且功能栏实测 `flex-shrink:1` 会被消息区抢高度压扁，观感就是「设置按钮镶嵌在页面里」。
+
+导轨上的页签有**两种呈现面**，语义分工不同：
+
+| 呈现面 | 是什么 | 装什么 | 判断依据 |
+|---|---|---|---|
+| `drawer` 半页抽屉 | 从边缘滑出、盖住半屏、可滚动 | **基础设置**：风格包、字号、配色 | 信息量大、要滚动、玩家会停留 |
+| `bubble` 锚定气泡 | 贴着页签弹出的小浮层 | **扩展功能**：地图、人物图鉴、自动注入 | 轻量、看一眼就走，不该盖掉半个屏幕 |
+
+两种面都支持**可选**导航栏，所以「集中式」（一个入口 + 导航栏切换）与「分散式」（多枚图标页签各管一件事）都能表达。
+
+**数量纪律（三条，都是「按需出现」而不是恒定层级）**：
+
+1. **单 pane 不做导航栏。** 只有一组内容就直接铺开——一条只有一个格子的导航栏是纯噪音。`ui-nav.js` 见 ≤1 pane 直接不建栏。
+2. **单功能不做第二层。** 一个页签只有一件事就点开即到。扇形（`ui-fan`）只在同一页签下挂着 **≥2 种不同类型**功能时才出现，用来快速分流；一项时它纯属多一次点击。`ui-dock.js` 的 `normTabs` 见 `entries.length === 1` 会自动降级成直达那一项。
+3. **设置页签全局唯一。** `role:'settings'` 第二次加会被拒并告警——玩家找设置时不该在两枚长得差不多的图标里猜。**扩展页签（抽屉的、气泡的）都可以有多枚**：图鉴、地图这类通常各占一枚独立按钮；收进同一个气泡的导航栏只是「功能多到导轨放不下」时的可选手段，不是默认做法。
+
+**AI 在作者没提要求时怎么选**：按「有几件事、每件多重」决定，不要默认堆满层级。
+
+- 只有美化 → 一枚设置页签 + 单 pane 抽屉，不要导航栏、不要扇形。
+- 美化 + 1~2 项轻量扩展 → 设置页签（抽屉）+ 扩展各一枚气泡页签。
+- 扩展多到 3 项以上 → 要么继续分散成多枚气泡页签，要么收成一枚气泡页签 + 气泡内导航栏；**别**同时用扇形和导航栏。
+- 作者明确要「集中」→ 一枚设置页签，抽屉里用导航栏分页（传 `panes`）。
+
+**三个现成扩展**（都只依赖 core + ui kit，可单独裁剪）：
+
+- `SBK.ui.inject`——**自动注入**：一个滑块开关 + 一个输入框。开关开启时，玩家发送消息会把输入框内容附加到用户输入**末尾**一起发送。用 `sdk.input`/`composer` 读写，不改气泡 DOM。
+- `SBK.ui.codex`——**人物图鉴**：四种版式（单列 / 双列 / 带导航栏按阵营分组 / 大图左右滑动）。版式按人数和是否有分组自动选，也可显式指定。
+- `SBK.ui.map`——**地图**：图片地图（大图可缩放、可点标识、点击弹气泡）与渲染地图（纯文字/像素/2D）。可捕获状态栏的地点字段来高亮当前位置。
+
+**JSON 配置只能表达最常见的那一种**：一枚图标 → 阅读设置抽屉（config 的 `chrome` 块：`form/side/icon/label/dockLabel/hoverOpen/settings`）。多页签、气泡面、导航栏分页需要 pane 内容（DOM 节点或工厂函数），JSON 表达不了——那条路是**作者自己写一条只放 `<script>` 的规则**，直接调 `SBK.ui.dock({tabs:[…]})`。导轨是共享的：`chrome()` 先放进设置页签，作者再 `addTab` 自己的，互不覆盖。
+
 ## 八、工作流
 
 ① 复制配置 → ② 修改主题/schema/正文 → ③ 生成器与 validator → ④ 本地 sandbox `chat` + `thin-preview` → ⑤ 桌面/竖屏/横屏 GUI 与截图。只有能力矩阵标为 `probe-needed`，或用户授权最终人工验收时才进真实站；AI 不默认登录账号、不把正式卡/公开卡当日常夹具。真实站操作仍按固定交付形态导入 6 键 JSON，并手工粘贴 persona。
@@ -497,7 +553,7 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 | 创卡页预览一打开就整卡炸掉 | 瘦预览下 `save.get`/`save.keys` **同步抛 `SdkError`**（不是返回 `NOT_SUPPORTED`，包分析原说法已被实机推翻，§4.4a）。**最易翻车处** | `store.load()` 必须 try/catch。基座已兜两层，异常一律返回 `null`。降级链 `save → cache → 内存`（`cache.get` 实测返 `undefined` 不抛） |
 | 规则装上了但整条不生效，只有告警 | 输出预算 `max(262144, 输入长度×4)`，**按条累计所有匹配的输出**，超限**整条回滚**（§5.2，手册与三份包分析均未提）。告警分 `replacement-alone`/`volume`/`empty-match` | 单条远低于 256KB；**匹配式绝不能匹配空串**。`/(?!)/` 是恒失败（安全但无用），`/a*/` 这类才触发回滚（裁决 6） |
 
-| 匹配式明明写对了却不替换 | 实机上裸字面量 `{{probe}}` **未生效**，改 `/{{probe}}/` 立即生效。与 worker 源码 `p()` 的字面量分支矛盾，说明宿主侧在交给 worker 前另有一层处理（§5.4 / 硬约束 21） | `findRegex` **一律 `/…/` slash 形态**。`{}` 在非量词位置无需转义，但**方括号是元字符必须转义**：`/\[状态\]([\s\S]*?)\[\/状态\]/`。漏转义会变成字符类（匹配「状」「态」任一字符），静默失效且极难排查 |
+| 匹配式明明写对了却不替换（写的是 `/…/`） | 多半是 `/…/` 里正则体语法错 → 整条静默丢弃；或匹配式重复/接不上触发串。**不是**"裸字面量不生效"——`【实机 2026-08-30】`裸字面量已复验生效（§5.4） | 写 `/…/` 时校验正则体；`{}` 在非量词位置无需转义，但**方括号是元字符必须转义**：`/\[状态\]([\s\S]*?)\[\/状态\]/`。漏转义会变成字符类（匹配「状」「态」任一字符），静默失效且极难排查。裸字面量也生效，但建议统一 slash（校验器出 WARN） |
 | `onclick` 静默消失 | `SAFE_FOR_XML` 默认开，属性值命中 `/((--!?|])>)|<\/(style\|script\|…)/i` → **整条属性被删**，且早于 `forceKeepAttr`（§5.5）。头号事故是 `onclick="if(a[0]>1)"` 里的 `]>` | **比较运算符两侧留空格**，属性值禁 `]>`/`-->`/`--!>`（硬约束 8）。`SBK.dom.h` 会拦下并告警。**好消息**：HTML 元素上**所有 `on*` 都可用**（实测 `<b onclick onmouseenter>` 双双保留），hover/input/change 放心用 |
 | SVG 里的点击事件不触发 | `on*` 在非 SVG 元素上强留，**SVG 内删除**（实测 `<circle onclick>` 被删，§5.5） | 交互必须挂 **HTML 壳**，`<path onclick>` 无效 |
 | 自写 `data-*`/`aria-*` 属性不见了 | 作者自写 `data-*` **全删**；`ALLOW_ARIA_ATTR:!1` → `aria-*` 与 `role` **全删**（§5.5）。平台自己的 `data-chat` 由 Vue 创建、从未进净化器，所以看着能用 | 用 class/id 传状态（硬约束 9）。**无障碍在此平台受限，属平台限制而非基座缺陷** |

@@ -13,7 +13,9 @@
 >
 > 优先级：**源码 > 实机 > 官方手册 > 官方 skill 校验脚本**。未标注的段落沿用原始官方文档级别。
 >
-> 🚨 **官方资料已被证伪的条目清单**（细节见对应章节）：`ready` 会补发且可做首屏（§2.6）· `stage.el()` 关闭时返回 `null`（§4.6）· 平台 chrome 占 8000–8999（§6.3）· `beginning` 上限 10240（§8）· 4 空格缩进变代码块（§6.5）· 外链脚本需域名白名单（§13）· 纯字面量匹配式是首选（§7.1）· 只有 `onclick` 可用（§5.2）。
+> 🚨 **官方资料已被证伪的条目清单**（细节见对应章节）：`ready` 会补发且可做首屏（§2.6）· `stage.el()` 关闭时返回 `null`（§4.6）· 平台 chrome 占 8000–8999（§6.3）· `beginning` 上限 10240（§8）· 4 空格缩进变代码块（§6.5）· 外链脚本需域名白名单（§13）· 只有 `onclick` 可用（§5.2）。
+>
+> 🔧 **本 skill 自己曾记错、现已实机订正**：「裸字面量 `findRegex` 不生效」——`【实机实测 2026-08-30】`（卡 64304 A/B）确认裸字面量**生效**，与官方「字面量是首选」一致；交付仍统一写 `/…/` 是约定而非硬红线（§7.1）。
 >
 > ✅ **官方资料被实测证实的条目**：手册「底栏和白名单弹窗另有 18 个变量」为真（逐个注入验证 18/18 生效，§6.1）。但手册那句「会话列表 / 模型 / 角色资料这类白名单弹窗」易被误读 —— 模型设置那五个渲染在**宿主页**、卡片 CSS 打不到，见 §6.3b。
 >
@@ -42,7 +44,7 @@
 
 | 项 | 当前MMD `/mmd` | 沙盒模式 `/mmdsandbox` |
 |---|---|---|
-| `findRegex` 必须 slash literal | ✅ 强制（实测铁律，见 `mmd.md` §8） | ✅ **也应强制写 `/…/`**（`【实机实测 2026-08-26】`：裸字面量 `{{probe}}` 不生效，改 `/{{probe}}/` 立即生效。官方称字面量是首选，实机推翻，见 §7.1） |
+| `findRegex` 必须 slash literal | ✅ 强制（实测铁律，见 `mmd.md` §8） | ⚠️ **建议统一写 `/…/`（约定，非硬性）**：`【实机实测 2026-08-30】`（卡 64304 A/B）裸字面量 `体力` 与斜杠 `/灵力/` 都生效；交付统一 slash 是为跨平台一致，校验器对裸字面量出 WARN 不出 ERROR，见 §7.1 |
 | 导入 JSON 顶层键 | 4 键 `pageDepth` / `statusbar` / `beginning` / `regex_scripts` | **恰好 6 键**（多 `chatVersion` / `personality`） |
 | `id` 取值 | 时间戳类 | **必须负数**，导入时重编号 |
 | 整卡 PNG / chara_card_v2 | ✅ 仅 v2，PNG 承载 | ❌ **官方禁 PNG 整卡**；交付 = 正则 JSON + persona 文本 |
@@ -88,7 +90,7 @@
 
 > **专开一条规则只放 `<script>`，匹配式填一个正文里用不到的词**（官方示例卡即 `scriptName: "kit"` / `findRegex: "{{eg-kit}}"`，谁都不引用）。同理一条只放 `<style>`，命名 `卡名-style`。
 >
-> ⚠️ **匹配式仍要写 slash 形态**（`/卡名-kit/`）—— 实机上裸字面量不生效（§7.1）；且**绝不能匹配空串**（§7.6）。
+> ⚠️ **匹配式建议写 slash 形态**（`/卡名-kit/`）—— 裸字面量实机也生效（§7.1），但统一 slash 更一致；且**绝不能匹配空串**（§7.6）。
 
 > 🚨 **真红线：`img onerror` 点火器与 teapot 系写法在沙盒模式被官方明令禁止。** 官方禁止清单逐字包含「teapot：`onerror` 图、`window.teapot*`、CoC 注入」。理由是 `<script>` 已经装卡即抽出、必然执行，点火器不再有存在意义。当前 MMD 那套 `img onerror` 引擎（`../beautify/statusbar-radar.md`）**不要移植到沙盒模式**，要重写成 `<script>` + `sdk.on('message:mount')`。
 
@@ -272,11 +274,13 @@ message:new  →  message:mount  →  message:done  →  ready
 | 事实 | 意义 |
 |---|---|
 | **正文字段名就是 `content`**，恰好 4 键 | 不用猜 `text` / `message` / `body` / `raw`，**只读 `content`** |
-| `id` 是**字符串**（开场白实测为 `"greeting"`） | 不是数字，别拿它做算术 |
-| `serverId` 开场白时为 `null` | 它是 `data-msg-id` 的对应物。**`serverId === null` 表示服务端还不认得这条 → 不可 `message.edit`**，调用前必须判空（§4.3） |
+| `id` 是**字符串**（开场白实测为 `"greeting"`） | 不是数字，别拿它做算术。🚨 **`id` 跨重载不稳定**（见下方红线） |
+| `serverId` 开场白时为 `null` | 它是 `data-msg-id` 的对应物（开场白 `data-msg-id` 实测为 `-1`）。**`serverId === null` 表示服务端还不认得这条 → 不可 `message.edit`**，调用前必须判空（§4.3） |
 | `role` 实测为 `"ai"` | 与气泡上 `data-from` 对应 |
 | **SDK 回调只传 1 个实参**（`argcount=1`） | 官方契约里写的 `fn(payload, bubbleRoot)` 的第二参 `bubbleRoot` **不是 SDK 提供的**，别指望它 |
 | `ready` 载荷为 `undefined` | 纯时序信号，不携带数据 |
+
+> 🚨 **`msg.id` 不是稳定标识，持久化只能用 `serverId`。** `【源码确证】`本地新消息的 `id` 由自增计数器发 `l1`/`l2`…（`ac()`），历史消息重载后变成 `h`+serverId（如 `h9512`）——**同一条消息重载前后 `id` 会变**。要把状态挂到某条消息上（存档 key、计数），一律用 `serverId`（等于气泡上的 `data-msg-id`），不要用 `id`。开场白的 `id` 是常量 `"greeting"`、`serverId` 为 `null`、`data-msg-id` 为 `-1`。
 
 → **取正文一律 `payload.content`；判断可编辑一律 `payload.serverId != null`。**
 
@@ -366,6 +370,7 @@ sdk.on('message:done', function (msg) {
 | `save.get` | `key: string` | `unknown` | sync | 🚨 **实测同步抛 `SdkError`（不是返回错误码）→ 必须 `try/catch`** |
 | `save.set` | `key: string`, `value: unknown` | `Promise<void>` | **async** | `NOT_SUPPORTED` |
 | `save.remove` | `key: string` | `Promise<void>` | **async** | `NOT_SUPPORTED` |
+| ↳ `save.remove` 真机 | 🚨 **坏死**：就绪态也稳定抛 `NETWORK`、重试无效（`【实机 2026-08-30】`）→ 用 `save.set(key,null)` 代替，见 §4.5 | | | |
 | `save.keys` | — | `string[]` | sync | 🚨 **实测同步抛 `SdkError` → 必须 `try/catch`** |
 | `stage.open` | `mode?: 'content' \| 'full'` | `void` | sync | 可用 |
 | `stage.close` | — | `void` | sync | 可用 |
@@ -385,7 +390,11 @@ sdk.on('message:done', function (msg) {
 
 最常见用法：点选项 → `sdk.input.set('你好')` 把话填进输入框 → 用户自己按发送。
 
-`set` / `add` / `insert` / `clear` 在**用户正在用拼音打字、字还没上屏**时会失败（IME 组合期抛 `INVALID_ARGS`），点按钮的路径撞不上。`insert` 取不到光标就落到末尾，别假设插入后光标停在原处。`clear` 在用户点发送后平台已经清了，不必自己再清。`focus` **别在页面刚打开时调**，手机键盘会盖住你刚画的东西。`setCursor` **没有选区 API**，别拿它模拟选区。`get` 别轮询判断用户在打字，用 `input:change` 事件。
+`set` / `add` / `insert` / `clear` 在**用户正在用拼音打字、字还没上屏**时会失败（IME 组合期抛 `INVALID_ARGS`），点按钮的路径撞不上。`clear` 在用户点发送后平台已经清了，不必自己再清。`focus` **别在页面刚打开时调**，手机键盘会盖住你刚画的东西。`setCursor` **没有选区 API**，别拿它模拟选区。`get` 别轮询判断用户在打字，用 `input:change` 事件。
+
+> 🚨 **`input.set()` 之后同一 tick 内 `setCursor` 必然失效**（`【源码确证】`）：`set` 走 Vue 响应式，DOM 上 `textarea.value` **当帧还是旧值**，而 `setCursor(n)` 拿它 clamp：`const t=I.value; const n=Math.max(0,Math.min(e,t.value.length)); t.setSelectionRange(n,n)` —— 旧值长度下 clamp 出来的位置是错的（未聚焦/已聚焦都一样，不是"没聚焦才坏"）。→ **`set` 后要定位光标，必须等一个 tick**（`requestAnimationFrame` 或 `queueMicrotask` 后再 `setCursor`）。
+>
+> 附带纠一处：官方手册说 `insert`「取不到光标就落到末尾」是**死代码** —— `getCursor()` 自己 `?? 0` 已兜底成 0（`getCursor:()=>I.value?.selectionStart??0`），`insert` 里的 `?? draft.length` 分支永远轮不到。所以 `insert` 取不到光标时是落到**开头**（位置 0），不是末尾；别指望它落末尾。
 
 ### 4.3 `sdk.composer.*` 与 `sdk.message.*`
 
@@ -456,7 +465,16 @@ sdk.on('message:mount', function () {
 | 存档名长度 | ≤ **64 字符** |
 | 存档名字符 | **不能含冒号**（`hp:cur` 会被拒，用 `hp_cur`） |
 | 值 | 必须可 `JSON.stringify`（函数、`Map`、循环引用存不进去） |
-| 写入限频 | `save.set` 1 分钟 **20** 次。`【源码确证】``save.remove` **无限频** |
+| 写入限频 | `save.set` 1 分钟 **20** 次。`【源码确证】``save.remove` **无限频**（但见下方红线：remove 本身是坏的） |
+
+> 🚨 **真红线：`save.remove` 在真机上是坏的，稳定报 `NETWORK`、重试无效。用 `save.set(key, null)` 规避。** `【实机实测 2026-08-30】`（卡 64304，save 就绪态 `serverId=8014`）
+>
+> 探针实测：`set(pbk)=ok`、**`remove(pbk)=NETWORK`、重试仍 `NETWORK`**、`set(pbk2,null)=ok`、事后 `keys=[pbk,pbk2]`。即 set 正常、**remove 通道坏死**、null-set 可用。
+>
+> - **这个 `NETWORK` 不代表网络问题。** `【源码确证】`remove 的 `catch` 把 `persistRemove` 抛出的非 `SdkError` 一律映射成 `NETWORK` + 通用文案 `'存档删除失败'`，**真实原因被吞掉**。别对着 `NETWORK` 去查网络。
+> - **规避写法**：删存档用 `sdk.save.set(key, null)` 代替 `sdk.save.remove(key)`，读取时把 `null` 当作"不存在"。
+> - **代价**：`set(null)` 只是把值写成 `null`，**key 不释放**（实测事后 `keys` 里仍在）。而且因为 remove 坏死，占着的 key **删不掉**。虽然 `SAVE_MAX_KEYS` 在沙盒侧不校验（§4.5 首行），但仍按"整套状态打成一包（一个对象）再存"的纪律做，才不会被这个坑拖累。
+> - 交付若依赖"清档/重开"，一律用 `set(key,null)` 语义，不要指望 `remove` 成功。
 
 `save.get` 是**同步**的，读的是进页时预载进来的那份内存副本。`set` / `remove` 必须 `.catch`（写法同上面 `message.send`），失败时页面上不会有任何提示。
 
@@ -550,7 +568,7 @@ input:change  conversation:switch  theme:change  back  stage:close  dispose
 
 **日常做卡，`message:mount` + `message:done` 两个就够** —— 原文这里写的是「`ready` + `message:mount` + `message:done`」，已按实测修正：`ready` 既不补发也最后到，**首屏不要依赖它**（§2.6.2）。需要「只跑一次」的初始化，就在 `message:mount` 回调里用幂等哨兵自己拦（因为没有 `once`）。
 
-### 4.10 错误码（官方记 6 个，源码实为 7 个）与限额限频
+### 4.10 错误码（官方记 6 个，源码实为 9 个）与限额限频
 
 | code | 常见原因 |
 |---|---|
@@ -558,9 +576,11 @@ input:change  conversation:switch  theme:change  back  stage:close  dispose
 | `RATE_LIMITED` | 写太勤或发太勤 |
 | `INVALID_ARGS` | 空消息、存档名违规、正在拼音输入时改草稿、编辑一条不存在的消息 |
 | `HOST_DENIED` | 存档还没准备好、发送通道没接上、切会话把这次作废了 |
-| `NETWORK` | 请求发出去了但没成 |
+| `NETWORK` | 请求发出去了但没成。🚨 **注意 `save.remove` 稳定返回这个码但它是坏的、不是网络问题**——真实原因被 catch 吞掉（§4.5），用 `save.set(key,null)` 规避 |
 | `NOT_SUPPORTED` | 当前环境没有这个能力，**多半是创卡页瘦预览** |
-| `BUSY` | `【源码确证】`**官方 6 码清单漏记这一个**：同类操作还在进行中。同样要在 `.catch` 里认得它 |
+| `BUSY` | `【源码确证】`**官方 6 码清单漏记**：同类操作还在进行中。源码里实际字符串是 **`UI_BUSY`**（「已有一个交互界面开着，能力「…」不发」）——舞台/交互界面开着时部分能力会被拒，这个互斥关系官方没提。要在 `.catch` 里认得它 |
+| `MODEL_UNAVAILABLE` | `【源码确证】`官方 6 码漏记：模型侧不可用 |
+| `UNKNOWN_CAPABILITY` | `【源码确证】`官方 6 码漏记：调了不存在的能力名（能力名拼错时可能撞上） |
 
 ⚠️ `【实机实测】`瘦预览下 `save.get` / `save.keys` 是**抛 `SdkError`**，不是「返回 `NOT_SUPPORTED`」——所以别只写 `.catch`，同步调用要 `try/catch`（§2.5.1）。
 
@@ -587,10 +607,13 @@ input:change  conversation:switch  theme:change  back  stage:close  dispose
   ├─ [data-chat="messages"]           可滚动的消息区
   │    └─ [data-chat="list"]
   │         └─ [data-chat="message-frame"]  一条的外框
-  │              └─ [data-chat="message"]   一条消息（data-from / data-state / data-msg-id）
-  │                   ├─ [data-chat="message-body"]   你的消息 HTML 在这里
+  │              └─ [data-chat="message"]   一条消息，是 <article>（data-from / data-state / data-msg-id）
+  │                   ├─ [data-chat="message-avatar"]  头像（`【实机 2026-08-30】`，未文档化）
+  │                   ├─ [data-chat="message-name"]    名字（同上）
+  │                   ├─ [data-chat="message-body"]   你的消息 HTML 在这里（生成中带 data-generating="1"）
+  │                   ├─ [data-chat="message-time"]    时间（同上）
   │                   ├─ [data-slot="message-extra"]
-  │                   └─ [data-chat="message-actions"]  重新生成 / 编辑
+  │                   └─ [data-chat="message-actions"]  按钮 data-action="regenerate|edit|share"
   ├─ [data-slot="left"] / [data-slot="right"]
   ├─ [data-chat="author-stage"]        舞台：长期面板挂这里
   └─ [data-chat="composer"]            底部输入区。卡片关掉输入时整块不存在
@@ -625,7 +648,11 @@ div  <  [data-slot="statusbar"]  <  [data-chat="root"]  <  div  <  body  <  html
 
 ### 5.1 可读属性
 
-`[data-chat="message"]` 上：`data-from`（`user` 或 `ai`）、`data-state`（如 `done`、`streaming`）、`data-msg-id`（**服务端认得这条时才有**，刚插入未落库的没有 → `message.edit` 前必须判空）。
+`[data-chat="message"]` 上：`data-from`（`user` 或 `ai`）、`data-state`（如 `done`、`streaming`）、`data-msg-id`（**服务端认得这条时才有**，刚插入未落库的没有 → `message.edit` 前必须判空）。消息节点本身是 **`<article>`**，开场白那条的 `data-msg-id` 实测为 **`-1`**（`【实机 2026-08-30】`）。
+
+> 🚨 **判「消息生成中」占位态用 `data-generating="1"` 比对比文本可靠**（`【源码确证】`+`【实机 2026-08-30】`）：生成中 `[data-chat="message-body"]` 带 **`data-generating="1"`**，收尾后去掉。比匹配平台占位串「消息生成中」稳得多（占位文案平台随时可能改），配合 §3 的 `isReplyText` 双保险最佳。
+
+> **气泡内部还有几个未文档化的平台节点**（`【实机 2026-08-30】`，均 `data-chat`，只读、可当选择器）：`message-avatar`（头像）、`message-name`（名字）、`message-time`（时间）；`[data-chat="message-actions"]` 里的按钮带 `data-action="regenerate|edit|share"`。
 
 `[data-chat="root"]` 上：`data-theme`（`light` / `dark`）、`data-composer`（底部输入区开着还是关着）。
 
@@ -648,7 +675,7 @@ linearGradient radialGradient stop clipPath title
 
 手册漏记的包括 **`a`、`font`、`thead`、`tbody`、`del`、`s`、`g`、`ellipse`、`polyline`、`polygon`、`tspan`、`defs`、`use`、`linearGradient`、`radialGradient`、`stop`、`clipPath`、`title`、`user`** —— 其中 `defs` / `use` / `clipPath` / `linearGradient` 的存在意味着**SVG 渐变与裁剪可用**，做血条、环形进度不必退回纯 CSS。
 
-- **会被删**：`iframe` `link` `meta` `form` `object` `embed`（且 CSP 另有一层封锁，见 §13）
+- **会被删**：`iframe` `link` `meta` `base` `form` `object` `embed`（且 CSP 另有一层封锁，见 §13）。🚨 `base` 常被漏记 —— `【源码确证】`DOMPurify `FORBID_TAGS:['style','iframe','object','embed','link','meta','base','form']` 逐字含 `base`。
 - `<style>` 和 `<script>` **不算被删**，它们被抽出来单独生效（见 §2.1）
 - **非白名单标签是被「正则剥壳」**，逐字 `/<\/?([\u4e00-\u9fa5a-zA-Z0-9_]+)(\s+[^>]*)?>/g` —— 只删标签、**文字保留**
 
@@ -979,17 +1006,17 @@ function m(e){return e.replace(/[.*+?^${}()|[\]\\]/g,`\\$&`)}
 
 由此确证：**前置处理**先 `.trim()` 再剥掉首尾反引号；**`/pattern/flags`** → 正则，合法 flags **仅 `gimsuy`**（无 `d`、无 `v`），**缺 `g` 平台自动补** → 总是全文替换；**其余任何非空串** → **字面量**，元字符被转义（`a.b` 不匹配 `axb`），全文每处都换。
 
-> 🚨 **真红线：源码允许字面量，但实机上裸字面量不生效 —— 一律写 `/…/`。**
+> ✅ **实机订正（`【实机实测 2026-08-30】` 卡 64304 A/B）：裸字面量确实生效。交付仍建议统一写 `/…/`（约定，不是硬红线）。**
 >
-> `【实机实测 2026-08-26】`探针最初用裸字面量 `{{probe}}` 作匹配式，**规则完全不生效**；改成 `/{{probe}}/` 后**立即生效**。
+> 在 0 规则的卡上加两条只匹配开场白既有词的规则做对照：`pb-bare` 匹配式填**裸字面量** `体力`（无斜杠）、`pb-slash` 填 `/灵力/`。保存后重载**真实聊天页**（不是创卡页预览——预览实测不跑规则），开场白状态块 `体力: 84/100 灵力: 30/60` 变成 `: 84/100 : 30/60` —— **裸 `体力` 与斜杠 `/灵力/` 在同一轮渲染里都被匹配替换**。
 >
-> 这与上面 worker 源码的字面量分支**矛盾** —— 说明**宿主侧在把规则交给 worker 之前另有一层处理**（那一层没有被逆向到）。既然源码路径与实机行为冲突，**以实机为准**。
+> 这与上面 worker 源码的字面量分支**一致**：宿主包 `sandbox-app.js` 只把 `pattern` 原样转发、不做形态分类（全包 `gimsuy` 命中 0），slash-vs-literal 只在 worker `p()` 里决定，而 `p()` 的字面量分支 `if(!n)return new RegExp(m(t),'g')` 就在渲染主路径上。
 >
-> → **结论：沙盒模式的 `findRegex` 也应一律写 slash 形态 `/…/`**，与当前 MMD（`mmd.md` §8）的铁律一致。原文档这里写的「不强制 slash literal、纯字面量是官方首选写法」**已推翻**。
+> 🚨 **原文档这里曾写「真红线：裸字面量不生效」——已订正。** 那条依据的 `【实机实测 2026-08-26】` 探针从头到尾用的是 `/{{probe}}/` slash 形态，**从没做过裸字面量的否定对照**；"宿主侧另有一层处理"是没被证实的推断，宿主包里并不存在那层。
+>
+> → **结论：两种形态都生效。交付仍统一写 slash `/…/`** —— 与当前 MMD（`mmd.md` §8）一致、也符合官方校验文案，写斜杠无害。校验器对裸字面量出 **WARN**（不是 ERROR），生成器同。真正判 ERROR 的只有「写成 `/…/` 但正则语法错」。
 >
 > 转义提示：正则里 `{}` 在**非量词位置就是字面量**，所以 `/{{hud}}/` 不需要转义成 `/\{\{hud\}\}/`（写了也对，只是没必要）。中文、方括号标记同理：`/【图鉴】/`、`/\[status\]([\s\S]*?)\[\/status\]/`（`[` 要转义，因为它是字符类起始）。
-
-⚠️ **`【待验证】`**：宿主侧那层预处理的具体逻辑未逆向到，所以「字面量在什么条件下会生效」不明。不要花时间试探，直接写 `/…/`。
 
 > 🚨 **写成 `/…/` 但正则语法错 → 整条规则被静默丢弃**，不降级成字面量，**页面上看不出异常**（只有告警）。官方校验对此判 ERROR。
 
@@ -1255,8 +1282,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 | 画的东西滚一会儿就没了 | 长期面板挂在气泡里，气泡销毁即没 | 挂舞台 `sdk.stage`（§4.6） |
 | JS 插入的功能栏宿主重复或位置不对 | 作者脚本早于 statusbar DOM；过早走 fallback 后静态宿主又迟到 | mount/done 同步期按固定 id 做全文档归一与内容迁移（§6.4） |
 | 预览里调什么都报 `NOT_SUPPORTED` | 创卡页是瘦预览，input / send / save 全不开放 | 回聊天页验（§2.5） |
-| 某条规则完全没生效、页面无异常 | 写成 `/…/` 但正则语法错 → **整条静默丢弃** | 校验匹配式（§7.1）。**不要退回字面量** —— 实机上裸字面量本身就不生效 |
-| **规则写的是裸字面量 `{{hud}}`，页面上永不替换** | **实机上裸字面量不生效**（官方称字面量是首选，已推翻） | **改写 `/{{hud}}/`（§7.1）** |
+| 某条规则完全没生效、页面无异常 | 写成 `/…/` 但正则语法错 → **整条静默丢弃** | 校验匹配式（§7.1）。语法拿不准时退回裸字面量也行——裸字面量实机生效 |
 | 后面那条同标记的规则永不生效 | 匹配式重复，前一条已换完全文 | 换标记；官方判 ERROR（§7.1） |
 | 想临时停用一条规则 | — | 名称加 `__` 前缀，整条被丢弃（§7.1） |
 | 界面上那块 UI 永远不出现 | 触发串没接到 `statusbar` / `beginning` / 别的 `replaceString` | 接上触发串（§7.3） |
@@ -1265,6 +1291,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 | `message.edit` 报错 / 拼出 `null` | 刚插入未落库的消息没有 `data-msg-id` | 调用前判空（§4.3） |
 | 发消息报 `UNAUTHORIZED` | 不是用户手势当帧（先 `await` 了，或定时器里发） | 点击当帧直接 `send`（§4.3） |
 | 存档/发送报 `RATE_LIMITED` | 超限频 | 攒批再写；照 §4.10 的次数控制 |
+| **`save.remove` 稳定报 `NETWORK`，重试也没用** | remove 通道坏死，真实原因被 catch 吞成 `NETWORK`（实机 2026-08-30，就绪态复现） | 用 `sdk.save.set(key, null)` 代替删除，读时把 `null` 当不存在；注意 key 不释放（§4.5） |
 | 存档在别人手机上全丢 | 游客存档退出即失、登录不迁移，**作者自己测不出** | 别把攒进度做成唯一玩法（§4.5） |
 | 面板挡住了平台长按菜单/提示 | z-index ≥ 8000，撞上平台临时浮层段 | 压回 **3500–7999**（**不是手册说的 1000–1999**，那个段位会盖住顶栏和输入框，§6.3） |
 | 面板被顶栏/输入框盖住，或反过来盖住了它们 | 照手册用 1000–1999，而 header/composer 实测是 `z-index:auto` | 用 3500–7999；常驻装饰用 1–999（§6.3） |

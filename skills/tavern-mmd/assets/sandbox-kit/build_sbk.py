@@ -160,8 +160,19 @@ DEFAULT_MARKERS = {
 # 顺序就是运行时装载顺序，装箱只能按该顺序取连续完整 IIFE，绝不重排或切开单文件。
 # core.js 建 SBK；core-store/core-boot 依赖它；theme-panel 依赖 theme 的私有门面。
 # protocol 在 HUD 前；hud-render 复用 hud 的同一 TYPES；ui-panel 复用 ui kit；ui-stage 最后。
+#
+# 侧边栏一族的依赖方向（都必须早于 ui-dock）：
+#   · ui-nav  —— dock 的抽屉面与 ui-bubble 的气泡面都调 SBK.ui.nav 建可选导航栏
+#   · ui-icon —— 页签图标取 SBK.ui.icon，晚到只会得到一个字符兜底
+#   · ui-fan  —— 扇形第二层的坐标与样式取 SBK.ui.fan，晚到退化成等距竖列
+# ui-dock 又必须晚于 ui-panel：chrome() 读 SBK.ui.dock 决定入口形态，晚到会静默回落
+# 成旧的功能栏按钮排（正是「设置按钮镶嵌在页面里」那个观感问题）。
+# 三个扩展组件（inject/codex/map）只依赖 core + ui kit(+nav/icon)，互不依赖，可单独裁剪。
 CORE_ASSETS = ("core.js", "core-store.js", "core-boot.js", "theme.js", "theme-panel.js")
-UI_ASSETS = ("protocol.js", "hud.js", "hud-render.js", "ui.js", "ui-panel.js", "ui-stage.js")
+UI_ASSETS = ("protocol.js", "hud.js", "hud-render.js", "ui.js", "ui-panel.js",
+             "ui-nav.js", "ui-icon.js", "ui-fan.js", "ui-dock.js", "ui-bubble.js",
+             "ui-inject.js", "ui-codex.js", "ui-map.js",
+             "ui-stage.js")
 ASSET_ORDER = CORE_ASSETS + UI_ASSETS
 
 
@@ -600,18 +611,20 @@ def check_lengths(rule, diag, where):
 
 
 def check_slash_form(rule, diag, where):
-    """硬约束 21：findRegex 必须写成 /…/ slash 形态。
+    """findRegex 形态检查：裸字面量实机生效（卡 64304 A/B，2026-08-30），故只 WARN
+    建议统一写 /…/ slash 形态；空值仍判 ERROR（worker p() 返回 'empty' 会跳过规则）。
 
-    实机验证：裸字面量 {{probe}} **不生效**，改 /{{probe}}/ 后立刻生效。
-    这与 worker 源码 p() 的字面量分支矛盾，说明宿主侧在交给 worker 前另有一层处理 → 实机为准。
+    worker 源码 p() 有 literal 分支（`if(!n)return new RegExp(m(t),'g')`），宿主包只把
+    pattern 原样转发、不做形态分类 → 裸字面量在真机上会被匹配替换。写斜杠无害、更统一。
     """
     kind, body, flags = classify_pattern(rule["findRegex"])
     if kind == "empty":
         diag.err(where, "findRegex 为空——worker p() 返回 'empty'，规则被跳过（§5.1）。")
         return
     if kind == "literal":
-        diag.err(where, "findRegex %r 是裸字面量——必须写成 /…/ slash 形态（硬约束 21，实机验证裸字面量不生效）。"
-                 % rule["findRegex"])
+        diag.warn(where, "findRegex %r 是裸字面量——实机生效，但建议统一写成 /…/ slash 形态"
+                  "（与 /mmd 一致、也符合官方校验文案；写斜杠无害）。"
+                  % rule["findRegex"])
         return
     try:
         _js_re_to_py(body, flags)
@@ -1385,6 +1398,11 @@ def boot_script(cfg, diag):
         "protocolTag": cfg["protocolTag"],
         "theme": theme_envelope(cfg),
     }
+    # chrome 入口形态（dock 默认 / bar 旧形态）。只在作者显式配了才下发，
+    # 省 payload 且让「没配过」与「配成默认值」在产物里可区分。
+    chrome_cfg = cfg.get("chrome")
+    if chrome_cfg:
+        payload["chrome"] = chrome_cfg
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     # 内联脚本里出现 </script 会【真的】提前闭合 <script>（这与 §6.10 的 JSON 层转义是两件事）。
     # 配置来自作者，此处按 JS 字符串转义拆开，闭合序列不再成形。
@@ -1556,6 +1574,81 @@ def check_host_id(host_id, diag):
     return host_id
 
 
+# chrome 入口形态。dock = 侧边图标导轨（默认）；bar = 旧的功能栏内按钮排。
+#
+# ⚠ 边界：config 只表达【单入口的基础设置】这一种常见情形（一枚图标 → 阅读设置抽屉）。
+#   多页签、气泡面、导航栏分页那套富形态需要 pane 内容（DOM 节点或工厂函数），
+#   JSON 配置表达不了 —— 那条路是作者自己写一条只放 <script> 的规则、直接调
+#   SBK.ui.dock({tabs:[…]})。方法论与选型规则见 references/beautify/sandbox-kit.md。
+CHROME_KEYS = {"form", "side", "icon", "label", "dockLabel", "hoverOpen", "settings"}
+CHROME_FORMS = ("dock", "bar")
+CHROME_SIDES = ("left", "right")
+# 与 sbk/ui-icon.js 的 ICONS 表逐字对齐。写错图标名运行时会告警并回落 gear，
+# 但生成期就拦住更省事（真机上没有控制台，只有开 ?sdkDebug=1 才看得见告警）。
+CHROME_ICONS = ("gear", "wrench", "tools", "sliders", "map", "book", "spark", "dots")
+
+
+def normalize_chrome(raw, diag):
+    """chrome 入口形态校验。返回 {} 表示作者没配（运行时取默认 dock）。
+
+    🚨 这里不做「静默丢弃未知键」：把 form 拼错成 forms 的后果是入口形态悄悄回到
+       旧 bar 形态，而作者以为自己已经切成 dock —— 与本轮要修的观感问题正面冲突，
+       故未知键一律 WARN 点名。
+    """
+    if raw is None or raw == "":
+        return {}
+    if not isinstance(raw, dict):
+        diag.err("config.chrome", "chrome 必须是对象（可含 %s），当前 %r。"
+                 % (sorted(CHROME_KEYS), raw))
+        return {}
+    out, unknown = {}, sorted(k for k in raw if k not in CHROME_KEYS)
+    if unknown:
+        diag.warn("config.chrome", "未知键 %s 会被忽略；合法键为 %s。"
+                                   "拼错 form 的表现是入口静默回到旧 bar 形态。"
+                  % (unknown, sorted(CHROME_KEYS)))
+    form = raw.get("form")
+    if form is not None:
+        if form in CHROME_FORMS:
+            out["form"] = form
+        else:
+            diag.err("config.chrome", "form 只能是 %s，当前 %r。dock 是侧边图标导轨，"
+                                      "bar 是旧的功能栏内按钮排。" % (list(CHROME_FORMS), form))
+    side = raw.get("side")
+    if side is not None:
+        if side in CHROME_SIDES:
+            out["side"] = side
+        else:
+            diag.err("config.chrome", "side 只能是 %s，当前 %r。" % (list(CHROME_SIDES), side))
+    icon = raw.get("icon")
+    if icon is not None:
+        if icon in CHROME_ICONS:
+            out["icon"] = icon
+        else:
+            diag.err("config.chrome", "icon 只能是 %s，当前 %r。运行时会回落成 gear 并只在 "
+                                      "?sdkDebug=1 里留一行告警，故在生成期直接拦住。"
+                     % (list(CHROME_ICONS), icon))
+    for k in ("label", "dockLabel"):
+        v = raw.get(k)
+        if v is None:
+            continue
+        if not isinstance(v, str) or not v.strip():
+            diag.err("config.chrome", "%s 必须是非空字符串，当前 %r。" % (k, v))
+        elif len(v) > 6:
+            # 文案只进 title 悬浮提示，但过长的 title 在窄屏上会截断得莫名其妙。
+            diag.err("config.chrome", "%s 最长 6 字，当前 %d 字（%r）。" % (k, len(v), v))
+        else:
+            out[k] = v
+    for k in ("hoverOpen", "settings"):
+        v = raw.get(k)
+        if v is None:
+            continue
+        if not isinstance(v, bool):
+            diag.err("config.chrome", "%s 必须是布尔值，当前 %r。" % (k, v))
+        else:
+            out[k] = v
+    return out
+
+
 # hud.js 真实支持的 schema type。九个数据类型 + 版面项 section（1.0 十种），
 # 本轮按美化决策「控件范围」补三种纯展示项：time / summary / turn。
 # 🚨 未知 type 在 hud.js 里走 `TYPES[type] || TYPES.text` 静默回落成 text ——
@@ -1658,6 +1751,7 @@ def normalize_config(raw, config_path, diag):
         "pinnedFields": pins,
         "schema": normalize_schema(cfg.get("schema") or {}, diag),
         "protocolTag": cfg.get("protocolTag") or "状态",
+        "chrome": normalize_chrome(cfg.get("chrome"), diag),
         "hostId": check_host_id(cfg.get("hostId") or "sbk-hud", diag),
         "markers": markers,
         "sceneRules": scenes,
@@ -1691,8 +1785,9 @@ def escape_js_regex(s):
 
 def _rule(rid, name, marker, body):
     """每条规则恰好四键：id/scriptName/findRegex/replaceString，id 为负数。
-    findRegex 一律 slash 形态（硬约束 21）。marker 用正文里不会出现的字面标记，
-    绝不用 /(?!)/ 这类零宽写法当"永不匹配"——那会触发 empty-match 撤销整条规则（§5.2）。"""
+    findRegex 统一 slash 形态（约定；裸字面量实机也生效，卡 64304 A/B 2026-08-30）。
+    marker 用正文里不会出现的字面标记，绝不用 /(?!)/ 这类零宽写法当"永不匹配"——那会
+    触发 empty-match 撤销整条规则（§5.2）。"""
     return {
         "id": rid,
         "scriptName": name,

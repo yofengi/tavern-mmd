@@ -46,7 +46,8 @@
   }
 
   /* 给 WP-4 生成器与做卡人用的推荐匹配式。
-     硬约束 21：一律 /…/ slash 形态（实机裸字面量 {{probe}} 不生效，加斜杠立即生效）。
+     统一 /…/ slash 形态（约定，非硬性）：裸字面量实机也生效（卡 64304 A/B 2026-08-30，
+     与 worker 源码一致），统一 slash 为跨平台一致；生成器对裸字面量出 WARN 不出 ERROR。
      §5.2：标记本身至少 6 个字符 → 绝不匹配空串，不会触发 empty-match 把整条规则撤销。
      cap=true 时整块进 $1，配合 replaceString 包一层 .sbk-snap--raw 壳给 hydrate() 升级
      成气泡内状态面板（modes.status）。 */
@@ -282,7 +283,7 @@
 
   parse.wrap = wrap;
   parse.config = config;      // 改块标记：SBK.parse.config({block:'状态'})
-  parse.pattern = pattern;    // 推荐匹配式（slash 形态，硬约束 21），供 WP-4 与做卡人取用
+  parse.pattern = pattern;    // 推荐匹配式（统一 slash 形态，约定；裸字面量实机也生效），供 WP-4 与做卡人取用
   parse.value = value;        // 单值分类器，供自定义控件复用
   parse.struct = struct;      // 结构类型的强制适配器（path/level/stats/kvlist），供 hud.js 的 fit() 复用
   SBK.parse = parse;          // 覆写 core.js 里那个「未装载」占位实现
