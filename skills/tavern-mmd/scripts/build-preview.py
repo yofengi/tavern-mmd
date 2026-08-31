@@ -1700,7 +1700,7 @@ _SANDBOX_HOOKS = {
     # data-preview-bubble-outline 是预览专属辅助标记（真机无此属性、无那圈描边）。
     # 默认不挂，保持真实外观；外层「气泡辅助线」按钮可临时切换，样式见 SANDBOX_CHROME_CSS。
     # 默认用已实测的 dark 真值；light 令牌仍保留为可切换的 probe-needed 占位。
-    "root": (' data-chat="root" data-theme="dark" data-composer="visible"'
+    "root": (' data-chat="root" data-theme="dark" data-composer="visible" data-chat-state="initial"'
              ' style="--chat-viewport-height:100vh;'
              'background-image:url(\'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22/%3E\');'
              'background-position:center center;background-size:auto 100%;background-repeat:no-repeat"'),
@@ -1851,6 +1851,35 @@ def _sandbox_panel_tools_html():
             '<button class="preview-tool" type="button" title="%s" '
             'onclick="%s.__sbxPanels.fieldState(\'%s\')">%s</button>'
             % (html_mod.escape(tip, quote=True), win, state, lab))
+    parts.append('<span class="preview-tools-label">消息态与长按（实测状态流转）</span>')
+    parts.append(
+        '<button class="preview-tool" type="button" title="初始态：显 first_mes + 开场白选择块'
+        '（[data-probe=prologue]）；发送一条后开场白消失、显用户+AI回复；回溯则重现" '
+        'onclick="%s.__sbxPanels.setChatState(\'initial\')">初始态(含开场白)</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="已发送态：开场白消失，'
+        '显用户消息(2圆钮)+AI回复(3圆钮)" '
+        'onclick="%s.__sbxPanels.setChatState(\'sent\')">已发送态</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="点开场白 chip 的等效动作：'
+        '把示例正文注入输入框（实测点开场白即填入，且不展开输入框）" '
+        'onclick="%s.__sbxPanels.fillInput(\'（示例）来自开场白的注入正文\')">开场白→输入框</button>'
+        % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="点击/聚焦输入框展开（加 is-expanded），'
+        '真机 blur 收回" onclick="%s.__sbxPanels.expandField()">展开输入框</button>' % win)
+    parts.append(
+        '<button class="preview-tool" type="button" title="失焦收回输入框（去 is-expanded）" '
+        'onclick="%s.__sbxPanels.collapseField()">收回输入框</button>' % win)
+    for kind, lab, tip in (
+            ("first", "长按·第一句话", "角色卡「第一句话」长按菜单仅「复制」（实测）"),
+            ("ai", "长按·AI消息", "AI 消息长按：复制/删除/回溯/开启新的故事（实测）"),
+            ("user", "长按·用户消息", "用户消息长按：同 AI 四项（回溯对用户消息也成立；"
+                                   "用户菜单逐字复核标 probe-needed）")):
+        parts.append(
+            '<button class="preview-tool" type="button" title="%s" '
+            'onclick="%s.__sbxPanels.longPress(\'%s\',\'被长按的消息正文（示例）\')">%s</button>'
+            % (html_mod.escape(tip, quote=True), win, kind, lab))
     parts.append('<span class="preview-tools-label">主题</span>')
     for t, lab in (("dark", "深色"), ("light", "浅色")):
         parts.append(
@@ -2765,6 +2794,26 @@ body{display:flex;flex-direction:column;background:#17181a}
 [data-chat="messages"]{flex:1 1 auto;min-height:0;overflow:hidden auto;padding:0;background:transparent;
   -webkit-overflow-scrolling:touch}
 [data-chat="messages"] [data-chat="list"]{display:block;min-height:100%%;padding:0 0 calc(18 * var(--rpx))}
+/* 顶部角色描述块（实测 [data-probe=role-intro]/role-intro-body）：通栏 AI 侧对齐，
+   气泡吃 --chat-bg（与普通气泡同色，靠 opacity .9 与背景略分），对称 16rpx 圆角。 */
+[data-probe="role-intro"]{box-sizing:border-box;width:100%%;padding:calc(23 * var(--rpx)) calc(30 * var(--rpx));
+  flex-direction:column;align-items:flex-start;display:flex}
+[data-probe="role-intro-body"]{box-sizing:border-box;width:fit-content;min-width:0;max-width:100%%;
+  padding:calc(24 * var(--rpx));border-radius:calc(16 * var(--rpx));
+  box-shadow:0 calc(4 * var(--rpx)) calc(4 * var(--rpx)) #00000003;background:var(--chat-bg);opacity:.9;
+  white-space:pre-line;overflow-wrap:anywhere;word-break:break-word;color:var(--chat-text);font-size:15px}
+/* 消息之间的空隙节点（实测存在，无样式承诺，仅占位不塌） */
+[data-chat="list-spacer"]{flex:0 0 auto}
+/* 开场白选择块（实测 [data-probe=prologue]）：仅初始态显示。标题是黑底 pill；
+   每个 chip 吃 --chat-bg + --chat-text（作者全局美化直接波及，与真机一致），可点注入输入框。 */
+[data-probe="prologue"]{padding:0 calc(31 * var(--rpx)) calc(20 * var(--rpx))}
+[data-probe="prologue-title"]{text-align:center;margin:0}
+[data-probe="prologue-title"] span{border-radius:calc(15 * var(--rpx));font-size:calc(28 * var(--rpx));
+  color:#fff;padding:calc(10 * var(--rpx)) calc(20 * var(--rpx));background:rgba(0,0,0,.5);display:inline-block}
+[data-probe="prologue-chip"]{box-sizing:border-box;width:100%%;min-height:calc(90 * var(--rpx));
+  margin-top:calc(20 * var(--rpx));padding:calc(30 * var(--rpx));border-radius:calc(12 * var(--rpx));
+  background:var(--chat-bg);opacity:.9;font-size:calc(26 * var(--rpx));color:var(--chat-text);
+  text-align:left;cursor:pointer;border:0;align-items:center;display:flex}
 [data-chat="message-frame"]{display:flow-root;margin:0}
 [data-chat="message"]{display:flex;flex-direction:column;width:100%%;max-width:100%%;padding:calc(23 * var(--rpx)) calc(30 * var(--rpx));
   margin:0;align-items:flex-start;background:transparent;color:var(--chat-text)}
@@ -2775,7 +2824,27 @@ body{display:flex;flex-direction:column;background:#17181a}
   white-space:pre-line;opacity:.9;word-break:break-word}
 [data-chat="message"][data-from="user"] [data-chat="message-body"]{border-radius:calc(32 * var(--rpx)) calc(32 * var(--rpx)) 0 calc(32 * var(--rpx));
   background:var(--chat-bubble-user-bg)}
-[data-slot="message-extra"],[data-chat="message-actions"]{display:block;width:0;height:0;overflow:hidden}
+/* 头像/昵称：实测 0×0 隐藏（此卡不显示），但节点存在（作者选择器可命中）。 */
+[data-chat="message-name"],[data-chat="message-avatar"]{flex:0 0 auto;width:0;height:0;margin:0;padding:0;overflow:hidden}
+[data-chat="message-time"]{display:none}
+/* message-extra 恒隐藏；message-actions 仅**非空**才显示（实测 :not(:empty)）——
+   角色卡「第一句话」actions 为空 → 整块不占位、无三圆钮，与真机一致。 */
+[data-slot="message-extra"]{display:block;width:0;height:0;overflow:hidden}
+[data-chat="message-actions"]{display:none}
+[data-chat="message-actions"]:not(:empty){margin-top:calc(16 * var(--rpx));gap:calc(16 * var(--rpx));display:flex}
+/* 三圆钮：实测 48rpx 圆、rgba(0,0,0,.5) 底、img 28rpx。用户消息 2 钮（编辑/分享），
+   AI 消息 3 钮（刷新/编辑/分享），第一句话 0 钮。 */
+[data-chat="message-actions"] [data-action]{box-sizing:border-box;width:calc(48 * var(--rpx));
+  height:calc(48 * var(--rpx));cursor:pointer;background:rgba(0,0,0,.5);border:0;border-radius:50%%;
+  justify-content:center;align-items:center;margin:0;padding:0;display:flex;color:#fff}
+[data-chat="message-actions"] [data-action] .pano-glyph{width:calc(28 * var(--rpx));height:calc(28 * var(--rpx));
+  font-size:calc(24 * var(--rpx));display:flex;align-items:center;justify-content:center;line-height:1}
+/* 消息两态互斥（实测状态流转）：初始态显 role-intro? 不——role-intro 两态都在；
+   仅 prologue(initial) 与 用户/AI回复(sent) 互斥。顺序恒为
+   描述→first_mes→prologue(initial)→用户(sent)→AI回复(sent)，隐藏项塌陷，视觉序自然对。
+   默认 data-chat-state=initial（真机新会话首屏即此态：显 first_mes + 开场白选择）。 */
+[data-chat="root"][data-chat-state="sent"] [data-msg-state="initial"]{display:none}
+[data-chat="root"][data-chat-state="initial"] [data-msg-state="sent"]{display:none}
 [data-slot="left"],[data-slot="right"]{position:relative;flex:0 1 auto;min-height:0}
 /* 🚨 底栏吃的是 --chat-composer-bg/-text（不是 --chat-bg/--chat-text）。实测原文如此，
    两者默认同色所以肉眼看不出差别 —— 但作者只改 --chat-composer-bg 时，写错会让预览
@@ -3120,16 +3189,69 @@ SANDBOX_HISTORY_LOADING = (
     '</div>'
 )
 
+# 长按菜单（实测 [data-chat=message-menu]）：选项**随被长按消息的角色而变**（实测 2026-08-31）。
+#   AI 消息：复制（仅文本）/ 删除（从上下文移除）/ 回溯（删本条及下方全部）/ 开启新的故事（保留本条及以上，进新聊天）
+#   用户消息：同 AI 四项（回溯对用户消息同样成立；实测未逐字复核用户菜单，标 probe-needed）
+#   角色卡「第一句话」(msg-id=-1)：仅「复制」
+# 静态 HTML 先放 AI 四项占位；面板脚手架在长按时按 data-msg-kind 重建 .menu-options。
+SANDBOX_MENU_OPTIONS = {
+    "ai": (("copy", "复制", "&#10697;"), ("delete", "删除", "&#10005;"),
+           ("backtrack", "回溯", "&#8630;"), ("newstory", "开启新的故事", "&#10022;")),
+    "user": (("copy", "复制", "&#10697;"), ("delete", "删除", "&#10005;"),
+             ("backtrack", "回溯", "&#8630;"), ("newstory", "开启新的故事", "&#10022;")),
+    "first": (("copy", "复制", "&#10697;"),),
+}
+
+
+def _sandbox_menu_options_html(kind):
+    opts = SANDBOX_MENU_OPTIONS.get(kind, SANDBOX_MENU_OPTIONS["ai"])
+    parts = []
+    for i, (act, label, glyph) in enumerate(opts):
+        if i:
+            parts.append('<div class="menu-sep"></div>')
+        parts.append('<button type="button" data-action="%s">%s<span class="pano-glyph">%s</span></button>'
+                     % (act, label, glyph))
+    return "".join(parts)
+
+
 SANDBOX_MESSAGE_MENU = (
     '<div data-chat="message-menu" data-open="off">'
     '<div class="menu-preview">被长按的消息正文（预览占位）</div>'
-    '<div class="menu-options">'
-    '<button type="button" data-action="copy">复制<span>&#10697;</span></button>'
-    '<div class="menu-sep"></div>'
-    '<button type="button" data-action="edit">编辑<span>&#9998;</span></button>'
-    '<div class="menu-sep"></div>'
-    '<button type="button" data-action="delete">删除<span>&#10005;</span></button>'
-    '</div></div>'
+    '<div class="menu-options">%s</div></div>' % _sandbox_menu_options_html("ai")
+)
+
+
+# 三圆钮：AI 3 钮（刷新/编辑/分享）、用户 2 钮（编辑/分享）、第一句话 0 钮（实测 2026-08-31）。
+SANDBOX_MESSAGE_ACTIONS = {
+    "ai": (("regenerate", "刷新（重新生成）", "&#8635;"),
+           ("edit", "编辑", "&#9998;"), ("share", "分享", "&#10148;")),
+    "user": (("edit", "编辑", "&#9998;"), ("share", "分享", "&#10148;")),
+    "first": (),
+}
+
+
+def _sandbox_actions_html(kind):
+    return "".join('<button type="button" data-action="%s" title="%s"><span class="pano-glyph">%s</span></button>'
+                   % (act, title, glyph)
+                   for act, title, glyph in SANDBOX_MESSAGE_ACTIONS.get(kind, ()))
+
+
+# 顶部角色描述块（实测 [data-probe=role-intro]，通栏、两态都在）。
+SANDBOX_ROLE_INTRO = (
+    '<div data-probe="role-intro" data-from="ai">'
+    '<div data-probe="role-intro-body">角色卡描述（role-intro，通栏，两态都显示）</div>'
+    '</div>'
+)
+
+# 开场白选择块（实测 [data-probe=prologue]，仅初始态）。真机最多 5 句；预览给 3 个可点 chip 示意。
+# 每个 chip 点击后把正文注入输入框（实测行为），并吃 --chat-bg/--chat-text（作者美化直接波及）。
+SANDBOX_PROLOGUE = (
+    '<div data-probe="prologue" data-msg-state="initial">'
+    '<div data-probe="prologue-title"><span>你可以选择开场</span></div>'
+    '<button type="button" data-probe="prologue-chip">开场白示例一（点击填入输入框）</button>'
+    '<button type="button" data-probe="prologue-chip">开场白示例二（点击填入输入框）</button>'
+    '<button type="button" data-probe="prologue-chip">开场白示例三（点击填入输入框）</button>'
+    '</div>'
 )
 
 SANDBOX_ALERT = (
@@ -3184,7 +3306,8 @@ SANDBOX_PANEL_SCAFFOLD = (
     "function all(){return D.querySelectorAll(SEL);}"
     "function closeAll(){var l=all();for(var i=0;i<l.length;i++){"
     "l[i].setAttribute('data-open','off');}"
-    "var tip=D.querySelector('[data-chat=\"assistant-tip\"]');if(tip)tip.remove();}"
+    "var tip=D.querySelector('[data-chat=\"assistant-tip\"]');if(tip)tip.remove();"
+    "if(typeof moreGlyph==='function')moreGlyph(false);}"
     "function nodeOf(name){"
     "return D.querySelector('[data-chat=\"'+name+'\"]')"
     "||D.querySelector('[data-probe=\"'+name+'\"]')"
@@ -3227,11 +3350,15 @@ SANDBOX_PANEL_SCAFFOLD = (
     "for(var j=0;j<sc.length;j++){(function(b){b.onclick=function(ev){"
     "ev.stopPropagation();var a=b.getAttribute('data-action');"
     "if(a==='instructions'){toggleInstr();}else if(map[a]){open(map[a]);}};})(sc[j]);}"
+    # 「+」按钮：点开更多面板时字形换成「−」（实测真机是换 PNG，预览用字形切换等效），
+    # 面板作为 composer 内的后置块把输入行往上顶（几何由 CSS 承担，这里只切 data-open + 字形）。
+    "function moreGlyph(open){var g=D.querySelector('[data-action=\"more\"] .pano-glyph');"
+    "if(g)g.innerHTML=open?'\\u2212':'\\uff0b';}"
     "var more=D.querySelector('[data-action=\"more\"]');"
     "if(more){more.onclick=function(ev){ev.stopPropagation();"
     "var p=D.querySelector('[data-chat=\"more-panel\"]');if(!p)return;"
     "var on=p.getAttribute('data-open')==='on';"
-    "closeAll();if(!on)p.setAttribute('data-open','on');};}"
+    "closeAll();if(!on)p.setAttribute('data-open','on');moreGlyph(!on);};}"
     "var asst=D.querySelector('[data-chat=\"assistant\"]');"
     "if(asst){asst.onclick=function(ev){ev.stopPropagation();assistantTip();};}"
     "var back=D.querySelector('[data-chat=\"instruction-back\"]');"
@@ -3261,10 +3388,72 @@ SANDBOX_PANEL_SCAFFOLD = (
     "field.className=multi?'pano-input-shell composer-field is-multiline'"
     ":'pano-input-shell composer-field';}}"
     "if(ta){ta.addEventListener('input',syncField);}"
+    # 🚨 两态契约（实测 2026-08-31）：**点击/聚焦输入框 → 加 is-expanded 展开**（框变高、+ 钮
+    # 底对齐上移）；**点框外/失焦 → 去 is-expanded 收回**。这是真机行为（focus 派发即展开，
+    # blur 即收回），不是靠 outside-click 监听。注入文字**不自动展开**（实测：点开场白把正文塞进
+    # 输入框后，field 仍是收起态）。展开态优先于 multiline。
+    "function expand(){if(field&&field.className.indexOf('is-expanded')<0){"
+    "field.className='pano-input-shell composer-field is-expanded';}}"
+    "function collapse(){if(field){field.className='pano-input-shell composer-field';syncField();}}"
+    "if(ta){ta.addEventListener('focus',expand);ta.addEventListener('blur',collapse);}"
     "function fieldState(s){if(!field)return null;"
     "field.className='pano-input-shell composer-field'+(s?' '+s:'');return s||'base';}"
     "window.__sbxPanels.fieldState=fieldState;"
+    "window.__sbxPanels.expandField=expand;window.__sbxPanels.collapseField=collapse;"
     "window.__sbxPanels.snack=snack;"
+    # 开场白 chip 点击 → 正文注入输入框（实测行为）。注入用原生 setter + input 事件（与 SDK
+    # composer.set 一致的可观察副作用），**不展开**输入框。
+    "function fillInput(text){if(!ta)return;"
+    "var setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(ta),'value');"
+    "if(setter&&setter.set){setter.set.call(ta,text);}else{ta.value=text;}"
+    "ta.dispatchEvent(new Event('input',{bubbles:true}));syncField();}"
+    "window.__sbxPanels.fillInput=fillInput;"
+    "var chips=D.querySelectorAll('[data-probe=\"prologue-chip\"]');"
+    "for(var pc=0;pc<chips.length;pc++){(function(ch){ch.onclick=function(ev){"
+    "ev.stopPropagation();fillInput(ch.textContent||'');};})(chips[pc]);}"
+    # 消息两态开关（实测状态流转）：发送→sent（开场白消失）；回溯→initial（开场白重现）。
+    "function setChatState(s){var r=D.querySelector('[data-chat=\"root\"]');"
+    "if(!r)return null;var st=(s==='sent')?'sent':'initial';"
+    "r.setAttribute('data-chat-state',st);return st;}"
+    "function toggleChatState(){var r=D.querySelector('[data-chat=\"root\"]');"
+    "if(!r)return null;return setChatState(r.getAttribute('data-chat-state')==='sent'?'initial':'sent');}"
+    "window.__sbxPanels.setChatState=setChatState;"
+    "window.__sbxPanels.toggleChatState=toggleChatState;"
+    # 长按菜单：选项随被长按消息角色变（实测）。ai/user 四项（复制/删除/回溯/开启新的故事），
+    # 「第一句话」(data-msg-kind=first) 仅「复制」。真机是 touch 长按，预览额外暴露 longPress(kind)
+    # 供工具栏与真实长按共用；每条气泡也绑 pointerdown 计时（>420ms 触发），移动/抬起取消。
+    "var MENU={"
+    "ai:[['copy','\\u590d\\u5236','\\u2a19'],['delete','\\u5220\\u9664','\\u2715'],"
+    "['backtrack','\\u56de\\u6eaf','\\u21ba'],['newstory','\\u5f00\\u542f\\u65b0\\u7684\\u6545\\u4e8b','\\u2726']],"
+    "user:[['copy','\\u590d\\u5236','\\u2a19'],['delete','\\u5220\\u9664','\\u2715'],"
+    "['backtrack','\\u56de\\u6eaf','\\u21ba'],['newstory','\\u5f00\\u542f\\u65b0\\u7684\\u6545\\u4e8b','\\u2726']],"
+    "first:[['copy','\\u590d\\u5236','\\u2a19']]};"
+    "function buildMenu(kind,previewText){var m=D.querySelector('[data-chat=\"message-menu\"]');"
+    "if(!m)return false;var opts=MENU[kind]||MENU.ai;"
+    "var pv=m.querySelector('.menu-preview');if(pv)pv.textContent=previewText||'';"
+    "var box=m.querySelector('.menu-options');if(box){box.innerHTML='';"
+    "for(var i=0;i<opts.length;i++){if(i){var sep=D.createElement('div');sep.className='menu-sep';box.appendChild(sep);}"
+    "var b=D.createElement('button');b.type='button';b.setAttribute('data-action',opts[i][0]);"
+    "b.appendChild(D.createTextNode(opts[i][1]));var g=D.createElement('span');g.className='pano-glyph';"
+    "g.textContent=opts[i][2];b.appendChild(g);"
+    "(function(act){b.onclick=function(ev){ev.stopPropagation();closeAll();"
+    "snack(act+'\\uff1a\\u9884\\u89c8\\u4e0d\\u6a21\\u62df\\u771f\\u5b9e\\u526f\\u4f5c\\u7528');};})(opts[i][0]);"
+    "box.appendChild(b);}}"
+    "closeAll();m.setAttribute('data-open','on');return true;}"
+    "function longPress(kind,text){return buildMenu(kind||'ai',text||'');}"
+    "window.__sbxPanels.longPress=longPress;"
+    "var frames=D.querySelectorAll('[data-chat=\"message\"]');"
+    "for(var mf=0;mf<frames.length;mf++){(function(fr){var tm=null;"
+    "var kind=fr.getAttribute('data-msg-kind')||(fr.getAttribute('data-from')==='user'?'user':'ai');"
+    "var bodyEl=fr.querySelector('[data-chat=\"message-body\"]');"
+    "var txt=bodyEl?(bodyEl.textContent||''):'';"
+    "fr.addEventListener('pointerdown',function(){tm=setTimeout(function(){longPress(kind,txt);},420);});"
+    "var cancel=function(){if(tm){clearTimeout(tm);tm=null;}};"
+    "fr.addEventListener('pointerup',cancel);fr.addEventListener('pointermove',cancel);"
+    "fr.addEventListener('pointercancel',cancel);})(frames[mf]);}"
+    # 长按菜单点遮罩空白处关闭（实测 backdrop 可点关）
+    "var mm=D.querySelector('[data-chat=\"message-menu\"]');"
+    "if(mm){mm.addEventListener('click',function(ev){if(ev.target===mm)closeAll();});}"
     "})()"
     '</script>'
 )
@@ -3420,11 +3609,37 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
             '%(statusbar)s'
             '<main class="chat chat-bg pano-chat" id="pano-chat"%(messages)s>'
             '<div class="chat-body"%(list)s>'
-            '<div class="item" data-message-role="ai"%(frame)s><article class="touch-scope"%(msg_ai)s>'
-            '<div class="content left"%(body)s>%(tested)s</div>%(message_extra)s%(message_actions)s'
+            # 顶部角色描述块（两态都显示）
+            '%(roleintro)s'
+            '<div data-chat="list-spacer"></div>'
+            # first_mes（角色卡「第一句话」= beginning 字段的实机落点）：AI 气泡、msg-id=-1、
+            # **0 圆钮**（message-actions 空 → :not(:empty) 不命中 → 整块不显示），长按仅「复制」。
+            # 被测正文（作者正则/脚本产物）渲染在此，两态都可见。
+            '<div class="item" data-message-role="ai"%(frame)s>'
+            '<article class="touch-scope" data-chat="message" data-from="ai" data-state="done" '
+            'data-msg-id="-1" data-msg-kind="first">'
+            '<div data-chat="message-avatar"></div><div data-chat="message-name"></div>'
+            '<div class="content left"%(body)s>%(tested)s</div>'
+            '<time data-chat="message-time"></time>'
+            '<div data-chat="message-actions"></div>%(message_extra)s'
             '</article></div>'
-            '<div class="item" data-message-role="user"%(frame)s><article class="touch-scope"%(msg_user)s>'
-            '<div class="content right"%(body)s>用户示例消息</div>%(message_extra)s%(message_actions)s'
+            # 开场白选择块（仅初始态）：可点 chip → 正文注入输入框
+            '%(prologue)s'
+            # 用户消息（仅发送后态）：2 圆钮（编辑/分享）
+            '<div class="item" data-message-role="user" data-msg-state="sent"%(frame)s>'
+            '<article class="touch-scope"%(msg_user)s data-msg-kind="user">'
+            '<div data-chat="message-avatar"></div><div data-chat="message-name"></div>'
+            '<div class="content right"%(body)s>用户示例消息</div>'
+            '<time data-chat="message-time"></time>'
+            '<div data-chat="message-actions">%(actuser)s</div>%(message_extra)s'
+            '</article></div>'
+            # AI 回复（仅发送后态）：3 圆钮（刷新/编辑/分享）
+            '<div class="item" data-message-role="ai" data-msg-state="sent"%(frame)s>'
+            '<article class="touch-scope"%(msg_ai)s data-msg-kind="ai">'
+            '<div data-chat="message-avatar"></div><div data-chat="message-name"></div>'
+            '<div class="content left"%(body)s>AI 回复示例（发送后出现；作者正则/脚本亦渲染于此）</div>'
+            '<time data-chat="message-time"></time>'
+            '<div data-chat="message-actions">%(actai)s</div>%(message_extra)s'
             '</article></div>'
             '</div></main>'
             '%(summarybubble)s'
@@ -3488,6 +3703,8 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
         ) % dict(hooks, runtime=runtime, tested=tested_content,
                  statusbar=statusbar_node, hoisted=hoisted,
                  sendscaffold=send_scaffold,
+                 roleintro=SANDBOX_ROLE_INTRO, prologue=SANDBOX_PROLOGUE,
+                 actuser=_sandbox_actions_html("user"), actai=_sandbox_actions_html("ai"),
                  panelscaffold=SANDBOX_PANEL_SCAFFOLD,
                  morepanel=SANDBOX_MORE_PANEL,
                  composertools=SANDBOX_COMPOSER_TOOLS,

@@ -503,3 +503,111 @@ div#app[data-v-app]
 | `--chat-more-item-bg` | `var(--chat-modal-surface)` |
 
 展开成字面量后，作者改 `--chat-bg` / `--chat-modal-surface` 真机跟随、预览不跟随。
+
+---
+
+## 10. 补充实测（2026-08-31）：消息子结构 / 开场白 / 输入框两态 / 长按菜单
+
+依据：真机聊天页 `h5.aitchat.org/#/pages/chat/host?roleId=64257`（卡片 iframe
+`c64257.sbx.aitchat.org`）Playwright 进 frame 读 CSSOM + 几何 + 派 focus/blur/click 实测。
+全景预览 `assemble_panorama` 已按本节复刻，并有 `test_build_preview.py` 断言与浏览器回归。
+
+### 10.1 平台 data 钩子全表（从 iframe CSSOM + DOM 抽取，59 CSS / 34 DOM）
+
+旧契约缺的钩子（本次补齐进预览）：
+
+- **`[data-probe="role-intro"]` / `role-intro-body`**：顶部角色描述块，通栏、AI 侧对齐，
+  body 吃 `--chat-bg` + `opacity:.9` + 对称 `16rpx` 圆角。两态都显示。
+- **`[data-probe="prologue"]` / `prologue-title` / `prologue-chip`**：开场白选择块（**仅初始态**）。
+  title 是黑底 pill（`rgba(0,0,0,.5)`，白字），每个 chip `min-height:90rpx`、吃
+  `--chat-bg`+`--chat-text`（**作者全局美化直接波及**）、`cursor:pointer`、点击注入输入框。
+- **`[data-chat="message-avatar"]` / `message-name`**：实测 `0×0` 隐藏（此卡不显示），节点仍在。
+- **`[data-chat="message-time"]`**：消息时间戳节点。
+- **`[data-chat="list-spacer"]`**：消息间空隙节点。
+- **`[data-chat="author-css"]`**：作者 CSS 挂载点。**`[data-slot="sdk-debug"]`**：SDK 调试槽。
+- 其余分享长图族：`share-shot-header/-header-row/-intro/-footer/-footer-url`、
+  `share-pick-cancel/-switch/-toggle`、`assistant-candidate-edit`、`assistant-tips`（复数）。
+
+### 10.2 每条消息子结构（实测顺序）
+
+```
+[data-chat=message-frame]              ← .item 外框
+  article[data-chat=message][data-from=ai|user][data-msg-id][data-state=done]
+    [data-chat=message-avatar]         0×0
+    [data-chat=message-name]           0×0
+    [data-chat=message-body]           正文（作者正则/脚本渲染于此）
+    time[data-chat=message-time]
+    [data-chat=message-actions]        三圆钮，:not(:empty) 才显示
+    [data-slot=message-extra]          恒隐藏
+```
+
+### 10.3 三圆钮随角色变（**头号新增**）
+
+`[data-chat="message-actions"]:not(:empty){margin-top:16rpx;gap:16rpx;display:flex}`
+钮：`[data-action]{width:48rpx;height:48rpx;background:rgba(0,0,0,.5);border-radius:50%;
+display:flex}`，img `28rpx`。
+
+| 消息 | `data-msg-id` | 圆钮 | `data-action` |
+|---|---|---|---|
+| 角色卡「第一句话」 | `-1` | **0**（actions 空 → 整块不显示） | — |
+| 用户消息 | 正数 | **2** | `edit` / `share` |
+| AI 消息 | 正数 | **3** | `regenerate` / `edit` / `share` |
+
+🚨 `:not(:empty)` 是「第一句话无钮」的实现关键：actions 子节点为空则整块 `display:none`。
+
+### 10.4 输入框两态：focus 展开 / blur 收回（实测派事件复核）
+
+真机只有**一个** `textarea[data-chat=input]`（`maxlength:2000`），两态靠 `.composer-field`
+是否带 **`is-expanded`** 切换：
+
+- **点击 / 聚焦输入框** → `.composer-field` 加 `is-expanded`：框 `h 43→118px`、整体上移，
+  `+`（more）按钮 `h 26→40px` 且**底对齐**。派 `focus` 事件即触发（实测 A/B）。
+- **点框外 / 失焦** → 去 `is-expanded`，框收回 `h 118→43`、composer `h→99`。是 **blur 驱动**，
+  不是 outside-click 监听（与旧聊天页 textarea 同源结论）。
+- **注入文字不自动展开**：实测把正文塞进 `input` 并派 `input` 事件后，`.composer-field` 仍是
+  收起态（`composer-field`，无 `is-expanded`）。点开场白注入即走此路径。
+
+`is-expanded` 转 grid 三区（见 §8.2），`is-multiline` 是内容多行的另一态；展开优先于多行。
+
+### 10.5 「+」更多面板：字形 +⇄− + 把输入行顶上去（实测几何）
+
+点 `[data-action="more"]` → `[data-chat="more-panel"]`（v-if，按需建）出现在 `.composer-field`
+**下方**，composer `h 99→428px`（+330 面板），输入行被**顶上去**（field `y 793→463`）。
+`+` 按钮的 `<img>` **换图**（`ico...` → 另一 base64），视觉即 `+ → −`；再点复位。
+预览用**字形切换**（`＋`⇄`−`）等效复刻（真机是换 PNG，预览无 PNG 资产）。
+按钮本身始终在输入行右侧（不会真的移到 field 下方），面板顶起靠 composer flex 高度增长。
+
+### 10.6 长按菜单：选项随角色变（实测 `message-menu` CSS + 用户口述行为）
+
+`[data-chat="message-menu"]` z-8200 + `backdrop-filter:blur(5px)`，内层 `.menu-preview`（被长按
+正文）+ `.menu-options`（选项，吃 `--chat-modal-surface`/`--chat-modal-text`）。选项集：
+
+| 长按对象 | 菜单项 |
+|---|---|
+| AI 消息 | 复制（仅文本）/ 删除（从上下文移除）/ 回溯（删本条及下方全部）/ 开启新的故事（保留本条及以上，进新聊天） |
+| 用户消息 | 同 AI 四项（回溯对用户消息同样成立）※ 用户菜单逐字复核 **probe-needed** |
+| 角色卡「第一句话」 | **仅**「复制」 |
+
+⚠️ 合成 `TouchEvent` 在 IAB 里**不触发** Vue 长按 handler（真机是原生 touch 长按）。预览改
+用 `pointerdown` 计时（>420ms）触发，并暴露 `__sbxPanels.longPress(kind,text)` 供工具栏调。
+上表 AI 四项与「第一句话」仅复制来自用户口述 + `message-menu` CSS 佐证；用户消息四项与各项
+真实副作用（尤其回溯删除范围）**未在真机逐一点击复核**，标 `probe-needed`。
+
+### 10.7 消息布局状态机（实测状态流转，用户口述 + DOM 佐证）
+
+```
+初始态(data-chat-state=initial)：  描述 → 第一句话 → 开场白选择块(prologue)
+发送一条后(sent)：                 描述 → 第一句话 → 用户消息 → AI回复   （开场白消失）
+回溯：                            回到 initial（开场白重现）
+```
+
+DOM 顺序恒为 `role-intro → first_mes → prologue(initial) → 用户(sent) → AI(sent)`，
+`prologue` 带 `data-msg-state="initial"`、用户/AI 带 `data-msg-state="sent"`，
+靠 `[data-chat="root"][data-chat-state=*]` 切 `display` 互斥，隐藏项塌陷、视觉序天然对。
+预览默认 `initial`（真机新会话首屏即此态）。追加动态气泡（模拟器）自动翻 `sent`。
+
+### 10.8 编辑页更新（实测 `role/create?id=...&r=2`）
+
+功能栏（statusbar）新增勾选项 **「降低层级，勾选后层级位于输入框下方」**：功能栏内容可被正则
+匹配替换、替换后层级为页面最高、不传给 AI；勾选后层级降到**输入框之下**。其余字段限额复核无
+变化（statusbar 0/200、beginning 0/4000、personality 0/10000、mes_example 0/1000、开场白 max 5）。

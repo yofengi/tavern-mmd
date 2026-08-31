@@ -285,23 +285,53 @@
     touch.setAttribute('data-from', role);
     touch.setAttribute('data-state', state || 'done');
     touch.setAttribute('data-msg-id', 'sim-' + msgSeq);
+    // 头像/昵称：真机存在但 0×0 隐藏，动态气泡也建出来（作者选择器可命中）。
+    var avatar = D.createElement('div');
+    avatar.setAttribute('data-chat', 'message-avatar');
+    var name = D.createElement('div');
+    name.setAttribute('data-chat', 'message-name');
     var body = D.createElement('div');
     body.className = 'content ' + (role === 'user' ? 'right' : 'left');
     body.setAttribute('data-chat', 'message-body');
+    var time = D.createElement('time');
+    time.setAttribute('data-chat', 'message-time');
     var extra = D.createElement('div');
     extra.setAttribute('data-slot', 'message-extra');
+    // 三圆钮随角色变（实测 2026-08-31）：ai 3 钮 / user 2 钮 / first 0 钮。
+    // 动态追加的气泡不是「第一句话」，故按 ai|user 给钮。
     var actions = D.createElement('div');
     actions.setAttribute('data-chat', 'message-actions');
+    var acts = role === 'user'
+      ? [['edit', '\u270E'], ['share', '\u27A4']]
+      : [['regenerate', '\u21BB'], ['edit', '\u270E'], ['share', '\u27A4']];
+    for (var ai = 0; ai < acts.length; ai++) {
+      var ab = D.createElement('button');
+      ab.type = 'button';
+      ab.setAttribute('data-action', acts[ai][0]);
+      var gl = D.createElement('span');
+      gl.className = 'pano-glyph';
+      gl.textContent = acts[ai][1];
+      ab.appendChild(gl);
+      actions.appendChild(ab);
+    }
+    touch.setAttribute('data-msg-kind', role === 'user' ? 'user' : 'ai');
     if (role === 'ai' && typeof renderedHtml === 'string' && renderedHtml) {
       body.innerHTML = renderedHtml;              // 仅预览器传入的离线规则结果；事件 payload 仍保留原文
     } else {
       body.textContent = String(text);
     }
+    // 子节点顺序对齐真机：avatar → name → body → time → actions → extra
+    touch.appendChild(avatar);
+    touch.appendChild(name);
     touch.appendChild(body);
-    touch.appendChild(extra);
+    touch.appendChild(time);
     touch.appendChild(actions);
+    touch.appendChild(extra);
     item.appendChild(touch);
     list.appendChild(item);
+    // 追加动态气泡即进入「已发送」态：隐藏开场白选择块（与真机一致）。
+    var rootEl = nq('[data-chat="root"]');
+    if (rootEl) { rootEl.setAttribute('data-chat-state', 'sent'); }
     var pane = nq('[data-chat="messages"]');
     if (pane) { pane.scrollTop = pane.scrollHeight; }
     return touch;

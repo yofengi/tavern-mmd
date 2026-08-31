@@ -1811,6 +1811,136 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertIn('[data-chat="more-panel"] > button', chrome)
         self.assertIn("function snack(", chrome)
 
+    def test_sandbox_role_intro_and_prologue_blocks(self):
+        """实测 2026-08-31：顶部 [data-probe=role-intro] 通栏描述块（两态都在）；
+        开场白选择块 [data-probe=prologue]（仅初始态）= prologue-title pill + N×prologue-chip，
+        chip 吃 --chat-bg/--chat-text（作者全局美化直接波及，与真机一致）、可点注入输入框。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn('data-probe="role-intro"', chrome)
+        self.assertIn('data-probe="role-intro-body"', chrome)
+        self.assertIn('data-probe="prologue"', chrome)
+        self.assertIn('data-probe="prologue-title"', chrome)
+        self.assertIn('data-probe="prologue-chip"', chrome)
+        # 开场白块仅初始态（带 data-msg-state=initial）
+        prologue = chrome.split('data-probe="prologue"', 1)[1].split("</div>", 1)[0]
+        self.assertIn('data-msg-state="initial"', prologue)
+        css = bp._sandbox_chrome_css()
+        # chip/role-intro-body 吃语义令牌，作者换肤/全局美化能波及
+        self.assertIn('[data-probe="prologue-chip"]{', css)
+        chip_rule = css.split('[data-probe="prologue-chip"]{', 1)[1].split("}", 1)[0]
+        self.assertIn("background:var(--chat-bg)", chip_rule)
+        self.assertIn("color:var(--chat-text)", chip_rule)
+        intro_rule = css.split('[data-probe="role-intro-body"]{', 1)[1].split("}", 1)[0]
+        self.assertIn("background:var(--chat-bg)", intro_rule)
+
+    def test_sandbox_per_role_message_actions(self):
+        """实测 2026-08-31：AI 消息 3 圆钮（刷新/编辑/分享）、用户 2 钮（编辑/分享）、
+        角色卡「第一句话」0 钮（message-actions 空 → :not(:empty) 不命中 → 整块不显示）。
+        圆钮 48rpx、rgba(0,0,0,.5) 底、img/glyph 28rpx。"""
+        self.assertEqual([a for a, _t, _g in bp.SANDBOX_MESSAGE_ACTIONS["ai"]],
+                         ["regenerate", "edit", "share"])
+        self.assertEqual([a for a, _t, _g in bp.SANDBOX_MESSAGE_ACTIONS["user"]],
+                         ["edit", "share"])
+        self.assertEqual(bp.SANDBOX_MESSAGE_ACTIONS["first"], ())
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        # first_mes 气泡：actions 为空
+        first = chrome.split('data-msg-kind="first"', 1)[1].split("</article>", 1)[0]
+        self.assertIn('<div data-chat="message-actions"></div>', first)
+        # user 气泡：2 钮
+        user = chrome.split('data-msg-kind="user"', 1)[1].split("</article>", 1)[0]
+        self.assertIn('data-action="edit"', user)
+        self.assertIn('data-action="share"', user)
+        self.assertNotIn('data-action="regenerate"', user)
+        # ai 回复气泡：3 钮
+        ai = chrome.split('data-msg-kind="ai"', 1)[1].split("</article>", 1)[0]
+        self.assertIn('data-action="regenerate"', ai)
+        self.assertIn('data-action="edit"', ai)
+        self.assertIn('data-action="share"', ai)
+        # CSS：:not(:empty) 才显示 + 48rpx 圆钮
+        css = bp._sandbox_chrome_css()
+        self.assertIn('[data-chat="message-actions"]{display:none}', css)
+        self.assertIn('[data-chat="message-actions"]:not(:empty){', css)
+        actbtn = css.split('[data-chat="message-actions"] [data-action]{', 1)[1].split("}", 1)[0]
+        self.assertIn("width:calc(48 * var(--rpx))", actbtn)
+        self.assertIn("border-radius:50%", actbtn)
+
+    def test_sandbox_input_focus_blur_two_state(self):
+        """🚨 实测 2026-08-31 两态契约：点击/聚焦输入框 → 加 is-expanded 展开；
+        点框外/失焦 → 去 is-expanded 收回（真机是 focus/blur 驱动，不是 outside-click 监听）。
+        注入文字不自动展开（fillInput 不加 is-expanded）。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn("addEventListener('focus',expand)", chrome)
+        self.assertIn("addEventListener('blur',collapse)", chrome)
+        self.assertIn("function expand()", chrome)
+        self.assertIn("function collapse()", chrome)
+        # fillInput 注入正文但**不**含 is-expanded（不自动展开）
+        fill = chrome.split("function fillInput(", 1)[1].split("window.__sbxPanels.fillInput", 1)[0]
+        self.assertNotIn("is-expanded", fill)
+
+    def test_sandbox_more_button_plus_minus_swap(self):
+        """实测：点开更多面板时「＋」字形换「−」，关闭复位。面板把输入行往上顶靠 CSS。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn("function moreGlyph(", chrome)
+        self.assertIn("moreGlyph(!on)", chrome)
+        # 关闭一切时复位为 ＋
+        self.assertIn("if(typeof moreGlyph==='function')moreGlyph(false)", chrome)
+
+    def test_sandbox_prologue_click_fills_input(self):
+        """实测：点开场白 chip → 正文注入输入框（原生 setter + input 事件）。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn('data-probe="prologue-chip"', chrome)
+        self.assertIn("function fillInput(", chrome)
+        self.assertIn("ch.onclick=function", chrome)
+        self.assertIn("fillInput(ch.textContent", chrome)
+
+    def test_sandbox_initial_sent_state_machine(self):
+        """实测状态流转：默认 initial（显 first_mes + 开场白）；发送→sent（开场白消失、
+        显用户+AI回复）；回溯→initial（开场白重现）。CSS 两态互斥切 display。"""
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        # 默认初始态
+        self.assertIn('data-chat-state="initial"', chrome)
+        css = bp._sandbox_chrome_css()
+        self.assertIn('[data-chat="root"][data-chat-state="sent"] [data-msg-state="initial"]{display:none}', css)
+        self.assertIn('[data-chat="root"][data-chat-state="initial"] [data-msg-state="sent"]{display:none}', css)
+        # 状态切换 API + 发送脚手架进入 sent
+        self.assertIn("function setChatState(", chrome)
+        self.assertIn("window.__sbxPanels.setChatState", chrome)
+        # DOM 序：first_mes(无 state) → prologue(initial) → 用户/AI(sent)。
+        # 只在消息区 HTML 里比（prologue 令牌在 CSS <style> 里也出现，会误命中在前）。
+        body = chrome.split('class="chat-body"', 1)[1].split("</main>", 1)[0]
+        first_at = body.index('data-msg-kind="first"')
+        prologue_at = body.index('data-probe="prologue"')
+        user_at = body.index('data-msg-kind="user"')
+        self.assertLess(first_at, prologue_at)
+        self.assertLess(prologue_at, user_at)
+
+    def test_sandbox_longpress_menu_variants_per_role(self):
+        """实测 2026-08-31：长按菜单随角色变。AI/用户：复制/删除/回溯/开启新的故事；
+        「第一句话」仅复制。气泡绑 pointerdown 计时长按，menu 按 data-msg-kind 重建选项。"""
+        self.assertEqual([a for a, _l, _g in bp.SANDBOX_MENU_OPTIONS["ai"]],
+                         ["copy", "delete", "backtrack", "newstory"])
+        self.assertEqual([a for a, _l, _g in bp.SANDBOX_MENU_OPTIONS["first"]], ["copy"])
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn("function longPress(", chrome)
+        self.assertIn("function buildMenu(", chrome)
+        # 气泡绑 pointerdown 长按计时
+        self.assertIn("addEventListener('pointerdown'", chrome)
+        self.assertIn("data-msg-kind", chrome)
+        # 回溯/新故事的中文标签在 MENU 表里
+        self.assertIn("\\u56de\\u6eaf", chrome)          # 回溯
+        self.assertIn("\\u5f00\\u542f\\u65b0\\u7684\\u6545\\u4e8b", chrome)  # 开启新的故事
+
+    def test_sandbox_sim_bubble_has_avatar_name_time_and_role_buttons(self):
+        """动态追加的气泡也建 avatar/name/time + 按角色给圆钮，并翻转 root 到 sent 态。"""
+        sim = bp.load_sandbox_sim_source()
+        self.assertIn("avatar.setAttribute('data-chat', 'message-avatar')", sim)
+        self.assertIn("name.setAttribute('data-chat', 'message-name')", sim)
+        self.assertIn("time.setAttribute('data-chat', 'message-time')", sim)
+        self.assertIn("role === 'user'", sim)
+        self.assertIn("['regenerate'", sim)
+        self.assertIn("data-msg-kind", sim)
+        self.assertIn("rootEl.setAttribute('data-chat-state', 'sent')", sim)
+
     def test_host_popups_are_marked_unstylable_not_faked(self):
         """🚨 宿主页那 5 个弹窗渲染在 h5 域的 uni-app 里，跨源 iframe 之外。
 
