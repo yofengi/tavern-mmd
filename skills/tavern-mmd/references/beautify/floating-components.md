@@ -4,7 +4,7 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 
 本文档给出**两个平台都验证过**的认证写法，供后续直接调用/改配色。预览验证用 `scripts/build-preview.py`（悬浮组件会被自动归入"悬浮组件预览"面板，全景预览里与其他组件组合显示）。
 
-> **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（无空白条）；代价：多一层 `attachShadow` 包装。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 双引号包裹、内部全单引号、禁内部裸双引号。本文下方 light DOM 写法仍是跨版本基线；shadow 变体用于需要强隔离的组件。全局主题 CSS 本身不可 shadow 化，因为它必须作用于平台 light DOM。
+> **Shadow DOM 变体（2026-06-17 当前 MMD 实测可行，可选增强）**：可把组件 UI 包进 shadow root 拿样式隔离。实测靶 10-11 全绿：**host 挂 `document.body` + shadow 内 `position:fixed` + `z-index:2147483647` 浮在消息之上 + 拖动 + `getElementById` 单例防重**全部成立。收益：组件 CSS 不外泄污染平台、平台强制染色渗不进来、不过 markdown 管线（`*星号*` 不被吃）；代价：多一层 `attachShadow` 包装。⚠️ **换行空白条不在收益里**——`white-space` 是继承属性会穿过 shadow 边界（2026-08-28 实测），shadow CSS 仍须带 `:host{white-space:normal}`，见 `../platforms/mmd.md` §13。**关键：host 必须 `appendChild` 到 `document.body`**（不能留消息气泡内，否则被气泡 stacking context 困住、被新消息盖住）。写法：`var wrap=document.createElement('div');wrap.id='z-fab-wrap';var sr=wrap.attachShadow({mode:'open'});`（CSS+按钮 createElement 进 sr）`document.body.appendChild(wrap);`。**铁律照旧**：onerror 属性用双引号包裹时内部全单引号、禁内部裸双引号（属性改用单引号包裹则内部可写双引号）。本文下方 light DOM 写法是当前 MMD 与本地酒馆的基线；shadow 变体用于需要强隔离的组件。全局主题 CSS 本身不可 shadow 化，因为它必须作用于平台 light DOM。**这两种写法都不适用于沙盒模式**（见下方平台红线表）。
 
 ### 主题切换 / 设置 UI 的职责边界
 
@@ -16,17 +16,25 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 
 ## 平台红线（决定写法）
 
-| 限制 | oldmmd | mmd（当前） |
-|---|---|---|
-| `<script>` | 剥离不执行 → **必须 img onerror 点火** | 可用，但 img onerror 仍是跨版本回退首选 |
-| `style.cssText=` | 报 Unexpected identifier → **禁用** | 仅告警 |
-| `el.innerHTML=` | 易被破坏 → **禁用** | 仅告警 |
-| `onerror` 多行 | CSP 破坏多行 → **必须单行** | 可多行 |
-| 内联 `onclick` 写 DOM 赋值 | 单行可用 | **会被净化** → 用 `el.onclick=function(){}` |
-| `el.style.left/top=`（单属性） | ✅ 允许 | ✅ 允许 |
-| `classList.add/remove/toggle` | ✅ 允许 | ✅ 允许 |
+| 限制 | 当前 MMD `/mmd` | 本地酒馆 `/st` | MMD沙盒模式 `/mmdsandbox` |
+|---|---|---|---|
+| `<script>` | 可用（document-level 一次性 bootstrap）；per-message 渲染仍须 img onerror | 可用 | **一等公民**，装卡即抽出、整卡跑一次 |
+| `img onerror` 点火器 | ✅ per-message 唯一可靠载体 | ✅ 可用 | 🚨 **官方明令禁止**（teapot 系） |
+| `style.cssText=` | 仅告警 | ✅ 允许 | 【待验证】官方未提及；按纯 DOM API 保守处理 |
+| `el.innerHTML=` | 仅告警 | ✅ 允许 | 【待验证】官方未提及；按纯 DOM API 保守处理 |
+| `onerror` 多行 | ✅ 可多行（属性用双引号包裹时内部禁裸双引号） | ✅ 可多行 | 不适用（onerror 被禁） |
+| 内联 `onclick` | **只放行干净调用/引用表达式**，禁代码字面量与直接 DOM 赋值 → 用 `el.onclick=function(){}` | ✅ 允许 | ✅ 普通标签 `onclick="tap()"` 可用（顶层 `function` 挂 `window`）；**`svg` 内部 `onclick` 会被删** |
+| 作者自写 `data-*` | ✅ 允许（轻主板 `data-s` 就靠它） | ✅ 允许 | 🚨 **会被净化删掉** → 用 `class` 或 `id` |
+| `el.style.left/top=`（单属性） | ✅ 允许 | ✅ 允许 | ✅ 允许（算出来的值写内联 `style`） |
+| `classList.add/remove/toggle` | ✅ 允许 | ✅ 允许 | ✅ 允许 |
+| 长期悬浮 UI 挂哪 | `document.body.appendChild` + `position:fixed` | 同左 | 🚨 **挂舞台 `sdk.stage`**，不能挂气泡（气泡滚出屏幕即销毁） |
+| z-index | `9999` 级即可 | 无约束 | **作者安全带 3500–7999**（手册说的「作者段 1000–1999」已被实测推翻：用 1000–1999 会盖住 header 和输入框）；避开舞台 `full` 的 3000 与平台弹窗的 8000+ |
 
-**统一结论（两版通用的最稳写法）**：
+> 🚨 **沙盒模式不要用本文档的写法。** 本文档全部组件的地基是「`img onerror` 点火器 + `createElement` 注入 `document.body`」，这在沙盒模式里两头都不成立：点火器被官方禁，长期浮层要挂舞台而不是 body。沙盒模式做悬浮 UI 的正确形状：专开一条规则只放 `<script>` → `sdk.stage.open('content')` + `sdk.stage.el()` 里装配面板（关掉再开内容还在，不必重建）→ 气泡内的按钮用 `sdk.on('message:mount')` 绑事件。规范见 `../platforms/mmd-sandbox.md` §4.6（舞台）、§5.2（净化与白名单）、§6.3（z-index）。**本文档的交互设计（拖动、菜单翻转、防冒泡、单例防重）思路可参考，载体与挂载点必须整体重写。**
+>
+> **而这些载体活儿已经有人替你干了**：沙盒模式做悬浮组件/状态栏/美化请直接用现成基座 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`），方法论见 `sandbox-kit.md`。`SBK.ui.panel` 就是浮层 / 抽屉 / 可拖动悬浮球，`SBK.ui.stage` 是舞台面板，挂载点、z-index 安全带（3500–7999）、层叠上下文陷阱、`stage.visible()` 判开关这些坑都已经收敛在里面 —— 你搬过去的是**交互设计决策**（浮球停靠、菜单翻转方向、点击穿透边界），不是载体代码。
+
+**统一结论（当前 MMD 与本地酒馆通用的最稳写法）**：
 1. 静态外观（尺寸/配色/圆角/阴影/默认位置）→ **预定义 CSS 类**（放进美化 `<style>`），不用 `cssText`。
 2. 开关状态（菜单显隐、抽屉滑入滑出）→ **`classList.toggle('z-open')`** + CSS 类里写 `.z-open{...}`，不用改 `style.display`/`style.transform` 字符串。
 3. 拖动位置、菜单翻转坐标这类**连续数值** → 用**单属性** `el.style.left=x+'px'`（validate 只拦 `cssText`/`innerHTML`，放行单属性）。
@@ -40,6 +48,7 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
 ## 一、可拖动悬浮球 + 跟随菜单（核心组件）
 
 要点（用户实测要求）：
+- **统一用 Pointer Events**：`pointerdown/pointermove/pointerup/pointercancel` + `setPointerCapture` 一条指针流处理鼠标与触摸，**不要再 `mousedown`+`touchstart` 双绑**——移动端双绑会被浏览器补发的模拟鼠标事件二次触发，菜单闪开即关（见「陷阱 5」）。
 - **本体可拖动**：按下→移动改 `style.left/top`，移动超过 3px 记为"拖动"。
 - **未拖动的点击 = 切换菜单**；拖动则不触发菜单（用 `moved` 标志区分）。
 - **菜单跟随本体**：拖动时每帧重算菜单位置（`reposition()`），菜单粘在球旁边。
@@ -80,7 +89,7 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
            if(a){a.value=acts[idx];a.dispatchEvent(new Event('input',{bubbles:true}));}}
       menu.classList.remove('z-open');};
     menu.appendChild(mi);})(i);}
-  var moved=false,sx=0,sy=0,ox=0,oy=0,GAP=8;
+  var moved=false,sx=0,sy=0,ox=0,oy=0,GAP=8,on=false,pid=null;
   var reposition=function(){                                  // 菜单跟随本体 + 翻转避裁
     if(!menu.classList.contains('z-open'))return;
     var r=fab.getBoundingClientRect(),mw=menu.offsetWidth,mh=menu.offsetHeight;
@@ -94,17 +103,19 @@ MMD 真正的悬浮组件是**运行时注入的可交互元素**：悬浮球是
     var nx=ox+cx-sx,ny=oy+cy-sy,vw=window.innerWidth,vh=window.innerHeight,bw=fab.offsetWidth,bh=fab.offsetHeight;
     nx=Math.max(0,Math.min(vw-bw,nx));ny=Math.max(0,Math.min(vh-bh,ny));   // 本体夹取进视口
     fab.style.left=nx+'px';fab.style.top=ny+'px';fab.style.bottom='auto';reposition();};
-  var mm=function(ev){onMove(ev.clientX,ev.clientY);};
-  var tm=function(ev){var t=ev.touches[0];onMove(t.clientX,t.clientY);ev.preventDefault();};
-  var up=function(){document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',up);
-    document.removeEventListener('touchmove',tm);document.removeEventListener('touchend',up);fab.style.cursor='grab';
+  var down=function(cx,cy){moved=false;sx=cx;sy=cy;var r=fab.getBoundingClientRect();ox=r.left;oy=r.top;fab.style.cursor='grabbing';};
+  var up=function(){if(!on)return;on=false;pid=null;fab.style.cursor='grab';
     if(!moved){if(menu.classList.contains('z-open')){menu.classList.remove('z-open');}
       else{menu.classList.add('z-open');reposition();}}};   // 未拖动=切换菜单
-  var down=function(cx,cy){moved=false;sx=cx;sy=cy;var r=fab.getBoundingClientRect();ox=r.left;oy=r.top;fab.style.cursor='grabbing';};
-  fab.addEventListener('mousedown',function(ev){ev.stopPropagation();down(ev.clientX,ev.clientY);
-    document.addEventListener('mousemove',mm);document.addEventListener('mouseup',up);});
-  fab.addEventListener('touchstart',function(ev){ev.stopPropagation();var t=ev.touches[0];down(t.clientX,t.clientY);
-    document.addEventListener('touchmove',tm,{passive:false});document.addEventListener('touchend',up);});
+  // 统一 Pointer Events：一条指针流覆盖鼠标+触摸，浏览器不再补发模拟鼠标（见陷阱5）
+  fab.addEventListener('pointerdown',function(ev){ev.stopPropagation();on=true;pid=ev.pointerId;
+    try{fab.setPointerCapture(pid);}catch(er){}down(ev.clientX,ev.clientY);});
+  fab.addEventListener('pointermove',function(ev){if(!on||ev.pointerId!==pid)return;onMove(ev.clientX,ev.clientY);});
+  fab.addEventListener('pointerup',function(ev){if(ev.pointerId!==pid)return;
+    try{fab.releasePointerCapture(pid);}catch(er){}up();});
+  fab.addEventListener('pointercancel',function(ev){if(ev.pointerId!==pid)return;
+    try{fab.releasePointerCapture(pid);}catch(er){}on=false;pid=null;fab.style.cursor='grab';});
+  fab.addEventListener('click',function(ev){ev.stopPropagation();});   // 吸收触摸后补发的 click，防冒泡到气泡
   document.body.appendChild(fab);document.body.appendChild(menu);e.remove();
 })(this)">
 ```
@@ -193,6 +204,26 @@ fillTA('请按格式输出：'+F('姓名')+F('职业')+L+'HP=当前/上限'+R+' 
 /* 对：只有 hover 的按钮拉伸 */ .z-sidebtns{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 ```
 
+### 5. 移动端"触摸 + 补发模拟鼠标"双触发（悬浮球点一下就没反应）
+
+可拖动本体若把 `mousedown`+`touchstart` 绑成**两条独立路径**（`up()` 同时挂 `mouseup`+`touchend`），移动端会坏：部分浏览器在一次触摸后，为兼容老代码会**补发一套模拟鼠标事件**（`mousedown`/`mouseup`/`click`）。于是点一下的实际时序是——
+
+```
+touchstart → touchend         // up() 第一次：菜单开
+（浏览器补发）mousedown → mouseup // up() 第二次：菜单又关
+```
+
+净效果：菜单**闪一下就关**，看起来像"点了没反应"；拖动则会被幽灵二次手势打断。`touch-action:none` 只挡滚动/缩放，**挡不住这套补发事件**；在 `touchmove` 里 `preventDefault()` 也只压住"移动"那一下，压不住"静止轻点"的补发。
+
+**避法（本文档采用）**：用 **Pointer Events** 一条流统一鼠标与触摸——`pointerdown/pointermove/pointerup/pointercancel` + `setPointerCapture(pointerId)`。浏览器对同一次指针交互只产生一条 pointer 事件流、**不会再补发模拟鼠标**，双触发从根上消失。要点：
+
+- `pointerdown` 里 `setPointerCapture(ev.pointerId)`，`pointermove`/`pointerup` 按 `ev.pointerId===pid` 过滤，拖动即使划出本体也不丢事件（省掉 document 级 mousemove/touchmove 绑定）。
+- 再给本体加一个 `el.addEventListener('click',ev=>ev.stopPropagation())`：触摸后浏览器仍可能补发一个 `click`，这条只吸收它、防止冒泡到聊天气泡触发编辑/复制。菜单开关已在 `pointerup` 里做，不依赖这个 click。
+- **不要**为"保险"再补一套 `mousedown`/`touchstart`——那正是 bug 来源。Pointer Events 现代浏览器（含移动端 WebView）已普遍支持。
+- 兜底：万一某环境 `setPointerCapture` 异常，改成 `pointerdown` 在本体、`pointermove`/`pointerup` 绑 `document`（不依赖捕获 API），逻辑不变。
+
+> 沙盒基座 `../../assets/sandbox-kit/sbk/ui-panel.js` 的悬浮球早已是这套 Pointer Events 写法，可作参照。侧边栏那种**单 `onclick` 切换**的按钮不受此陷阱影响（浏览器只补发一个 click，无二次翻转）。
+
 ---
 
 ## 调用清单
@@ -202,6 +233,6 @@ fillTA('请按格式输出：'+F('姓名')+F('职业')+L+'HP=当前/上限'+R+' 
 3. **触发标记**：`<悬浮球>`/`<侧边栏>` 写进第一句话（`beginning`）或 `statusbar`，由对应正则消费——别留**悬空标记**（validate 会报错）。
 4. **菜单动作**：改 `acts` 数组与 `mi.onclick` 分支即可换行为（回填输入框/开抽屉/打开你自己的弹层）。回填输入框统一用选择器 `.uni-textarea-textarea`（与状态栏选项按钮一致）。
 5. **序列化**：`replaceString` 必须脚本序列化成单行（换行转 `\n`、引号转 `\"`、无 BOM），禁手写多行——见 ../output/regex-output.md 2.3。
-6. **验证**：`validate.py --platform <mmd|oldmmd>` 必 0 错 → `build-preview.py`（默认 `--mode both`）看三面板"悬浮组件预览"+全景预览，实测拖动、菜单跟随、翻转、选项点击。oldmmd 与 mmd 同一套写法都已验证通过。
+6. **验证**：`validate.py --platform mmd` 必 0 错 → `build-preview.py --platform mmd`（默认 `--mode both`）看三面板"悬浮组件预览"+全景预览，实测拖动、菜单跟随、翻转、选项点击。本文写法在当前 MMD 与本地酒馆均已验证通过；沙盒模式请勿套用（见「平台红线」）。
 
 > 现成资产与生成器：`../../assets/shadowcast-examples/` 下的 `build_float.py`、`悬浮球侧边栏-影渲法.mmd.json` 和 `README.md`。生成器当前默认输出名以脚本 `--help` / README 为准；用 `../../scripts/build-preview.py` 生成预览，不再引用仓库中不存在的 fixture 脚本。

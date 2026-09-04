@@ -22,4 +22,6 @@ description: 角色卡深度共创流程（大段讨论+弹窗收敛→分节设
 
 ## 交付前审核（强制）
 
-角色卡 json 完成后：派子代理跑 `python <skill>/scripts/validate.py <文件> --type card --platform <平台>`（MMD项目会校验 v2 规范），报告写入 `工作/审核记录.md`。有 ERROR 修复后复审。若卡内含状态栏/美化，按 /beautify 的预览流程让主AI 测交互。
+产出 json 完成后：派子代理跑 `python <skill>/scripts/validate.py <文件> --type <card|regex> --platform <mmd|mmdsandbox|st>`（`--platform` 省略时默认 `mmd`），报告写入 `工作/审核记录.md`。有 ERROR 修复后复审。若卡内含状态栏/美化，按 /beautify 的预览流程让主AI 测交互。
+
+平台决定校验什么：`--platform mmd` 与 `--platform mmdsandbox` 的角色卡都按 chara_card_v2 规范校验，`--platform st` 走 v3。**`/mmdsandbox` 同样是 v2 卡平台**（`【用户实测】`编辑页导入 v2 卡按新卡处理，故整卡路线可达新页）：走整卡就跑 `--type card --platform mmdsandbox`，走分离式再跑 `--type regex --platform mmdsandbox` 审那份 6 键 json。人设格式与「新建卡 + 首次保存前选『使用新版』聊天页」的交付提醒见 `references/platforms/mmd-sandbox.md` §9。

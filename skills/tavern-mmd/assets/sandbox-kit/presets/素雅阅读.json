@@ -1,0 +1,118 @@
+{
+  "name": "素雅阅读",
+  "_intent": "长文阅读优先：低饱和、宽节奏、零发光。适合纯文字向剧情卡。六维键恰好 palette/layout/ui/font/cohesion/decoration，每维双侧完整（平台强制两套主题都存在）。",
+  "_safety": "零外部资源：无 url()、无 @import、无外部字体（§2 CSP 已封死，且风格包一律只用系统字体栈）。尺寸沿用平台 --rpx 保持等比节奏；只有字号走 CSS px（可读性绝对尺度）。",
+  "palette": {
+    "_note": "核心五键 bg/surface/text/accent/border 逐侧显式 hex：对比度检查要有基准才算得出比值。text 对 bg/surface ≥4.5:1，accent/border ≥3:1。",
+    "dark": {
+      "bg": "#16181c",
+      "surface": "#1f2228",
+      "text": "#e8e6e1",
+      "muted": "#a8a49c",
+      "_border": "边界色必须对 bg 达 3:1（WCAG 1.4.11 非文本对比）——它承载控件边界与焦点环。灰度再压暗一档就只有 2.16:1，看着「雅」但焦点环几乎不可见。",
+      "border": "#6b7280",
+      "accent": "#9fb8ad",
+      "onAccent": "#14181a",
+      "userBubble": "#242830",
+      "aiBubble": "#1f2228",
+      "bubbleText": "#e8e6e1",
+      "inputBg": "#1f2228",
+      "inputText": "#e8e6e1",
+      "shortcutText": "#e8e6e1",
+      "moreItemBg": "#2b2f36",
+      "sharePick": "#2b2f36"
+    },
+    "light": {
+      "bg": "#f7f5f0",
+      "surface": "#fffefb",
+      "text": "#2d2b28",
+      "muted": "#5e5b55",
+      "border": "#8d8880",
+      "accent": "#4a6b5d",
+      "onAccent": "#ffffff",
+      "userBubble": "#eceae3",
+      "aiBubble": "#fffefb",
+      "bubbleText": "#2d2b28",
+      "inputBg": "#fffefb",
+      "inputText": "#2d2b28",
+      "shortcutText": "#2d2b28",
+      "moreItemBg": "#eceae3",
+      "sharePick": "#eceae3"
+    }
+  },
+  "layout": {
+    "_note": "宽节奏：间距与内边距比基座默认（gap 12 / pad 16 / radius 12）更松，圆角收敛以免文字块显得幼态。",
+    "dark": {
+      "gap": "calc(16 * var(--rpx))",
+      "pad": "calc(20 * var(--rpx))",
+      "radius": "calc(8 * var(--rpx))"
+    },
+    "light": {
+      "gap": "calc(16 * var(--rpx))",
+      "pad": "calc(20 * var(--rpx))",
+      "radius": "calc(8 * var(--rpx))"
+    }
+  },
+  "ui": {
+    "_note": "克制的浮层质感。浅色下阴影必须更淡：深色那套的黑影打在白底上会显脏。",
+    "dark": {
+      "shadow": "0 1px 6px rgba(0, 0, 0, .28)",
+      "lift": "rgba(255, 255, 255, .035)",
+      "ball": "calc(88 * var(--rpx))",
+      "drw-w": "calc(560 * var(--rpx))"
+    },
+    "light": {
+      "shadow": "0 1px 6px rgba(0, 0, 0, .1)",
+      "lift": "rgba(0, 0, 0, .03)",
+      "ball": "calc(88 * var(--rpx))",
+      "drw-w": "calc(560 * var(--rpx))"
+    }
+  },
+  "font": {
+    "_note": "fontSize/lineHeight 是结构化 tune（数字），不是 CSS：prefs.get 要能回读它们，否则面板显示的初值会与实际生效值不一致。fs-sm 仍是 CSS 令牌。",
+    "dark": {
+      "fontSize": 16,
+      "lineHeight": 1.8,
+      "fs-sm": "calc(22 * var(--rpx))"
+    },
+    "light": {
+      "fontSize": 16,
+      "lineHeight": 1.8,
+      "fs-sm": "calc(22 * var(--rpx))"
+    }
+  },
+  "cohesion": {
+    "_note": "只参与生成期校验与文档，绝不输出任何 CSS 声明。",
+    "dark": {
+      "contrast": "AA",
+      "density": "loose",
+      "motion": "reduced",
+      "mood": "纸感 低饱和",
+      "pairing": "长文剧情 / 日常向"
+    },
+    "light": {
+      "contrast": "AA",
+      "density": "loose",
+      "motion": "reduced",
+      "mood": "米白纸感",
+      "pairing": "长文剧情 / 日常向"
+    }
+  },
+  "decoration": {
+    "_note": "glow 置 0＝关掉进度条发光（阅读向不要光晕）。四条语义色仍要彼此可辨，浅色侧压暗加饱和。",
+    "dark": {
+      "glow": "0",
+      "hp": "#c4736f",
+      "mp": "#7d95b8",
+      "sp": "#87a37f",
+      "xp": "#c0a468"
+    },
+    "light": {
+      "glow": "0",
+      "hp": "#a3403c",
+      "mp": "#3d5c85",
+      "sp": "#4a6b42",
+      "xp": "#8a6d28"
+    }
+  }
+}

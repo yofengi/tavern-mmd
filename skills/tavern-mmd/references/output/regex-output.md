@@ -1,8 +1,17 @@
 # 正则交付物规范
 
-三种交付形式：**本地酒馆正则 JSON**（可导入）、**MMD 导入 JSON**（首选，平台直接导入）和 **MMD 手填清单**（Markdown 文档，备选）。
+## 平台 → 格式速查（先定位再往下读）
 
-> **单独美化 / 状态栏流程的默认交付** = 正则 json + 规则.md（独立的状态栏生成规则文档/模型侧协议），不强制塞进某张卡。若是做整张角色卡，正则默认内嵌进卡、状态栏规则进卡内世界书（蓝灯），见 card-json.md 第 8 节。
+| 目标平台 | 正则交付格式 | 本文哪一节 | 顶层键 | `findRegex` 形态 | `id` |
+|---|---|---|---|---|---|
+| 本地酒馆（`/st`） | 正则 JSON 数组（13 字段/条） | **第一节** | 无（数组） | `/pattern/flags` | UUID 字符串 |
+| 当前 MMD（`/mmd`） | 导入 JSON，**4 键顶层** | **第二节** | `pageDepth` `statusbar` `beginning` `regex_scripts` | **强制** `/pattern/flags` slash literal | 固定 `-1` |
+| MMD沙盒模式（`/mmdsandbox`） | 导入正则 JSON，**恰好 6 键顶层** | **第三节** | 上面 4 键 + `chatVersion` + `personality` | **统一 slash 形态**（约定；裸字面量实机也生效，判 WARN） | **任意负数**，导入时重编号 |
+| MMD 两平台的备选 | 手填清单（Markdown 文档） | **第四节** | —— | 同该平台 | 同该平台 |
+
+三者结构互不兼容，**不要把一个平台的 JSON 直接改平台名交付**：第二节与第三节的顶层键数、`findRegex` 铁律、`id` 取值三处全都不同（沙盒模式还多一份独立 persona 文本，见第三节 3.5）。
+
+> **单独美化 / 状态栏流程的默认交付** = 正则 json + 规则.md（独立的状态栏生成规则文档/模型侧协议），不强制塞进某张卡。若是做整张角色卡，正则默认内嵌进卡、状态栏规则进卡内世界书（蓝灯），见 card-json.md 第 8 节。**沙盒模式同样适用这条**（旧版本写「沙盒例外、不走整卡内嵌」是基于「禁 PNG 整卡」的错误前提，已更正）：沙盒能导 v2 整卡，所以整卡内嵌与独立交付两条路都在，见 card-json.md 第 9 节。
 
 ---
 
@@ -75,9 +84,11 @@ python -m json.tool output/正则文件名.json > /dev/null && echo OK
 
 ---
 
-## 第二节：MMD 导入 JSON（首选交付）
+## 第二节：当前 MMD 导入 JSON（`/mmd` 首选交付）
 
-MMD 平台支持直接导入专用 4 字段格式的 json（与本地酒馆正则 json 结构**不同**，字段更少）。顶层必须**恰好且仅有** `pageDepth`、`statusbar`、`beginning`、`regex_scripts` 四个键；`regex_scripts` 的每条规则也必须**恰好且仅有** `id`、`scriptName`、`findRegex`、`replaceString` 四个键，不得夹带 ST 字段或任意扩展键。
+> **仅适用于当前 MMD（`--platform mmd`）。** 沙盒模式的导入 JSON 是 6 键顶层且同样强制 slash 形态，见**第三节**；不要把两种顶层结构混用。
+
+当前 MMD 平台支持直接导入专用 4 字段格式的 json（与本地酒馆正则 json 结构**不同**，字段更少）。顶层必须**恰好且仅有** `pageDepth`、`statusbar`、`beginning`、`regex_scripts` 四个键；`regex_scripts` 的每条规则也必须**恰好且仅有** `id`、`scriptName`、`findRegex`、`replaceString` 四个键，不得夹带 ST 字段或任意扩展键。
 
 ### 2.1 完整结构
 
@@ -113,12 +124,12 @@ MMD 平台支持直接导入专用 4 字段格式的 json（与本地酒馆正�
 | `regex_scripts` | array | 正则数组，每条仅 4 字段 |
 | `regex_scripts[].id` | number | 固定 `-1` |
 | `regex_scripts[].scriptName` | string | 规则名 |
-| `regex_scripts[].findRegex` | string | 查找正则；当前 MMD 与旧版 MMD 均必须写 slash literal（固定标记也写 `/<css>/`，一般表达式写 `/pattern/flags`） |
+| `regex_scripts[].findRegex` | string | 查找正则；当前 MMD **必须写 slash literal**（固定标记也写 `/<css>/`，一般表达式写 `/pattern/flags`） |
 | `regex_scripts[].replaceString` | string | 替换内容，可用 `$1` 捕获组 |
 
 注意：
 - **没有** placement/markdownOnly/promptOnly 等字段（MMD 正则仅作用于显示层）
-- **每条 `findRegex` 必须是 `/pattern/flags` slash literal**：固定触发标记也要包斜杠；裸值在控制台可能测试通过，但实际聊天不替换
+- **两条 MMD 路线的交付 `findRegex` 统一写 `/pattern/flags` slash 形态**：当前 MMD 是硬性铁律；沙盒是约定（实机复验裸字面量也生效，卡 64304 A/B 2026-08-30，与 worker literal 分支一致，校验器对裸字面量出 WARN 不出 ERROR），统一 slash 为跨平台一致。
 - 限额仍然适用：≤130条、findRegex≤1000字符、replaceString≤20000字符
 - 现成状态栏范例可参考 `../../assets/radar-examples/西幻RPG-正则与第一句话.json`
 - `../../assets/radar-examples/完整美化-日夜主题与雷达.json` 是 **legacy 日夜集成包**，只作兼容研究，不再推荐作为新全局主题基底；需要 day/night/native 或生命周期管理时，优先使用 `../../assets/global-beautify-examples/mmd-theme-runtime/` 的新 runtime
@@ -174,8 +185,9 @@ json.loads(open('out.json', encoding='utf-8').read())   # 回读自检
 import json
 rs = json.load(open('out.json', encoding='utf-8'))['regex_scripts'][0]['replaceString']
 assert rs.count('\\') == 0 or '\\' not in rs, f'HTML残留{rs.count(chr(92))}个反斜杠，疑双重转义'
-assert '<script' not in rs.lower(), '含<script>，旧版MMD禁用'
 print('字符数', len(rs), '| 残留反斜杠', rs.count(chr(92)))
+# 注：不要在这里 assert 「无 <script>」——在役的两个 MMD 平台都允许 <script>
+# （当前 MMD 已实测可执行；沙盒模式更是一等公民）。平台红线交给 validate.py 判。
 ```
 解析后的 `replaceString` 里**反斜杠数应为 0**（除非 HTML/JS 逻辑真的需要反斜杠，如正则脚本——纯美化 HTML 通常不含）。若数量异常偏高（几百个），几乎一定是双重转义，需把源 HTML 先 `.replace('\\"','"')` 还原再重新 dumps。
 
@@ -186,21 +198,23 @@ print('字符数', len(rs), '| 残留反斜杠', rs.count(chr(92)))
 skill 自带 `scripts/validate.py` 一次性覆盖上述所有检查（JSON合法性、BOM、双重转义、平台红线、字符数、v2规范、**悬空标记**），比手写 assert 更全。**0 错误才能交付：**
 
 ```bash
-python <skill>/scripts/validate.py output/文件.json --platform <mmd|oldmmd>
+python <skill>/scripts/validate.py output/文件.json --platform mmd
 ```
+
+`--platform` 的三个取值是 `mmd`（当前 MMD，**默认值**）/ `mmdsandbox`（沙盒模式）/ `st`（本地酒馆）。审沙盒产出必须显式写 `--platform mmdsandbox`，否则会按 4 键顶层误报（沙盒的 `chatVersion`/`personality` 会被当成多余键）。
 
 报错对照处理：
 - `双重转义` → 源HTML喂 json.dumps 前已含 `\"`，先 `.replace(chr(92)+chr(34), chr(34))` 还原（见 2.4 与 wabisabi 案例）
 - `BOM` → 改用无 BOM 的 UTF-8 保存
 - `换行` → replaceString 内真实换行未转 `\n`
-- `<script>`/`ES6`/`innerHTML` → 旧版MMD红线，按报告改写
+- `innerHTML`/`cssText` → 易被平台净化，按报告改写（两个 MMD 平台都只是 WARN）
 - `悬空标记` → `statusbar`/`beginning` 里有 `<标记>` 但 `regex_scripts` 没有对应 `findRegex` 消费；会在页面裸露，必须补正则或删标记
 
-可选预览（状态栏/美化必做）：`python <skill>/scripts/build-preview.py output/文件.json --platform <mmd|oldmmd>`（默认 `--mode both`）。MMD 导入 json 会生成两份：**三面板沙箱**（①第一句话剩余预览，显示扣除单独抽检的状态栏/悬浮组件后的正文、选项菜单/图片/特殊美化；②状态栏单独预览；③悬浮组件预览，侧边栏/悬浮球）用于逐组件审核；**全景预览**（`-panorama-` 文件）把所有组件组合进一个模拟 MMD 聊天页，底部固定主输入框+发送按钮，发送出现用户气泡+占位AI气泡，用于二次审核组合效果。主AI 用 Preview 工具先看三面板、再看全景，全景不默认关闭留给用户自查。
+可选预览（状态栏/美化必做）：`python <skill>/scripts/build-preview.py output/文件.json --platform <mmd|mmdsandbox|st>`（`--platform` 必填无默认；默认 `--mode both`）。MMD 导入 json 会生成三面板诊断与全景：三面板用于逐组件审核；全景把组件组合进一个聊天页。`mmd`/`st` 的通用全景使用 fixed 输入栏与占位 AI；`mmdsandbox` 使用真实新聊天页的 root flex 外壳、静态 composer 和本地 SDK profile，仿真控制/证据说明默认折叠。主AI 先看三面板，再按平台检查全景；沙盒还要分别生成 `chat`/`thin-preview` 并验桌面、竖屏、横屏/键盘高度。
 
-> `--platform mmd`（当前 MMD）下，`<script>`/ES6/onerror 多行均按实测能力放行；inline `onclick` 只认证平台已实测的 canonical 形式，代码字符串、赋值和未认证形式均记为 ERROR，并在 preview 中禁用。`--platform oldmmd` 保持全红线最严格。校验当前 MMD 产出务必带 `--platform mmd`，否则会误报 ES6/script。
+> `--platform mmd`（当前 MMD，validate.py 的默认值）下，`<script>`/ES6/onerror 多行均按实测能力放行；inline `onclick` 只认证平台已实测的 canonical 形式，代码字符串、赋值和未认证形式均记为 ERROR，并在 preview 中禁用。`--platform mmdsandbox` 换一整套检查（6 键顶层白名单、`chatVersion` 必须为 1、`id` 必须负数、SDK 能力/事件名核对、禁 `img onerror` 点火器等），见第三节 3.6。
 
-### 2.6 平台原生替换语法（当前 MMD，写正则时可直接用）
+### 2.6 平台原生替换语法（**当前 MMD 专用**，写正则时可直接用）
 
 **当前 MMD inline handler 的权威可用形式**：无参数全局调用用 `onclick="window.__fn&&__fn()"`；轻主板调用用 `onclick="eval(getElementById('FUNC').dataset.s)"`。两者都是单一干净调用/引用表达式；不要把代码字符串直接塞进 `eval('...')`，也不要在属性里写 DOM 赋值。复杂组件还可在 `img onerror` 内用 `el.onclick=function(){...}` 动态绑定，避开 inline 属性净化。
 
@@ -220,7 +234,155 @@ MMD 平台正则的 `replaceString` 内除了 HTML/CSS/JS，还可用平台内�
 
 ---
 
-## 第三节：MMD 手填清单（Markdown 交付物，备选）
+## 第三节：MMD沙盒模式导入正则 JSON（`/mmdsandbox`）
+
+> **仅适用于沙盒模式（`--platform mmdsandbox`）。** 「沙盒模式」是本 skill 的叫法，官方口径是「新页 / 新聊天页」，开关是角色卡 `chatVersion: 1`。平台能力全集见 `../platforms/mmd-sandbox.md`。
+>
+> 导入入口是创卡页的「**导入正则**」（也叫「设置正则」），吃 **JSON 文本**。
+>
+> ✅ **更正**：旧版本这里写「沙盒不走 chara_card_v2、不走 PNG 整卡（官方明令禁止），所以正则 JSON 是主交付物」—— **错的，已删除**。`【用户实测】`沙盒**能导 v2 整卡**（编辑页导入按新卡处理）。所以本节这份 6 键 JSON 是**分离式路线（路线 B）**的格式；走整卡路线（路线 A）时正则内嵌进 `data.extensions.regex_scripts`，见 `card-json.md` 第 8-9 节。
+
+顶层必须**恰好 6 键**，多一个不认、少一个报错：
+
+```
+chatVersion  pageDepth  statusbar  beginning  personality  regex_scripts
+```
+
+`regex_scripts` 的每条规则仍是**恰好 4 键** `id` / `scriptName` / `findRegex` / `replaceString`（与第二节同名，但 `id` 取值规则不同）。
+
+### 3.1 完整结构（可直接照抄的合法样例）
+
+```json
+{
+  "chatVersion": 1,
+  "pageDepth": 2,
+  "statusbar": "{{hud}}",
+  "beginning": "雨还在下。禾安把伞往 {{user}} 那边偏了偏，指尖沾着湿泥。\n\n{{intro}}",
+  "personality": "<角色设定 名字：禾安>\n<基本信息>\n- 身份：种子铺守护人\n- 年龄：二十七\n</基本信息>\n<说话方式>\n- 句子短，不用比喻。\n</说话方式>\n</角色设定>\n<输出格式>\n- 每轮正文结束后另起一行输出 [状态]\n血量: 当前值/上限\n金币: 整数\n[/状态]\n</输出格式>",
+  "regex_scripts": [
+    {
+      "id": -1,
+      "scriptName": "禾安-style",
+      "findRegex": "/{{禾安-style}}/",
+      "replaceString": "<style>\n.hean-hud{display:flex;gap:8px;padding:6px 10px;background:var(--chat-surface);color:var(--chat-text);border-bottom:1px solid var(--chat-border)}\n.hean-hud button{background:var(--chat-accent);border:0;border-radius:4px;padding:2px 8px;color:var(--chat-bubble-text)}\n</style>"
+    },
+    {
+      "id": -2,
+      "scriptName": "hud",
+      "findRegex": "/{{hud}}/",
+      "replaceString": "<div class=\"hean-hud\"><span class=\"hean-hp\">血量 --</span><button class=\"hean-ask\">问路</button></div>"
+    },
+    {
+      "id": -3,
+      "scriptName": "状态块渲染",
+      "findRegex": "/\\[状态\\]([\\s\\S]*?)\\[\\/状态\\]/",
+      "replaceString": "<div class=\"hean-row\" style=\"display:none\">$1</div>"
+    },
+    {
+      "id": -4,
+      "scriptName": "禾安-kit",
+      "findRegex": "/{{禾安-kit}}/",
+      "replaceString": "<script>\nsdk.debug.log('禾安 kit 就位');\nsdk.on('message:done', function (msg) {\n  if (!msg || !msg.content) return;\n  var m = /血量[:：]\\s*(\\d+)/.exec(msg.content);\n  if (!m) return;\n  var hp = parseInt(m[1], 10);\n  if (isNaN(hp)) return;\n  var el = document.body.querySelector('.hean-hp');\n  if (el) el.textContent = '血量 ' + hp;\n});\nsdk.on('message:mount', function () {\n  var btn = document.querySelector('.hean-ask');\n  if (!btn) return;\n  btn.addEventListener('click', function () { sdk.input.set('这条路通去哪里？'); });\n});\n<\\/script>"
+    }
+  ]
+}
+```
+
+样例里的四条对应沙盒起手形态：一条只放 `<style>`、一条放功能栏可见 UI、一条把模型吐的 `[状态]` 块吃掉、一条只放 `<script>`。`/{{禾安-style}}/` 与 `/{{禾安-kit}}/` 的标记故意谁都不引用；`<style>` / `<script>` 装卡即被抽出，不需要真正匹配命中，但匹配式本身仍按实机纪律写成合法 slash。
+
+> **注意最后一条里的 `<\/script>`**：JSON 字符串里的 `</script>` 必须写成 `<\/script>`，避免宿主页面提前截断。`\/` 是合法 JSON 转义，解析回来就是 `/`。
+
+### 3.2 字段说明与硬上限
+
+| 字段 | 类型 | 说明 | 硬上限 |
+|---|---|---|---|
+| `chatVersion` | number | **必须是 `1`**，这是沙盒模式（新聊天页）的总开关。漏写或写 0 → 落回旧聊天页，规则照跑但 `sdk.*`、`[data-chat]`、舞台全部失效，页面上没有任何报错 | 必须 `1` |
+| `pageDepth` | number | 固定 `2`。只对旧页有意义，**新页不实现**；非 2 官方判 WARN | 固定 `2` |
+| `statusbar` | string | 功能栏触发标记位。会过一遍规则。**标准写法是只放 `{{hud}}`**，真界面写在规则里（200 字放不下界面） | **200 字** |
+| `beginning` | string | 开场白，**玩家看见的第一句话，不是人设**。可夹触发串（如 `{{intro}}`） | **4000 字** |
+| `personality` | string | 人设正文。**导入页不会读这个字段**，必须另出独立文本给用户手工粘贴（见 3.5） | **10000 字** |
+| `regex_scripts` | array | 规则数组，每条恰好 4 键 | **130 条** |
+| `regex_scripts[].id` | number | **必须是负数**（`-1`、`-2`…，不必连续），导入时平台会重编号。`typeof !== 'number'` 或 `>= 0` → ERROR | —— |
+| `regex_scripts[].scriptName` | string | 规则名，非空 | UI 显示 **20** / 源码归一常量 **200**；双路径与超限语义待确证，交付按 20 |
+| `regex_scripts[].findRegex` | string | 匹配式，非空；交付一律 slash 形态，见 3.3 | UI 显示 **1000** / 源码归一常量 **4096**；双路径与超限语义待确证，交付按 1000 |
+| `regex_scripts[].replaceString` | string | 替换内容：HTML / `<style>` / `<script>` 全写在这里 | 编辑器 **20000** / 导入源码上限 **100000** |
+
+规则里多余字段 → WARN；缺任一字段 → ERROR。
+
+**禁止出现的顶层键**（官方直接判 ERROR，因为它们属于别的格式）：
+
+```
+role  presentation  worldbook  world_book  lorebook  lore_book  entries  characterBook  character_book
+```
+
+其余未知顶层键 → WARN（导入页不认）。世界书为什么不能塞进来见 3.5。
+
+> `replaceString` 有两条录入路径：创卡页编辑器 **20000 硬上限**，超限会无提示拒绝保存整条修改；「导入正则」源码上限为 100000。默认仍按 18000 拆条，保证导入与手工维护都安全。
+
+### 3.3 `findRegex`：两形态都生效，交付统一用 slash
+
+worker 源码的 `classifyPattern` 包含裸字面量分支：非空非斜杠串会被转义后全文替换；`/pattern/flags` 编译为正则，缺 `g` 自动补。`【实机实测 2026-08-30】`（卡 64304 A/B）确认**裸字面量确实生效**：裸 `体力` 与斜杠 `/灵力/` 在真实聊天页同一轮渲染都被替换，与 worker 源码一致（宿主包只把 pattern 原样转发、不做形态分类）。
+
+因此交付纪律是一条**约定**（不是硬约束）：**MMD 沙盒的 `findRegex` 统一写 `/pattern/flags` slash 形态**，为的是跨平台一致（与 `/mmd` 铁律一致）、也符合官方校验文案；裸字面量写了也生效，校验器对它出 WARN 不出 ERROR。
+
+| 写法 | 交付判定 | 行为 |
+|---|---|---|
+| `/{{hud}}/`、`/【图鉴】/` | ✅ 固定标记 | `{}` 在非量词位置可不转义；中文照常 |
+| `/血量[:：]\s*(\d+)/` | ✅ 正则 | 合法 flags 仅 `gimsuy`；缺 `g` 平台自动补 |
+| `/[未闭合/` | ❌ bad-regex | 整条规则静默丢弃，不降级字面量 |
+| `{{hud}}` | ⚠️ 裸字面量 | 实机生效，但建议统一写 `/{{hud}}/`（WARN，非 ERROR） |
+| 空串 | ❌ empty | ERROR |
+
+两条会让规则永久失效、且页面上毫无迹象的坑：
+
+1. slash 正则语法写错会整条静默丢弃，交付前必须让 `validate.py --platform mmdsandbox` 编译门禁通过。
+2. 固定标记不要重复。规则按数组顺序跑，前一条换完全文后，后一条同串永远匹配不到。
+
+匹配式别含 HTML 标签或独立保留字 `html/head/body/css`，也别写太松；规则会扫这张卡的每条 AI 消息。
+
+### 3.4 触发串必须接得上（可见 HTML 才会出现）
+
+**可见 HTML 的匹配式，必须能在 `statusbar` / `beginning` / 另一条规则的 `replaceString` 里找到**（链式触发被官方认可），否则页面上永不出现。人设 `<输出格式>` 里的输出约定必须和这些匹配式对得上 —— **模型写得出，规则才换得掉**。
+
+反过来，只放 `<style>` / `<script>` 的规则，匹配式**故意谁都不引用**（`{{卡名-style}}` / `{{卡名-kit}}`）：它们装卡时就被抽走，不需要被匹配命中。这也意味着**不能靠「让规则不匹配」来关掉样式**。
+
+### 3.5 分离式路线（路线 B）的交付物
+
+> 走**整卡路线（路线 A）**时不用本小节 —— 正则内嵌进 `data.extensions.regex_scripts`、世界书进 `character_book`、人设进 `data.description`，一张 PNG 交付完事，见 `card-json.md` 第 8-9 节。本小节是**分离式**的形态。
+
+| 交付物 | 内容 | 去哪 |
+|---|---|---|
+| `<短名>-regex.json` | 本节的 6 键导入 JSON | 创卡页「导入正则」入口 |
+| `<短名>-persona.txt` | **未转义的人设纯文本** | **导入页不读 `personality` 字段** → 必须让用户手工粘贴到人设框 |
+| `<短名>-worldbook.json`（可选） | 独立世界书，根对象**只留 `entries`** | 世界书独立导入入口 |
+
+- `personality` **仍要写进 JSON**（供校验与留档），但**同时**必须另出一份纯文本。两份内容要一致。
+- 世界书**不能**塞进这份 6 键导入正则 JSON（顶层出现 `entries` / `worldbook` / `characterBook` 等直接 ERROR）。这是**这份文件**的格式约束，**不是**「沙盒的世界书必须单独交付」—— 走整卡时它正常并进 `character_book`。字段规范见 `worldbook-json.md`。
+- 人设格式要点（`<角色设定 名字：真实角色名>` 成对单行标签、只用 `{{user}}`、禁 `{{char}}` / `$#char#$` / `$#user#$`、禁 `【章节】` 方括号标题）见 `card-json.md` 第 9 节。
+- 交付说明里**必须写明「必须新建卡；首次保存前在创卡页把『新版聊天页』选成使用新版，该选择首次保存后永久不可改」** —— `chatVersion` 只在新建卡导入时被读取，给已存在的卡导入会被忽略，表现是「按钮全不响应、样式对一半」且无任何报错。
+
+### 3.6 交付前强制审核
+
+转义规则与生成方式**完全沿用 2.3 / 2.4**（换行转 `\n`、双引号转 `\"`、无 BOM、用 `json.dumps` 生成而非手写、回读查双重转义）。额外只多一条：JSON 里的 `</script>` 写成 `<\/script>`。
+
+```bash
+python <skill>/scripts/validate.py output/文件-regex.json --platform mmdsandbox
+python <skill>/scripts/build-preview.py output/文件-regex.json --platform mmdsandbox
+```
+
+`--platform mmdsandbox` 下 `validate.py` 换的是一整套沙盒检查，**0 错误才能交付**：
+
+- **结构**：顶层 6 键白名单 + 禁用顶层键；`chatVersion` 必须为 1；`id` 必须为负数；上表全部长度/条数上限。
+- **匹配式**：写 `/…/` 时正则体必须合法（bad-regex 判 ERROR，整条静默丢弃）；裸字面量实机生效、判 WARN（建议统一 slash）；固定标记重复判 ERROR。
+- **SDK**：能力名不在 30 能力表、事件名不在 12 事件表、用了不存在的 `sdk.once` / `sdk.off` → 全部 ERROR（平台侧写错名字**不报错只是永不触发**，只能靠静态校验拦）。
+- **被禁写法**：`img onerror` 点火器与 teapot 系 → ERROR（官方明令，沙盒模式 `<script>` 装卡即执行，点火器不再有意义）。
+- **WARN 项**：作者自写 `data-*`（会被净化删掉）；`iframe` / `link` / `meta` / `form` / `object` / `embed` 等被删标签；全局 CSS（`*{}` / `html{}` / `body{}` / `:root{}` → 改用 `[data-chat="root"]`）；HTML 缩进 4 空格（官方 WARN；实机当前会在 Markdown 前剥掉缩进，不据此断言会变代码块，仍保守顶格写）；`sdk.on` 写进 `message:mount` 回调（每挂一条气泡多订一份）；`message:done` 里 `message.send` 自问自答死循环。
+- 世界书条目标题 20 字在沙盒模式是 **WARN**（当前 MMD 仍是 ERROR），理由见 `worldbook-json.md` 与 `../platforms/mmd-sandbox.md` §10.1。
+- 拿 chara_card_v2 卡审沙盒是**合法**的（沙盒能导 v2 整卡）：用 `--type card --platform mmdsandbox`，会执行与 `/mmd` 相同的 v2 检查。旧版本在这种情况下 WARN 提示「沙盒真正的交付物是导入 JSON」，那条已删除。
+
+`build-preview.py --platform mmdsandbox` 使用共享契约 v1.1.0 复刻真实新聊天页：dark root flex 外壳、header/statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、author-stage、静态 composer/toolbar/input/send，以及 **14 个 `--chat-*` 设计令牌**。另注入 `--rpx`；`--chat-viewport-height` 由模拟宿主以内联 style 写入并随 iframe resize/键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍装卡即抽出执行，但 script 审计角标只在诊断页展示，不挤占全景 iframe。预览自带 `chat`/`thin-preview` SDK profile、能力精度表、默认折叠的仿真控制与证据说明；真实宿主握手、AI 分块节奏、完整 Markdown/净化、跨设备 save、CSP 与最终人工验收仍需真实站。
+
+## 第四节：MMD 手填清单（Markdown 交付物，备选）
 
 当用户偏好手动录入或导入失败时使用。交付物格式如下：
 
@@ -253,7 +415,7 @@ MMD 平台正则的 `replaceString` 内除了 HTML/CSS/JS，还可用平台内�
 总条数核对：N/130
 ````
 
-### 3.1 清单生成规则
+### 4.1 清单生成规则
 
 1. **每条带编号 + 用途说明**：标题格式 `## 规则N：<用途>`，便于追踪
 2. **findRegex 与 replaceString 分开独立代码块**：每块单独全选复制，减少误操作
@@ -261,9 +423,10 @@ MMD 平台正则的 `replaceString` 内除了 HTML/CSS/JS，还可用平台内�
 4. **末尾总条数核对行**：`总条数核对：N/130`，超过130条须拆分或合并规则
 5. **每条勾选框**：`- [ ] 已填写`，手填完毕后勾选，避免遗漏
 
-### 3.2 MMD 平台填写注意事项
+### 4.2 MMD 平台填写注意事项
 
-- findRegex 字段：必须填写 `/pattern/flags` 外层斜杠；固定标记也写成 `/<标记>/`
+- **findRegex 两个 MMD 路线都统一填 `/pattern/flags` 外层斜杠**，固定标记也写成 `/<标记>/`；沙盒裸字面量实机也生效（卡 64304 A/B 2026-08-30），统一 slash 是跨平台一致的约定
 - replaceString 字段：如含 HTML，注意转义确认界面接受原始 HTML
 - 每条填写后建议发条测试消息验证效果，再勾选 `- [ ] 已填写`
 - MMD 平台正则仅作用于显示层（等效 markdownOnly=true）
+- 沙盒模式手填时**别忘了创卡页表单里的 `chatVersion`**：手填清单只覆盖规则，`chatVersion: 1` 要用户在创卡页自己确认（默认是 0），漏了整套方案零效果

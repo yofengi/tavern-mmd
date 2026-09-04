@@ -26,7 +26,9 @@ DEFAULT_CONFIG = {
     "uid_strategy": "rebuild_sequential",
     "order_strategy": "layer_base_plus_step",
     "order_step": 10,
-    # 目标平台，决定是否套用 MMD 平台限额（标题 20 字等）。mmd / oldmmd / st，默认取严。
+    # 目标平台，决定是否套用 MMD 平台限额（标题 20 字等）。
+    # mmd = 当前MMD（20 字硬拦）/ mmdsandbox = MMD沙盒模式（20 字只告警，见 enforces_comment_limit）
+    # / st = 本地酒馆（不查）。默认 mmd 取严。
     "platform": "mmd",
     "export": {"include_entry_id_in_comment": False},
     "layers": [
@@ -69,8 +71,20 @@ def include_entry_id_in_comment(config):
 
 
 def enforces_comment_limit(config):
-    """本地酒馆标题无长度限制，只有 MMD（当前版/旧版）需要查。"""
+    """本地酒馆标题无长度限制，只有 MMD 系（mmd / mmdsandbox）需要查。
+
+    黑名单语义：除 `st` 之外一律套用 20 字上限——20 字来源是 MMD 创卡页 UI 对世界书
+    条目标题的截断，与 chatVersion（新旧聊天页）无关，沙盒模式同样在册。"""
     return config.get("platform", "mmd") != "st"
+
+
+def comment_limit_is_hard(config):
+    """标题超限是否硬拦（拒绝写入 + 退出码 2）。
+
+    锁定决策 D8：沙盒模式**只告警不拦**。限制仍在（见 enforces_comment_limit），
+    但官方 validate-worldbook.mjs 不检查该项，本 skill 不拿一条无官方脚本背书的
+    平台侧 UI 限制去阻断交付。当前 MMD 仍硬拦。请勿"顺手修正"成一律硬拦。"""
+    return config.get("platform", "mmd") != "mmdsandbox"
 
 
 def export_comment(title, entry_id, config):
@@ -95,10 +109,16 @@ def comment_length_problem(title, entry_id, config):
 
 
 def require_title_length(title, entry_id, config):
-    """生成路径上的前置拦截：不写出注定被平台截断的源文件。"""
+    """生成路径上的前置拦截：不写出注定被平台截断的源文件。
+
+    硬拦平台（mmd）抛 ValueError → 退出码 2；软拦平台（mmdsandbox）不抛，
+    把提示原文返回给调用方去打 [WARN]，写入照常进行。未超限返回 None。"""
     problem = comment_length_problem(title, entry_id, config)
-    if problem:
+    if not problem:
+        return None
+    if comment_limit_is_hard(config):
         raise ValueError(problem)
+    return problem
 
 
 def _default_config_copy():
@@ -635,7 +655,9 @@ def check_project(root, out_path=None):
         else:
             problem = comment_length_problem(entry["title"], eid, cfg)
             if problem:
-                errors.append("%s %s" % (eid, problem))
+                # 沙盒模式降级为 warning（D8），当前 MMD 仍算 error
+                bucket = errors if comment_limit_is_hard(cfg) else warnings
+                bucket.append("%s %s" % (eid, problem))
         if entry.get("status") == "archived" and _is_under(entry["path"], root / "entries"):
             errors.append("归档条目出现在 entries 中: %s" % eid)
         if entry.get("layer") not in valid_layers:
@@ -710,7 +732,7 @@ def cmd_add(args):
     cfg = ensure_project(root)
     require_layer(cfg, args.layer)
     entry_id = allocate_entry_id(cfg, existing_entry_ids(root))
-    require_title_length(args.title, entry_id, cfg)
+    title_warning = require_title_length(args.title, entry_id, cfg)
     save_config(root, cfg)
     layer_dir = root / "entries" / args.layer
     prefix = next_sort_prefix(layer_dir)
@@ -729,6 +751,8 @@ def cmd_add(args):
     refresh_index(root)
     log_patch(root, "add", {"entry_id": entry_id, "path": path.relative_to(root).as_posix(), "title": args.title})
     print("[OK] added %s %s" % (entry_id, path.relative_to(root).as_posix()))
+    if title_warning:
+        print("[WARN] %s %s" % (entry_id, title_warning))
     return 0
 
 
@@ -768,7 +792,7 @@ def cmd_import(args):
 def cmd_rename(args):
     root = Path(args.root)
     entry = find_entry(root, args.entry)
-    require_title_length(args.title, entry["entry_id"], load_config(root))
+    title_warning = require_title_length(args.title, entry["entry_id"], load_config(root))
     old_path = entry["path"]
     meta = dict(entry)
     content = meta.pop("content")
@@ -783,6 +807,8 @@ def cmd_rename(args):
     refresh_index(root)
     log_patch(root, "rename", {"entry_id": args.entry, "old_title": old_title, "new_title": args.title})
     print("[OK] renamed %s" % args.entry)
+    if title_warning:
+        print("[WARN] %s %s" % (args.entry, title_warning))
     return 0
 
 
@@ -889,7 +915,8 @@ def cmd_build(args):
     render_index(root, active_entries(root), cfg, build_map)
     log_patch(root, "build", {"entry": "project", "out": str(out), "entries": len(data["entries"])})
     print("[OK] built %s (%d entries)" % (out, len(data["entries"])))
-    # add/rename 已在入口拦超限标题，这里兜手改 frontmatter 的情况：不阻断导出，但必须吭声
+    # mmd 下 add/rename 已在入口拦超限标题（沙盒只告警不拦），这里兜手改 frontmatter
+    # 与沙盒放行的情况：一律不阻断导出，但必须吭声
     if enforces_comment_limit(cfg):
         for entry in data["entries"].values():
             comment = entry.get("comment", "")

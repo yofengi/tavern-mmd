@@ -1,0 +1,141 @@
+{
+  "_comment": "SBK 生成器示例配置。JSON 不支持注释，故用 _comment / _* 键说明（生成器会丢弃所有 _ 开头的顶层键）。字段全表见 build_sbk.py 的模块 docstring 或 --help。",
+  "_build": "python build_sbk.py sbk.config.example.json --out dist/sbk.json --verbose",
+  "_verify": "python validate.py dist/sbk.json --type regex --platform mmdsandbox",
+  "chatVersion": 1,
+  "_chatVersion": "必须 1——沙盒模式（新聊天页）由它开启。",
+  "pageDepth": 2,
+  "_pageDepth": "固定 2。",
+  "assetDir": "sbk",
+  "_assetDir": "基座源码目录，相对配置文件。须包含 base.css 与 19 个完整经典脚本模块，固定顺序：core.js → core-store.js → core-boot.js → theme.js → theme-panel.js → protocol.js → hud.js → hud-render.js → ui.js → ui-panel.js → ui-nav.js → ui-icon.js → ui-fan.js → ui-dock.js → ui-bubble.js → ui-inject.js → ui-codex.js → ui-map.js → ui-stage.js。缺模块表示资产不完整。顺序即装载顺序，不可重排：nav/icon/fan 必须早于 ui-dock（dock 消费它们，晚到只会吃到兜底退化路径）；ui-dock 必须晚于 ui-panel（chrome() 反查 SBK.ui.dock 决定入口形态，晚到会静默回落成旧的功能栏按钮排，也就是「设置按钮镶嵌在页面里」那个观感 bug）；inject/codex/map 三个扩展只依赖 core + ui kit，互不依赖，可单独裁剪。",
+  "hostId": "sbk-hud",
+  "_hostId": "功能栏宿主基名。首字符须为 ASCII 字母，其余只能字母/数字/_/-，总长最多 60；基座会派生 -chr/-pin，最终 DOM id 最多 64。事实卡 §3：document.currentScript 恒为 null，脚本无法自定位，只能靠固定 id 约定。",
+  "protocolTag": "状态",
+  "_protocolTag": "数据协议块标签名，对应模型输出的 [状态]…[/状态]（plan.md 2.3）。🚨 一律用方括号（plan.md 已裁决第 9 条）：事实卡 §5.4 的剥壳正则 /<\\/?([\\u4e00-\\u9fa5a-zA-Z0-9_]+)(\\s+[^>]*)?>/g 会把 <状态> 这类中文尖括号标签【整个删掉】（文字保留、标签消失）。正则管线跑在剥壳【之前】，所以场景规则的正则还看得见 <状态>、能把它换成 sbk-snap 外壳；但凡是从气泡 textContent 读标记的路径（hydrate 的兜底解析、功能栏精简条 pinned、做卡人自写脚本）拿到的都是剥壳后的裸行，标记已经没了，解析必然失败。方括号不是标签，全链路都活着。解析器兼容三族写法（方/尖/书名号），但文档与默认值一律方括号——别改回尖括号。不用平台的 $名字：数据源固定 $1 且须同时含 :: 与 ;;，表达力太弱（事实卡 §5.3）。",
+  "modes": {
+    "status": true,
+    "chrome": true,
+    "pinned": false
+  },
+  "_modes": "🚨 2.0 语义（基座2.0设计.md 第二节）：三者【职责不同】，不是同一份 schema 的多个渲染器。status＝气泡内状态面板，是【唯一】的状态数据渲染器（1.0 叫 snapshot），随消息滚动＝天然历史快照，默认开。chrome＝功能栏入口按钮组（主题/设置/侧边栏），【不渲染业务数据】，默认开。pinned＝功能栏常驻精简条，只显示 pinnedFields 的 1..3 项、单行无分组无标签，默认【关】。为什么这么分：1.0 的 {hud, snapshot} 是「两个渲染器渲染同一份 schema」，本示例曾经两个都开 → 实机截图里同时出现【两个一模一样的状态面板】；而且 hud 把状态数据放进功能栏，违反 MMD 惯例（功能栏历来放全局美化/侧边栏这类 chrome，状态栏历来在气泡内）。旧键仍被接受：snapshot→status 自动归一化；hud=true→pinned 并告警——⚠ 那【不是等价替换】，旧 hud 是完整面板，新 pinned 是单行精简条。要完整面板请开 status。",
+  "chrome": {
+    "form": "dock",
+    "side": "right",
+    "icon": "wrench"
+  },
+  "_chrome": "【可选】设置入口的形态。整块省略＝按默认走 dock，行为与本示例一致。form：dock＝贴视口边缘的一枚【图标】页签，点开是半页抽屉（默认，推荐）；bar＝旧的功能栏内按钮排（大按钮＋「设置」文字）。⚠ 之所以默认改成 dock：bar 形态走功能栏行内流，与平台自己的 chrome 挤在一条上，且功能栏实测 flex-shrink:1 会被消息区抢高度压扁，观感就是「设置按钮镶嵌在页面里」。side：导轨贴左还是贴右，默认 right。icon：页签图标名，只能取 gear/wrench/tools/sliders/map/book/spark/dots（与 sbk/ui-icon.js 的 ICONS 表逐字对齐；写表外的名字生成期就报错——运行时只会静默回落 gear 并在 ?sdkDebug=1 里留一行告警，真机没有控制台看不见）。label：设置面标题（≤6 字，默认「设置」）。dockLabel：页签的悬浮提示（≤6 字，默认同 label）。hoverOpen：false 关掉「悬停即滑出」，只允许点击。settings：false 彻底不要设置页签（此时必须自己传 entries/panes，否则整个入口没有内容、生成器会告警）。🚨 边界：本配置只表达【单入口的基础设置】这一种常见情形（一枚图标 → 阅读设置抽屉）。多页签、气泡面、导航栏分页那套富形态需要 pane 内容（DOM 节点或工厂函数），JSON 表达不了——那条路是作者自己写一条只放 <script> 的规则、直接调 SBK.ui.dock({tabs:[…]})。选型规则见 references/beautify/sandbox-kit.md。",
+  "_pinnedFields": "精简条要显示的字段名，1..3 项，取 schema.fields 里的 key。仅在 modes.pinned 为 true 时生效（此时必填，否则生成器报错——boot 会跳过整个模式，功能栏上什么都不出现）。上限 3 项是【形态约束】而非性能考虑：精简条必须与气泡面板明显不同，项数一多就又变成「同一份数据渲染两遍」。值一律压成短文本（bar 取 当前/上限，不画进度条），entities/tags 这类结构不进精简条。",
+  "_statusbar": "功能栏字段。modes.chrome 或 modes.pinned 任一开启就必须包含 markers.hud，否则宿主容器永远不出现——事实卡 §5.6：功能栏 h_() 只在装载时跑一次，且其正则输入是 statusbar 字段【自身】而非消息内容。这也是「动态状态栏只能靠作者 JS 改 DOM」的根因（硬约束 14）。上限 200 字符。",
+  "statusbar": "{{hud}}",
+  "_beginning": "开场白，上限 4000（事实卡 §6 运行时真值，创卡页 UI 同样显示 4000；skill 校验器写的 10240 是错的）。含状态块时须与 persona 的输出约定一致，且【必须用方括号】 [状态]…[/状态]（plan.md 已裁决第 9 条，尖括号会被剥壳正则删掉）。",
+  "beginning": "推开门，潮气裹着草药味涌上来。柜台后的女人抬眼看你。\n\n「来买药，还是来卖命？」\n\n[状态]\n体力: 84/100\n灵力: 30/60\n境界: 炼气三层|120/300\n银钱: 380\n装备: 头:斗笠|身:麻衣:防御+2|腰:药囊\n属性: 攻:12 防:8:破甲 敏:15\n位置: 内城-东市-药铺\n好感: 苏九=61, 阿澈=25\n标记: 初来乍到, 中毒\n[/状态]",
+  "_theme": "【制作期项目覆写】＝作者基线。语义名见 theme.js 的 MAP，也可直给 --chat-* / --sbk-*。扁平写法 = 两套主题同值；写 {dark:{},light:{}} 分别覆盖。🚨 2.1 起它【不再被静态编译进 sbk-css】（这是 1.0 的双通道缺陷：静态覆写 + theme.js 动态 <style> 两个所有者，于是「关闭美化」只清得掉动态那条，关了还是没跟随平台）。现在 theme 经 boot 信封下发给 theme.js，作三层合成的【最底层】：author base → 选中的 preset → 玩家 per-mode overrides，最终只有 theme.js 的一个 <style> 写主题。选择器仍是 [data-chat=\"root\"][data-theme=\"*\"]：特异度 (0,2,0) 高于平台的 (0,1,0)，深浅色切换不会覆盖回去，且不需要 !important（事实卡 §7.1 / 硬约束 10）。写 :root 完全无效——平台无 :root 定义。本例保留 theme 正是为了演示「项目级基线覆写」：它会被下面 preset 选中的风格包盖住同名令牌，但 preset 没写的令牌仍由它生效。",
+  "theme": {
+    "dark": {
+      "accent": "#c8a15a",
+      "surface": "#22201c",
+      "onAccent": "#1a1712"
+    },
+    "light": {
+      "accent": "#8a6a2f",
+      "surface": "#f4efe4",
+      "onAccent": "#ffffff"
+    }
+  },
+  "_presets": "六维风格包。两种写法：① 路径数组（相对本配置所在目录的 JSON），② 内联映射 {\"包名\":{六维…}}。六维键【恰好】 palette/layout/ui/font/cohesion/decoration，多一个少一个都报错（写错的维会整维静默不生效，实机看不出少了什么）。每维必须【双侧完整】给 dark 与 light：平台强制两套主题都存在、玩家随时可能切，只给一侧时另一侧回落平台原生令牌，实机现象是「切到浅色整卡失效」（盘点 E.3）。生成器把它们编译成 theme.register 可消费的 {tokens, tune} 放进 boot 信封——tune 是结构化数字（fontSize/lineHeight/opacity），这样 prefs.get 能回读它们而不必去反解析任意 CSS。生成期校验：未知六维键/未知令牌名/危险值一律 ERROR；正文 text 对 bg 与 surface ≥4.5:1，accent 作前景与 border 作关键图形 ≥3:1（只对可解析 hex 做严格检查，不可解析【也报错】而不是假通过——静默放行的后果可能是实机白底白字）。🚨 只列本卡真要用的包，绝不把整个风格库搬进来：每个包都要进 boot 规则的 replaceString，全量搬运会顶到 §6 长度上限，而玩家一次只用得上一套。",
+  "presets": [
+    "presets/素雅阅读.json",
+    "presets/密集状态.json",
+    "presets/表现性科技.json"
+  ],
+  "_preset": "默认风格包名，必须是 presets 里已注册的名字（不然生成器报错：theme.js 只接受已注册包名，实机会静默退回「只有 author base」）。它只作【首次默认】：玩家在设置面板里挑过风格包之后，存档里的选择优先。",
+  "preset": "素雅阅读",
+  "_schema": "状态栏 schema 经 SBK.boot() 归一化后交给 SBK.ui.snapshot；权威键名是 fields，rows 仅为会告警的兼容别名。SBK.ui.hud 只保留自定义控件注册入口，不再渲染状态面板。可选键：title、extra。不要使用已删除的 schema.persist；业务持久化显式调用 SBK.store.save/load/merge。",
+  "_schemaTypes": "合法 type 共十三种：十二个数据控件 bar/num/text/tags/entities/path/level/stats/kvlist/time/summary/turn，加版面项 section。time/summary/turn 只在 schema 显式指定时使用，不自动推断；option/bag/enemy 不在本轮。未知 type 生成期 ERROR，运行时告警一次并按 text 降级。",
+  "schema": {
+    "fields": [
+      {
+        "type": "section",
+        "label": "状态"
+      },
+      {
+        "key": "体力",
+        "type": "bar",
+        "label": "体力"
+      },
+      {
+        "key": "灵力",
+        "type": "bar",
+        "label": "灵力"
+      },
+      {
+        "key": "境界",
+        "type": "level",
+        "label": "境界"
+      },
+      {
+        "type": "section",
+        "label": "行囊"
+      },
+      {
+        "key": "银钱",
+        "type": "num",
+        "label": "银钱"
+      },
+      {
+        "key": "装备",
+        "type": "kvlist",
+        "label": "装备"
+      },
+      {
+        "key": "属性",
+        "type": "stats",
+        "label": "属性"
+      },
+      {
+        "type": "section",
+        "label": "见闻"
+      },
+      {
+        "key": "位置",
+        "type": "path",
+        "label": "位置"
+      },
+      {
+        "key": "好感",
+        "type": "entities",
+        "label": "好感"
+      },
+      {
+        "key": "标记",
+        "type": "tags",
+        "label": "标记"
+      }
+    ]
+  },
+  "_markers": "五个固定规则的触发串。必须是正文里不会出现的字面标记。生成器会把它们转义并统一包成 /…/ slash 形态（约定，为跨平台一致；裸字面量实机也生效——卡 64304 A/B 2026-08-30，与 worker 源码一致，生成器对裸字面量出 WARN 不出 ERROR）。绝不能用 /(?!)/ 这类零宽写法当\"永不匹配\"：那会触发 worker 的 empty-match 判定撤销整条规则（事实卡 §5.2）。",
+  "markers": {
+    "css": "{{sbk-css}}",
+    "core": "{{sbk-core}}",
+    "ui": "{{sbk-ui}}",
+    "hud": "{{hud}}",
+    "boot": "{{sbk-boot}}"
+  },
+  "idBase": -1,
+  "_idBase": "规则 id 起始负数，依次 -1,-2,…。id 必须为负数。",
+  "splitThreshold": 18000,
+  "_splitThreshold": "脚本自动拆条阈值（plan.md 已裁决第 7 条）。sbk-core 与 sbk-ui 超过此值就按【文件边界】自动拆成 sbk-core-1/-2、sbk-ui-1/-2…，各自获得唯一的 slash 形态标记（/{{sbk-ui-1}}/ 这类）。18000 = 编辑器显示上限 20000 留 2000 安全余量（运行时真值 100000，见事实卡 §6）。regexList 上限 130 条，拆条成本可忽略。🚨 拆条严格保持装载顺序 protocol.js → hud.js → ui.js：它们都依赖 core.js 已定义，且 hud.js/ui.js 用合并挂载往 SBK.ui 上追加，顺序错了会出现未定义引用。regex_scripts 数组序即装载顺序（worker 按 regexSort 升序）。绝不切开单个文件——每个文件本身是完整 IIFE，切开必然语法错；单文件自身超阈值时允许独占一条并告警。",
+  "_sceneRules": "场景规则（第 6 条起）。expectedMatches 用于输出预算估算：预算 = max(262144, 输入长度×4)，按条规则累计【所有匹配】的输出，超限整条规则回滚（事实卡 §5.2）。allowNonWhitelistTags 可跳过标签白名单告警。注意 replaceString 里的 </script> 必须写成 <\\/script>（§6.10）。",
+  "sceneRules": [
+    {
+      "scriptName": "sbk-snap",
+      "findRegex": "/\\[状态\\]([\\s\\S]*?)\\[\\/状态\\]/",
+      "replaceString": "<div class=\"sbk-snap sbk-card sbk-pre sbk-snap--raw\">$1</div>",
+      "expectedMatches": 1,
+      "_note": "气泡内状态面板（modes.status）的兜底外壳：正则先把协议块换成这层纯文本壳，再由 JS 升级成真面板。根元素【必须】带 .sbk-snap——否则 base.css 对 message-body 的 opacity:.9 与 white-space:pre-line 重置不生效（plan.md 已裁决第 4 条 / 硬约束 11）。🚨 还【必须】带 .sbk-snap--raw：hud.js 的 hydrate() 正是靠这个类找待升级节点（SBK.dom.all(root,'.sbk-snap--raw')），少了它 JS 升级永远不触发，气泡里只会留一段纯文本，而「真正的结构化渲染由 snapshot() 在 mount 回调内接管」这句就成了空话。🚨 壳内只放 $1，不要再套 <span class=\"sbk-label\">状态</span> 之类的装饰：hydrate 读的是节点 textContent，多出来的文字会被当成块体首行（「状态体力: 84/100」会被解析成键名「状态体力」）。.sbk-pre 保住解析失败时的换行观感——hydrate 的兜底分支也正是补这个类。",
+      "_regex": "🚨 方括号在正则里是元字符，【必须转义】：正确形态 /\\[状态\\]([\\s\\S]*?)\\[\\/状态\\]/，写进 JSON 再叠一层反斜杠。漏转义会变成字符类 [状态]（匹配「状」「态」任一字符），静默失效且极难排查。"
+    }
+  ],
+  "_personality": "人设文本。导入页不读该字段，须手工粘贴，此处仅随 JSON 归档。",
+  "personality": "你在扮演药铺老板苏九。\n\n输出约定：每次回复正文之后，追加一个状态块，格式固定（方括号，不要用尖括号）：\n[状态]\n体力: 当前/上限\n灵力: 当前/上限\n境界: 境界名|当前经验/升级所需\n银钱: 整数\n装备: 槽位:名|槽位:名:说明\n属性: 攻:数 防:数:说明 敏:数\n位置: 大区-中区-小地点\n好感: 名字=数值, 名字=数值\n标记: 标签, 标签\n[/状态]\n\n状态块内只写数据，不写描写。数值必须随剧情变化。"
+}

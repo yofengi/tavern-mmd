@@ -10,7 +10,7 @@
 - 视角/时态与文风条目一致
 - 长度300-800字为宜；首条开场白是体验门面，质量优先
 - 遵守 character.md 全部写作规则（八股化检查逐项过）
-- 若卡带状态栏：开场白末尾附首条完整数据块（格式见 beautify/statusbar.md 的AI生成规范——首条必须完整不省略，因为继承机制需要基准数据）
+- 若卡带状态栏：开场白末尾附首条完整数据块。当前 MMD 按 `beautify/statusbar.md` 与平台文档；MMD 沙盒按 `beautify/sandbox-kit.md` / `assets/sandbox-kit/sbk/协议说明.md`，首条必须使用完整 `[状态]…[/状态]` 作为基准。
 
 ## 多开场白（alternate_greetings）
 - 每个开场白=不同起点情境（不是同一场景改写）：不同时间线/不同关系阶段/不同地点
@@ -18,5 +18,9 @@
 - json位置：first_mes=主开场白；alternate_greetings=数组
 
 ## MMD注意
-- MMD开场白区域类名 .prologue-content，支持HTML渲染——可包含状态栏触发标记
-- 开场白内不要依赖<script>（旧版MMD会剥离；当前MMD虽支持但跨平台不保险）——状态栏由正则替换接管，开场白只放<status>数据块
+
+- 当前 MMD 开场白区域类名 `.prologue-content`，支持HTML渲染——可包含状态栏触发标记
+- **开场白只放触发标记与数据块，渲染一律交给正则替换**：这是两个 MMD 平台共同的做法，理由是职责分离（开场白是玩家看见的第一句话，不是代码容器），不是因为平台剥离 `<script>`。
+  - **当前 MMD `/mmd`**：`<script>` 可执行，但**做不了 per-message 自渲染/定位**，状态栏引擎只能用 `img onerror`（见 `../platforms/mmd.md` §4）。开场白里塞 `<script>` 解决不了任何问题，只会让首条消息变脆。
+  - **MMD沙盒模式 `/mmdsandbox`**：`<script>` 是一等公民，但**写在 `beginning` 里没有意义** —— 脚本由平台从**规则的替换内容**里抽出、装卡跑一次。专开一条规则只放 `<script>`（匹配式仍写 slash 形态且用正文不会出现的标记），`beginning` 只放触发串（如 `{{intro}}`）。`beginning` 硬上限 **4000 字**。
+- 若卡带状态栏：当前 MMD 的数据标记按 `/mmd` 状态栏方案；沙盒模式一律在正文末尾写完整 `[状态]…[/状态]`，可见 UI 的规则触发串另放 `statusbar` / `beginning`。不要把 `<status>` 或中文尖括号标记带进沙盒，worker 会剥掉它们。

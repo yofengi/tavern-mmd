@@ -18,10 +18,12 @@
 
 ## MMD 铁律
 
-- 注入 HTML 必须单行无换行（markdown 管线会把标签间换行补成空 `<p>` 撑出空白条）。
+- **注入 HTML 必须单行无换行**（markdown 管线会把标签间换行补成空 `<p>` 撑出空白条）。两个 MMD 平台都要守：当前 MMD 见 `../../platforms/mmd.md` §10.1；沙盒模式的形态是「HTML 不要缩进 4 个空格，否则被当代码块把源码印在页面上」（`../../platforms/mmd-sandbox.md` §6.5）。走 Shadow DOM（影渲法）可对空白条免疫。
 - 所有装饰性伪元素加 `pointer-events:none`（防挡点击）。
-- onerror/onclick 内代码单行无换行。
-- 毛玻璃 backdrop-blur 类一律标"待验证"，必须留 onerror 回退方案。
+- **onerror 内代码在当前 MMD 可多行**（`../../platforms/mmd.md` §2 实测）；真正的红线是属性用双引号包裹时**内部禁裸双引号**（会提前闭合属性、引擎静默不渲染）。`onclick` 属性值只能是干净的调用/引用表达式，不能塞代码字面量。
+- 毛玻璃 backdrop-blur 类一律标"待验证"，必须留回退方案（当前 MMD 用 onerror 载体回退；沙盒模式用纯 CSS 回退，见下）。
+
+> **沙盒模式（`/mmdsandbox`）差异**：本文的装饰全是纯 CSS，**可以照用**，但有三条要改：① 选择器不能写 `*{}` / `html{}` / `body{}` / `:root{}`，改用 `[data-chat="root"]`；② 颜色尽量走平台的 14 个 `--chat-*` 变量（实测确证，官方手册只记 10 个）而不是写死色值，否则深浅色切换跟不上；③ **回退方案不能用 `img onerror`**（官方明令禁止），要么纯 CSS 降级，要么在只放 `<script>` 的规则里处理。详见 `../../platforms/mmd-sandbox.md` §6。
 
 ## 各风格装饰
 
@@ -49,7 +51,7 @@
 | 20 | 金橙账本 | 橙金渐变 | 脉冲点pulse | 数据行 |
 | 21 | 粗体海报 | 超大标题 | 下划线CTA | — |
 | 22 | 动势野兽 | 跑马灯marquee | 反色按压 | 单行无换行；动画注意性能 |
-| 23 | 毛玻璃 | backdrop-blur | 光晕 | **MMD待验证，留onerror回退** |
+| 23 | 毛玻璃 | backdrop-blur | 光晕 | **MMD待验证，必须留回退**（当前 MMD 可用 onerror 载体；沙盒模式用纯 CSS 降级，onerror 被禁） |
 | 24 | 新野兽派 | 硬阴影4px | 3px黑边 | — |
 | 25 | 包豪斯 | 硬阴影4px | 点阵/几何 | — |
 | 26 | Y2K千禧 | 金属渐变 | 光泽glossy/glow | — |

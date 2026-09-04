@@ -554,5 +554,99 @@ class TestTitleLengthLimit(unittest.TestCase):
             self.assertNotIn("[WARN]", buf.getvalue())
 
 
+class TestSandboxPlatformTitleLimit(unittest.TestCase):
+    """锁定决策 D8：沙盒模式（mmdsandbox）保留 20 字上限但降级为 WARN——
+    限制来源是 MMD 创卡页 UI（与 chatVersion 无关，故沙盒仍在册），
+    但官方 validate-worldbook.mjs 不检查该项，故只告警不阻断交付。"""
+
+    @staticmethod
+    def _sandbox_project(d):
+        root = Path(d) / "wb"
+        cfg = wt.ensure_project(root)
+        cfg["platform"] = "mmdsandbox"
+        wt.save_config(root, cfg)
+        return root
+
+    def test_limit_still_applies_to_sandbox(self):
+        """黑名单语义：沙盒不是 st，20 字上限照样在册。"""
+        cfg = {"platform": "mmdsandbox"}
+        self.assertTrue(wt.enforces_comment_limit(cfg))
+        self.assertFalse(wt.comment_limit_is_hard(cfg))
+        self.assertIsNotNone(wt.comment_length_problem(TITLE_21, "e0001", cfg))
+
+    def test_add_accepts_over_length_title_with_warning(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self._sandbox_project(d)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = wt.main(["add", str(root), "--layer", "00-世界设定层",
+                              "--title", TITLE_21, "--constant", "true"])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0)                                  # 不阻断
+            self.assertEqual(wt.find_entry(root, "e0001")["title"], TITLE_21)
+            self.assertIn("[WARN]", out)
+            self.assertIn("超过 MMD 上限", out)
+
+    def test_add_stays_silent_within_limit(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self._sandbox_project(d)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(wt.main(["add", str(root), "--layer", "00-世界设定层",
+                                          "--title", TITLE_20, "--constant", "true"]), 0)
+            self.assertNotIn("[WARN]", buf.getvalue())
+
+    def test_rename_accepts_over_length_title_with_warning(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self._sandbox_project(d)
+            wt.main(["add", str(root), "--layer", "00-世界设定层",
+                     "--title", "原标题", "--constant", "true"])
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = wt.main(["rename", str(root), "--entry", "e0001", "--title", TITLE_21])
+            self.assertEqual(rc, 0)
+            self.assertEqual(wt.find_entry(root, "e0001")["title"], TITLE_21)
+            self.assertIn("[WARN]", buf.getvalue())
+
+    def test_check_reports_warning_not_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self._sandbox_project(d)
+            with contextlib.redirect_stdout(io.StringIO()):
+                wt.main(["add", str(root), "--layer", "00-世界设定层",
+                         "--title", TITLE_21, "--constant", "true"])
+            errors, warnings = wt.check_project(root, None)
+            self.assertEqual([e for e in errors if "上限" in e], [])
+            self.assertTrue(any("超过 MMD 上限" in w for w in warnings))
+
+    def test_build_still_warns(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "工作" / "世界书"
+            cfg = wt.ensure_project(root)
+            cfg["platform"] = "mmdsandbox"
+            wt.save_config(root, cfg)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                wt.main(["add", str(root), "--layer", "00-世界设定层",
+                         "--title", TITLE_21, "--constant", "true"])
+                self.assertEqual(wt.main(["build", str(root), "--out", "output/wb.json"]), 0)
+            self.assertIn("超过 MMD 上限", buf.getvalue())
+
+    def test_mmd_still_hard_rejects_and_st_unchecked(self):
+        """同一超长标题在三平台上的分流：mmd 拒绝 / mmdsandbox 放行告警 / st 不查。"""
+        for platform, expect_rc in (("mmd", 2), ("mmdsandbox", 0), ("st", 0)):
+            with tempfile.TemporaryDirectory() as d:
+                root = Path(d) / "wb"
+                cfg = wt.ensure_project(root)
+                cfg["platform"] = platform
+                wt.save_config(root, cfg)
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = wt.main(["add", str(root), "--layer", "00-世界设定层",
+                                  "--title", TITLE_21, "--constant", "true"])
+                self.assertEqual(rc, expect_rc, "platform=%s" % platform)
+                warned = "[WARN]" in buf.getvalue()
+                self.assertEqual(warned, platform == "mmdsandbox", "platform=%s" % platform)
+
+
 if __name__ == "__main__":
     unittest.main()

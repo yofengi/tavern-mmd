@@ -5,16 +5,28 @@
 > 现成生成器在 `../../assets/shadowcast-examples/`（`build_demo.py` 状态栏、`build_float.py` 悬浮组件），改字段/改配色即可复用。
 > **2.0 强化（吸收哨兵雷达法 sd3 卡【280366】的架构启发，浏览器三路验证通过）**：① shadow→light DOM 降级链，attachShadow 不可用环境照常渲染；② `adoptedStyleSheets` + 跨气泡缓存单张 sheet；③ 事务式渲染（建好再挂载，异常回退纯净态）。该卡是用户提供的社区资产快照，作者、原 URL 与许可证未记录，仅作兼容研究参考，不宣称原创；ShadowCast 2.0 为吸收架构启发后的重写实现。详见末节「2.0 强化」。
 
+> 🚨 **平台归属：本文档只针对当前 MMD（`/mmd`）与本地酒馆（`/st`）。MMD沙盒模式（`/mmdsandbox`）不可用本方案。** 两条独立原因：① 影渲法的点火载体是 `img onerror`，而沙盒模式**官方明令禁止 `img onerror` 点火器与 teapot 系写法**；② 沙盒的运行容器形态已由实测查明——它是**部署在独立子域的 Vue 应用、以跨源 iframe 嵌入宿主**（`window===window.top` 为 false、`getRootNode()===document` 为真），且 `document.currentScript` **恒为 `null`**（走 eval，无 script 节点）。所以 `attachShadow` 自定位这套写法在那里既无依据也无收益：**iframe 本身就是隔离边界，再套 Shadow DOM 是纯负债**（平台 14 个 `--chat-*` 令牌定义在 iframe 文档的 `[data-theme]` 上，shadow 内继承不到具体规则，主题得重搭一遍）。沙盒模式做状态栏走「专开一条规则只放 `<script>`」+ `sdk.on('message:mount')` + 长期面板挂 `sdk.stage`，规范见 `../platforms/mmd-sandbox.md`。**本文档的双轨代谢、全量快照协议、schema 驱动字段设计仍可参考，渲染载体必须整体重写。**
+>
+> **而渲染载体已经有现成的了**：沙盒模式做状态栏/美化请直接用基座 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`），方法论见 `sandbox-kit.md`。基座封装脚本点火、事件时序、light DOM 渲染、`status/chrome/pinned` 三职责、主题与 z-index；你只需搬**与载体无关的部分**：双轨代谢字段分类、全量快照协议、schema 驱动字段设计。本文档配套的模型侧协议也可参考，但标记必须换成方括号 `[状态]`。
+
 ## 一句话内核
 
 模型每轮吐**全量快照**到 light DOM 隐藏 span → `img onerror` 点火 → `attachShadow` 把 UI 渲进 **shadow root**（隔离）→ 数据留 light（可扫描跨轮恢复）、UI 进 shadow（不过 markdown、不被染色）。
+
+> 🚨 **shadow CSS 首条必须写 `:host{white-space:normal}`**（2026-08-28 实测补正）。`white-space` 是**继承属性**，会穿过 shadow 边界从 host 气泡（`.content{white-space:pre-line}`）继承进来 —— shadow 隔离的是**选择器**，不隔离继承属性。实测 shadow 内 computed 值就是 `pre-line`，标签间换行同样撑出空白条（102px vs 子元素合计 51px）。本文档早期版本称"进 shadow 即对空白条免疫"，**那一条是错的**；`applyCss()` 注入的 `CSS` 文本开头请固定带上：
+>
+> ```css
+> :host{white-space:normal}
+> ```
+>
+> light DOM 降级路径（`styleLight()`）同理，需 `.g3-panel{white-space:normal}`。机制与证伪过程见 `../platforms/mmd.md` §13 与 `statusbar-radar.md`「MMD换行空白条陷阱」。
 
 ## 与雷达法 / KV V4.0 的选型对比
 
 | 维度 | 影渲法（本文档） | 雷达法（statusbar-radar.md） | KV V4.0（statusbar.md） |
 |---|---|---|---|
 | UI 载体 | **Shadow DOM**（隔离） | light DOM + 防御补丁 | light DOM 预制骨架 |
-| markdown 空白条 | **免疫**（shadow 不过 markdown 管线） | 需源头压平 + 三件套防御 CSS | 需防御 CSS |
+| 换行空白条 | **不免疫**，需 `:host{white-space:normal}`（`white-space` 是继承属性，穿过 shadow 边界；2026-08-28 实测 shadow 内 computed 仍是 `pre-line`） | 需 `white-space:normal` 或源头压平 | 同左 |
 | 平台强制染色 | **免疫**（shadow 边界天然挡） | 需 MutationObserver 哨兵剥离 | 无防御 |
 | CSS 类名冲突 | **免疫**（shadow 内隔离，无需前缀） | 需 `z-` 前缀 | 需前缀 |
 | 防平台重绘 | onerror 重新点火自动水合（幂等）；2.0 事务回退不留破碎 UI | 探针自检 + 2.5s 重建 | 无 |
@@ -113,7 +125,7 @@ light 路径：g3- 前缀类名零冲突，面板照常显示（降级兜底，�
 
 - **挂 body 挣脱气泡 stacking context**：`document.body.appendChild(wrap)`，shadow 内 `position:fixed` + `z-index:2147483647`，浮在消息气泡和输入框之上（解决"放开场白球被消息盖住"）。
 - **单例防重**：`if(document.getElementById('zsf-ball-wrap'))return;`——每条消息 onerror 都触发，但已存在就跳过，屏幕只有一个球。完整 reload 会重建 document，body 注入节点随之消失；后续消息可重新点火创建，这不是 `<script>` 能力或持久性的结论。
-- **拖动**：`mousedown/touchstart` 记起点 → `mousemove` 改 `style.left/top`（单属性放行）→ 移动超 3px 记为拖动、否则算点击展开菜单。本体夹取进视口（`Math.max/min`，注意铁律1 不能用 `<`/`>`）。
+- **拖动（统一 Pointer Events）**：`pointerdown` 记起点 + `setPointerCapture(pointerId)` → `pointermove` 改 `style.left/top`（单属性放行）→ 移动超 3px 记为拖动、否则 `pointerup` 里算点击展开菜单。本体夹取进视口（`Math.max/min`）。**别再 `mousedown`+`touchstart` 双绑**——移动端浏览器会补发模拟鼠标事件，双绑导致 `up()` 二次触发、菜单闪开即关，详见 `floating-components.md`「陷阱 5」。
 - **菜单跟随 + 翻转避裁**：拖动时 `reposition()` 重算菜单坐标；上方放得下放上方、否则翻下方；水平夹取进视口。
 - **回填输入框**：选择器用 `'textarea, input'+LB+'type=text'+RB`（LB/RB 由 `fromCharCode` 拼，避铁律3），`dispatchEvent(new Event('input',{bubbles:true}))`。
 
@@ -123,7 +135,7 @@ light 路径：g3- 前缀类名零冲突，面板照常显示（降级兜底，�
 
 ### 事件绑定
 
-shadow 内 `el.onclick=function(){}` 与 `el.addEventListener` 两种都通（实测靶9）。最外层 `ev.stopPropagation()` 防冒泡到气泡。
+shadow 内 `el.onclick=function(){}` 与 `el.addEventListener` 两种都通（实测靶9）。最外层 `ev.stopPropagation()` 防冒泡到气泡。可拖动本体的按下/移动/抬起统一走 Pointer Events（`pointerdown/pointermove/pointerup/pointercancel`），并额外绑一个 `click`→`stopPropagation` 吸收触摸补发的 click；不要 `mousedown`+`touchstart` 双绑（见 `floating-components.md`「陷阱 5」）。
 
 ---
 

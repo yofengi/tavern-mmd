@@ -6,10 +6,12 @@ tavern-mmd 审核脚本 validate.py
 不渲染、不联网、不依赖第三方库。子代理可直接调用以节约上下文。
 
 用法:
-  python validate.py <文件> --type <regex|card|worldbook> --platform <oldmmd|mmd|st>
+  python validate.py <文件> --type <regex|card|worldbook> --platform <mmd|mmdsandbox|st>
 
   --type 省略时按文件内容自动猜测。
-  --platform 省略时默认 oldmmd（最严格）。
+  --platform 省略时默认 mmd（当前MMD）。
+  mmdsandbox = MMD沙盒模式（新聊天页，由角色卡 chatVersion:1 开启），
+  规则集与 mmd 有系统性差异：6 键导入 JSON、findRegex 允许纯字面量、SDK 名核对。
 
 退出码: 0=无错误(可能有警告)  1=有错误  2=用法/读取错误
 输出: 文本报告，[ERROR]/[WARN]/[OK] 前缀，便于人和AI阅读。
@@ -35,6 +37,88 @@ MAX_COMMENT_LEN = 20
 
 MMD_TOP_LEVEL_KEYS = ("pageDepth", "statusbar", "beginning", "regex_scripts")
 MMD_SCRIPT_KEYS = ("id", "scriptName", "findRegex", "replaceString")
+
+# MMD 系平台集合。沙盒模式是同一平台的新聊天页（chatVersion:1），不是新后端，
+# 故平台侧限制（世界书标题等）与 mmd 同源，但执行模型/校验规则差异极大。
+MMD_FAMILY = ("mmd", "mmdsandbox")
+
+# ---- 沙盒模式（MMD 新聊天页）常量。全部对齐官方 scripts/validate.mjs ----
+# 顶层键白名单：恰好 6 键（mmd-sandbox.md §8.1）
+SANDBOX_TOP_LEVEL_KEYS = (
+    "chatVersion", "pageDepth", "statusbar", "beginning", "personality", "regex_scripts",
+)
+# 出现即 ERROR 的顶层键：世界书/回归夹具形状塞进导入 JSON（mmd-sandbox.md §8.1）
+SANDBOX_FORBIDDEN_TOP_LEVEL_KEYS = (
+    "role", "presentation", "worldbook", "world_book", "lorebook", "lore_book",
+    "entries", "characterBook", "character_book",
+)
+# 长度上限（mmd-sandbox.md §8 + 基座事实卡 §6）。
+#
+# 【双阈值设计，勿「修正」】沙盒应用源码里可见的归一常量（事实卡 §6）：
+#   var Us={beginning:4e3,statusbar:200,imageUrl:2048,name:200,regex:4096,
+#           content:1e5,regexList:130};
+#   function Ws(e,t){...e.length>t?e.slice(0,t)...}   // 该源码路径会静默裁切
+# 创卡页 UI 显示值更严（name 20 / regex 1000 / content 20000）。证据分级：
+#   name 20/200 与 regex 1000/4096 是否构成 editor/import 双路径、超限如何失败仍未确证；
+#   校验器在源码归一观察值外继续报 ERROR，是防损坏的保守交付门禁，不声称真实站必然如何失败；
+#   content 例外：编辑器 20000 静默拒绝整次保存、导入 100000 已实测确认；
+#   beginning=4000 与 UI 计数器一致，官方 validate.mjs 的 10240 会放行坏产物，故按 4000 ERROR。
+SANDBOX_MAX_STATUSBAR = 200
+SANDBOX_MAX_BEGINNING = 4000
+SANDBOX_MAX_PERSONALITY = 10000
+SANDBOX_MAX_SCRIPT_NAME = 20
+SANDBOX_MAX_SCRIPT_NAME_HARD = 200
+SANDBOX_MAX_FIND_REGEX = 1000
+SANDBOX_MAX_FIND_REGEX_HARD = 4096
+SANDBOX_MAX_REPLACE_STRING = 20000
+SANDBOX_MAX_REPLACE_STRING_HARD = 100000
+SANDBOX_MAX_RULES = 130
+
+# SDK 能力名（30 个）与事件名（12 个）。**镜像官方 contract.json 的 capabilities /
+# events 两张表**（mmd-sandbox.md §4.1 / §4.9）。名字拼错平台不报错、只是永不生效，
+# 所以官方校验对未知名判 ERROR，本脚本同步。SDK 升版时只改这两个常量即可。
+SANDBOX_SDK_CAPABILITIES = frozenset((
+    "input.get", "input.set", "input.add", "input.insert", "input.clear",
+    "input.focus", "input.blur", "input.getCursor", "input.setCursor",
+    "composer.show", "composer.hide", "composer.visible",
+    "message.send", "message.edit",
+    "cache.get", "cache.set", "cache.remove",
+    "save.get", "save.set", "save.remove", "save.keys",
+    "stage.open", "stage.close", "stage.el", "stage.visible",
+    "role.get", "user.get", "on", "debug.log", "version",
+))
+SANDBOX_SDK_EVENTS = frozenset((
+    "ready", "message:new", "message:done", "message:stream", "message:mount",
+    "message:unmount", "input:change", "conversation:switch", "theme:change",
+    "back", "stage:close", "dispose",
+))
+# sdk.role.get() / sdk.user.get() 的返回字段（mmd-sandbox.md §4.7）
+SANDBOX_ROLE_FIELDS = frozenset(("name", "avatarUrl"))
+SANDBOX_USER_FIELDS = frozenset(("nickname", "avatarUrl"))
+# contract.json 里只有 on，没有 once/off（实测两者均 undefined）。
+# 🚨 补发规则与手册相反：有 late replay 的是 message:mount / message:done，**ready 没有**
+# （事实卡 §4.1）。订阅不可撤销，唯一退订是内部 Ac()，它会清掉所有脚本的全部订阅。
+SANDBOX_SDK_MISSING_CAPABILITIES = ("once", "off")
+# 规则输出预算（事实卡 §5.2，手册与三份包分析都未提，对状态栏致命）：
+#   let a=Math.max(262144, e.length*4)
+# 按条规则累计所有匹配的输出，超预算 → **整条规则回滚**，页面上完全不生效只留告警。
+SANDBOX_OUTPUT_BUDGET_FLOOR = 262144
+SANDBOX_OUTPUT_BUDGET_INPUT_MULTIPLIER = 4
+
+# 命名空间首段集合，供「sdk.input」这类只写首段的引用放行。
+SANDBOX_SDK_NAMESPACES = frozenset(
+    name.split(".", 1)[0] for name in SANDBOX_SDK_CAPABILITIES if "." in name
+)
+
+# 平台自己的 data-* 钩子；作者自写的 data-* 会被净化删掉（mmd-sandbox.md §5）。
+SANDBOX_PLATFORM_DATA_ATTRS = frozenset((
+    "data-chat", "data-slot", "data-theme", "data-composer", "data-from",
+    "data-state", "data-msg-id",
+))
+# 会被净化删掉的标签（mmd-sandbox.md §5.2）
+SANDBOX_FORBIDDEN_TAGS = ("iframe", "link", "meta", "form", "object", "embed")
+# 创卡页文案禁的匹配式保留字；线上真卡有用 `【css】` 当匹配式的，故仅 WARN。
+SANDBOX_RESERVED_IN_PATTERN = ("html", "head", "body", "css")
 
 _NODE_REGEX_ORACLE = (
     "const fs=require('fs');"
@@ -235,8 +319,9 @@ def check_onerror_inner_quote(s, platform, where):
     三组对照确认的唯一引号红线。修法：内部字符串全用单引号，CFG/CSS 用单引号 JS 字面量
     序列化（非 json.dumps）。仅 MMD 系平台（onerror 是注入载体）。
     注：裸 < > => 在 onerror 引号内经实机证实无害（HTML 属性值不解析标签；雷达法引擎
-    满是 i<n/c>0 实战正常），不在此检查——曾误立的"禁裸 <>"已撤销。"""
-    if platform not in ("oldmmd", "mmd"):
+    满是 i<n/c>0 实战正常），不在此检查——曾误立的"禁裸 <>"已撤销。
+    沙盒模式不适用：onerror 点火器被官方明令禁止，<script> 是一等公民。"""
+    if platform != "mmd":
         return
     bad = 0
     for m in re.finditer(r"\bonerror\s*=\s*\"", s, re.I):
@@ -256,15 +341,326 @@ def check_onerror_inner_quote(s, platform, where):
             '字面量序列化（勿用 json.dumps）。' % (where, bad))
 
 
+# ============ 沙盒模式（MMD 新聊天页）专项检查 ============
+
+_SANDBOX_SDK_REF = re.compile(
+    r"\bsdk\.(" + _JS_IDENT + r")(?:\.(" + _JS_IDENT + r"))?")
+_SANDBOX_SDK_ON = re.compile(
+    r"\bsdk\.on\s*\(\s*(?P<quote>['\"])(?P<event>[^'\"]*)(?P=quote)")
+_SANDBOX_ROLE_FIELD = re.compile(r"\bsdk\.role\.get\s*\(\s*\)\s*\.\s*(" + _JS_IDENT + r")")
+_SANDBOX_USER_FIELD = re.compile(r"\bsdk\.user\.get\s*\(\s*\)\s*\.\s*(" + _JS_IDENT + r")")
+
+
+def check_sandbox_sdk_names(s, where):
+    """SDK 能力名/事件名核对。名字拼错平台不报错、只是永不生效，故判 ERROR。
+
+    名单见 SANDBOX_SDK_CAPABILITIES / SANDBOX_SDK_EVENTS（镜像官方 contract.json）。"""
+    seen = set()
+    for m in _SANDBOX_SDK_REF.finditer(s):
+        first, second = m.group(1), m.group(2)
+        if first in SANDBOX_SDK_MISSING_CAPABILITIES:
+            if first in seen:
+                continue
+            seen.add(first)
+            err("%s 用了 sdk.%s——contract.json 里只有 sdk.on，没有 %s（实测两者均为 undefined）。"
+                "🚨 注意补发规则与手册相反：**有 late replay 的是 message:mount 与 "
+                "message:done，ready 没有**（事实卡 §4.1 实测）。冷启动首屏请挂 mount/done，"
+                "挂 ready 会晚一整轮；订阅不可撤销，请自带「已初始化」哨兵做单例幂等。"
+                % (where, first, first))
+            continue
+        dotted = "%s.%s" % (first, second) if second else first
+        if dotted in SANDBOX_SDK_CAPABILITIES:
+            continue
+        # 只写首段（如 `sdk.input` 整体传递）时放行
+        if not second and first in SANDBOX_SDK_NAMESPACES:
+            continue
+        if dotted in seen:
+            continue
+        seen.add(dotted)
+        err("%s 用了 sdk.%s——contract.json 里没有这个能力，平台不报错但**永不生效**。"
+            "请对照 30 个合法能力名逐字照抄。" % (where, dotted))
+    for m in _SANDBOX_SDK_ON.finditer(s):
+        event = m.group("event")
+        if event in SANDBOX_SDK_EVENTS or event in seen:
+            continue
+        seen.add(event)
+        err("%s sdk.on('%s')——不在 12 个合法事件名内，打错不报错、只是**永不触发**。"
+            "合法事件：%s。" % (where, event, "、".join(sorted(SANDBOX_SDK_EVENTS))))
+    for regex, allowed, call in ((_SANDBOX_ROLE_FIELD, SANDBOX_ROLE_FIELDS, "role"),
+                                (_SANDBOX_USER_FIELD, SANDBOX_USER_FIELDS, "user")):
+        for m in regex.finditer(s):
+            field = m.group(1)
+            key = "%s.get().%s" % (call, field)
+            if field in allowed or key in seen:
+                continue
+            seen.add(key)
+            err("%s sdk.%s.get().%s 不存在——返回对象只有 %s。"
+                % (where, call, field, "、".join(sorted(allowed))))
+
+
+class _TagAttributeParser(HTMLParser):
+    """收集真实开始标签上的全部属性，带标签名。script/style 文本不会被当属性扫描。"""
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.tags = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append((tag.lower(), [(n.lower(), v or "") for n, v in attrs]))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+
+def _extract_tags_with_attrs(s):
+    parser = _TagAttributeParser()
+    try:
+        parser.feed(s)
+        parser.close()
+    except (ValueError, TypeError):
+        return []
+    return parser.tags
+
+
+# 点火器判据：onerror 体在做代码注入/组件引导，而不是普通图片兜底。
+# 保守起见只认这几个明确的注入信号——误报 ERROR 比漏报 WARN 更糟。
+_SANDBOX_IGNITER_BODY = re.compile(
+    r"\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(\s*['\"]|"
+    r"\.innerHTML\s*=|\binsertAdjacentHTML\s*\(|document\.write\s*\(|"
+    r"\bcreateElement\s*\(\s*['\"]script|\bappendChild\s*\(|\bimport\s*\(",
+    re.I)
+# teapot 系写法（官方明令禁止的旧写法）
+_SANDBOX_TEAPOT = re.compile(
+    r"\bwindow\.teapot[A-Za-z0-9_$]*|\bteapot[A-Za-z0-9_$]*\s*=", re.I)
+
+
+def check_sandbox_redlines(s, where):
+    """沙盒模式红线（ERROR）：img onerror 点火器与 teapot 系写法。
+
+    两者在沙盒模式都被官方明令禁止，且完全不必要——<script> 是一等公民，
+    装卡即被抽出执行，不需要靠图片加载失败来点火。"""
+    for tag, attrs in _extract_tags_with_attrs(s):
+        if tag != "img":
+            continue
+        for name, value in attrs:
+            if name != "onerror":
+                continue
+            body = html_mod.unescape(value or "")
+            if _SANDBOX_IGNITER_BODY.search(body):
+                err("%s 用 <img onerror> 点火器注入代码——沙盒模式**官方明令禁止**（teapot 系写法），"
+                    "且完全不必要：<script> 是一等公民，装卡那一刻就被抽出执行。"
+                    "改法：**专开一条规则只放 <script>**，匹配式填正文用不到的词"
+                    "（如 {{卡名-kit}}），谁都不引用即可。" % where)
+    if _SANDBOX_TEAPOT.search(s):
+        err("%s 含 teapot 系写法——沙盒模式官方明令禁止。改用专开一条只放 <script> 的规则，"
+            "配合 sdk.on('message:mount') 给每条气泡绑事件。" % where)
+
+
+# 选择器前缘：串首、块结束、分号、空白，或 <style> 的 `>`。
+# 前缘限制是为了不误伤 [data-chat="message-body"]{...} 这类属性选择器。
+_SANDBOX_GLOBAL_CSS = (
+    # 裸 `*{}` 与后代/子组合子里的 `*` 必须分开：真正污染平台 chrome 的只有
+    # **选择器起始位置**的通用选择器。`.sbk-host *{}`、`.a > *{}` 已被祖先限定作用域，
+    # 是良好写法，不该报。原正则前缘含 `\s` 与 `>`，把 `.sbk-host ` 的那个空格
+    # 和 `.a > ` 的箭头都当成了前缘 → 误报。
+    # 现在前缘只认「选择器起始」：串首 / `}` 后（上一块结束）/ `;` 后 /
+    # `,` 后（逗号后另起一个裸选择器，`.a, *{}` 该报）/ `{` 后（@media 内首个选择器）/
+    # `<style>` 标签之后。注意 `>` 与空白**不**是前缘，那是组合子。
+    (re.compile(r"(?:^|[\},;{]|<style[^>]*>)\s*\*\s*\{"), "*{}"),
+    (re.compile(r"(?:^|[\}\;\s>])html\s*\{", re.I), "html{}"),
+    (re.compile(r"(?:^|[\}\;\s>])body\s*\{", re.I), "body{}"),
+    (re.compile(r":root\s*\{", re.I), ":root{}"),
+)
+_SANDBOX_MARKDOWN_CODE_BLOCK = re.compile(r"^[ ]{4,}<", re.M)
+
+
+def check_sandbox_content_warnings(s, where):
+    """沙盒模式 WARN（全部来自官方 validate.mjs）：净化、禁用标签、全局 CSS、
+    Markdown 代码块、订阅位置、自问自答死循环、「消息生成中」占位陷阱。"""
+    # 作者自写 data-* 会被净化删掉 → 自己的按钮用 class 或 id
+    author_attrs = []
+    for _tag, attrs in _extract_tags_with_attrs(s):
+        for name, _value in attrs:
+            if name.startswith("data-") and name not in SANDBOX_PLATFORM_DATA_ATTRS:
+                if name not in author_attrs:
+                    author_attrs.append(name)
+    if author_attrs:
+        warn("%s 可见 HTML 上自写 %s——沙盒模式会把作者自写的 data-* **净化删掉**，"
+             "选择器会失效。自己的节点用 class 或 id。" % (where, "、".join(author_attrs)))
+    # 会被净化删掉的标签
+    present = [t for t in SANDBOX_FORBIDDEN_TAGS if re.search(r"<%s\b" % t, s, re.I)]
+    if present:
+        warn("%s 含 <%s>——不在沙盒模式标签白名单内，会被净化删掉。"
+             % (where, ">、<".join(present)))
+    # 禁全局 CSS
+    hits = [label for regex, label in _SANDBOX_GLOBAL_CSS if regex.search(s)]
+    if hits:
+        warn("%s 含全局 CSS %s——沙盒模式禁全局 CSS（会污染平台 chrome）。"
+             '改用 [data-chat="root"] 作用域。' % (where, "、".join(hits)))
+    # 替换内容会过一遍 Markdown：缩进 4 空格的 HTML 会被当代码块原样显示
+    if _SANDBOX_MARKDOWN_CODE_BLOCK.search(s):
+        warn("%s 有行缩进 4+ 空格后紧跟 <——替换内容会过一遍 Markdown，"
+             "这会被当**代码块**原样显示成源码。HTML 不要缩进 4 空格。" % where)
+    # 订阅应写在脚本体，不要写在 mount 回调里（每挂一条气泡就重复订阅一次）
+    mount = re.search(r"sdk\.on\s*\(\s*['\"]message:mount['\"]", s)
+    if mount and re.search(r"sdk\.on\s*\(", s[mount.end():mount.end() + 1200]):
+        warn("%s 在 sdk.on('message:mount') 之后不远处又出现 sdk.on(——"
+             "订阅要写在**脚本体**里，写进 mount 回调会每挂一条气泡就重复订阅一次。" % where)
+    if re.search(r"sdk\.on\s*\(\s*['\"]ready['\"]", s):
+        warn("%s 订阅 ready——ready **没有 late replay**，且冷启动排在 message:new → "
+             "message:mount → message:done 之后。它只适合时序/诊断信号；首屏渲染请订 "
+             "message:mount 或 message:done。" % where)
+    # message:done + message.send 同条 = 自问自答死循环
+    if "message:done" in s and re.search(r"sdk\.message\.send\s*\(", s):
+        warn("%s 同一条规则里既有 message:done 又有 sdk.message.send(——"
+             "收到回复就再发一条会做成**自问自答死循环**。请加状态位或改由用户手势触发。" % where)
+    # 「消息生成中」占位陷阱
+    if (mount and '[data-chat="message-body"]' in s
+            and (re.search(r"message\.send\s*\(", s) or "message:stream" in s)):
+        warn("%s 从 message:mount 里读 [data-chat=\"message-body\"]——"
+             "空 AI 气泡刚挂上时那里是平台占位「消息生成中」，**不是模型回的字**。"
+             "跟字用 message:stream 的 msg.content，收尾用 message:done 的 msg.content；"
+             "content 空时也不要退回去读 DOM。" % where)
+
+
+# SAFE_FOR_XML 危险形态（事实卡 §5.5，逐字照抄源码判据）：属性值命中即**整条属性被删**，
+# 且发生在 forceKeepAttr 之前 —— 所以连 on* 都保不住。
+_SANDBOX_SAFE_FOR_XML = re.compile(
+    r"((--!?|\])>)|</(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)",
+    re.I)
+
+
+def _svg_spans(s):
+    """返回 [(start, end)] 覆盖每个 <svg>…</svg>。用于区分 SVG 内外的 on*。"""
+    spans = []
+    for m in re.finditer(r"<svg\b", s, re.I):
+        close = re.search(r"</svg\s*>", s[m.start():], re.I)
+        spans.append((m.start(), m.start() + (close.end() if close else len(s) - m.start())))
+    return spans
+
+
+def check_sandbox_sanitization(s, where):
+    """已确证的净化子集（事实卡 §5.5）。逐项都有实机或源码依据，不含推测项。"""
+    # aria-* 与 role 被删（ALLOW_ARIA_ATTR:!1）。属平台限制，不是作者写错 → WARN。
+    aria = []
+    for _tag, attrs in _extract_tags_with_attrs(s):
+        for name, _value in attrs:
+            if (name.startswith("aria-") or name == "role") and name not in aria:
+                aria.append(name)
+    if aria:
+        warn("%s 用了 %s——沙盒净化 ALLOW_ARIA_ATTR 为关，**aria-* 与 role 会被删掉**。"
+             "无障碍在此平台受限（属平台限制，非卡片缺陷）；语义靠原生标签承载。"
+             % (where, "、".join(sorted(aria))))
+    # SVG 内 on* 被删；HTML 元素上所有 on* 保留（实测 onclick/onmouseenter 均 KEPT）。
+    spans = _svg_spans(s)
+    if spans:
+        for m in re.finditer(r"\bon[a-z]+\s*=", s, re.I):
+            if any(a <= m.start() < b for a, b in spans):
+                warn("%s 在 <svg> 内写了 %s——SVG 内的 on* 会被净化删除（实测 "
+                     "<circle onclick> 被删）。交互请挂到 HTML 壳上。"
+                     % (where, m.group(0).rstrip("= ").strip()))
+                break
+    # SAFE_FOR_XML：属性值里出现 ]> / --> / --!> 或闭合标签片段 → 整条属性被删。
+    for _tag, attrs in _extract_tags_with_attrs(s):
+        for name, value in attrs:
+            if value and _SANDBOX_SAFE_FOR_XML.search(value):
+                warn("%s 属性 %s 的值命中 SAFE_FOR_XML 危险形态（]> / --> / --!> / "
+                     "</style 等）——**整条属性会被删掉**，且发生在 on* 强留之前，"
+                     "所以连 onclick 都保不住。比较运算符两侧留空格（写 `a[0] > 1` 而非 "
+                     "`a[0]>1`）即可规避。" % (where, name))
+                return
+
+
+def _sandbox_pipeline_input_text(obj):
+    """规则管线的输入文本估计值：statusbar + beginning。
+
+    真机输入是整条消息正文（通常更长 → 预算更宽），所以这个估计**偏严不偏松**：
+    这里报预算超限的，真机一定也超；这里放行的，真机可能仍然安全。"""
+    if not isinstance(obj, dict):
+        return ""
+    parts = []
+    for field in ("statusbar", "beginning"):
+        value = obj.get(field)
+        if isinstance(value, str):
+            parts.append(value)
+    return "".join(parts)
+
+
+def sandbox_output_budget(input_length):
+    """单条规则的输出预算：max(262144, 输入长度×4)（事实卡 §5.2 逐字常量）。"""
+    return max(SANDBOX_OUTPUT_BUDGET_FLOOR,
+               int(input_length) * SANDBOX_OUTPUT_BUDGET_INPUT_MULTIPLIER)
+
+
+def check_sandbox_output_budget(fr, rs, input_text, where):
+    """输出预算与空串匹配。两者都导致**整条规则回滚**（页面上完全不生效，只留告警）。
+
+    input_text 是本地可见的 statusbar + beginning 样本。真实消息通常更长，故结果只对
+    当前样本作保守诊断，绝不把未知的真实消息长度伪装成精确模拟。"""
+    source = input_text if isinstance(input_text, str) else ""
+    budget = sandbox_output_budget(len(source))
+    if isinstance(rs, str) and len(rs) > budget:
+        err("%s replaceString 单条 %d 字，超过输出预算 %d（=max(262144, 输入长度×4)）"
+            "——命中 `replacement-alone`，**整条规则回滚**，页面上这条完全不生效。"
+            % (where, len(rs), budget))
+    if not isinstance(fr, str):
+        return
+    if sandbox_pattern_delivery_error(fr):
+        return                            # 形态本身已判错，不叠加预算判罚
+    parsed = _split_findregex_literal(re.sub(r"^`|`$", "", fr.strip()))
+    if parsed is None:
+        return
+    pattern, flags = parsed
+    if "g" not in flags:
+        flags += "g"                    # worker 会自动补 g，预算必须统计所有命中
+    regex, _flags, reason = _compile_js_regex_for_preview("/%s/%s" % (pattern, flags))
+    if regex is None or reason:
+        return                            # 预览器模拟不了这条正则，不猜它是否匹配空串
+    if regex.search(""):
+        err("%s findRegex 能匹配**空串**——每个位置都会插一次替换内容，瞬间撑爆输出预算，"
+            "命中 `empty-match` 后**整条规则回滚**。请把 `*` 改 `+`、去掉可全空的分支，"
+            "确保匹配式至少吃掉一个字符。" % where)
+        return
+    total = 0
+    for match in regex.finditer(source):
+        total += len(_expand_js_replacement(rs, match, source))
+        if total > budget:
+            err("%s 所有命中的替换内容累计 %d 字，超过输出预算 %d——命中 `volume`，"
+                "**整条规则回滚**，页面上这条完全不生效。" % (where, total, budget))
+            return
+
+
+def check_sandbox_find_regex_content(fr, where):
+    """匹配式的内容禁令（WARN）：别含 HTML 标签或独立保留字。"""
+    if re.search(r"<[a-zA-Z/]", fr):
+        warn("%s findRegex 含 HTML 标签——平台不建议，匹配式应是正文里的标记词。" % where)
+    # 单词边界比官方 validate.mjs 的 `(^|[^A-Za-z])w([^A-Za-z]|$)` 更窄：
+    # 边界排除了 `-` 与 `_`，所以连字符/下划线复合标识符里的保留字不再误报。
+    # 起因：基座装载标记名形如 `/{{sbk-css}}/`，`css` 前是 `-`、后是 `}`，
+    # 按官方算法算「独立保留字」被误 WARN。而 `sbk-css` 显然是一个整体标识符，
+    # 不是创卡页文案禁的那个裸保留字。规则本身保留（官方文档确有此禁令，
+    # 且线上真卡有用 `【css】` 当匹配式的，故仍只 WARN）。
+    hit = [w for w in SANDBOX_RESERVED_IN_PATTERN
+           if re.search(r"(^|[^A-Za-z_-])%s([^A-Za-z_-]|$)" % w, fr, re.I)]
+    if hit:
+        warn("%s findRegex 含独立保留字 %s——创卡页文案禁用，建议换词。"
+             % (where, "、".join(hit)))
+
+
 def check_comment_length(comment, platform, where):
-    """世界书条目标题（comment）长度。MMD 上限 20 字，超出在平台侧被截断；st 无限制。"""
-    if platform not in ("oldmmd", "mmd"):
+    """世界书条目标题（comment）长度。MMD 上限 20 字，超出在平台侧被截断；st 无限制。
+
+    沙盒模式**故意降级为 WARN**（锁定决策 D8）：沙盒是同一 MMD 平台的新聊天页，
+    20 字来源是创卡页 UI，限制仍在，但官方 validate-worldbook.mjs **不检查该项**，
+    判 ERROR 会与官方校验结论冲突。请勿"顺手修正"成 ERROR。"""
+    if platform not in MMD_FAMILY:
         return
     if not isinstance(comment, str):
         return
     if len(comment) > MAX_COMMENT_LEN:
-        err("%s 标题共 %d 字，超过 MMD 上限 %d 字——导入后标题被截断。"
-            "请精简标题，去掉【】·— 等装饰符（装饰符同样占额度）。" % (where, len(comment), MAX_COMMENT_LEN))
+        report = warn if platform == "mmdsandbox" else err
+        report("%s 标题共 %d 字，超过 MMD 上限 %d 字——导入后标题被截断。"
+               "请精简标题，去掉【】·— 等装饰符（装饰符同样占额度）。"
+               % (where, len(comment), MAX_COMMENT_LEN))
 
 
 def check_platform_redlines(s, platform, where):
@@ -272,42 +668,21 @@ def check_platform_redlines(s, platform, where):
     # onerror="" 内部裸双引号（影渲法 demo 实机踩出的真红线）
     check_onerror_inner_quote(s, platform, where)
 
-    # <script> 标签
+    # <script> 标签：两个在役 MMD 平台都支持（沙盒模式更是一等公民），仅记 OK
     if re.search(r"<script\b", s, re.I):
-        if platform == "oldmmd":
-            err("%s 含 <script> 标签——旧版MMD会剥离，JS不执行。改用 img onerror 点火器。" % where)
-        elif platform == "mmd":
+        if platform == "mmd":
             ok("%s 含 <script>——当前MMD已确认支持，正常执行。" % where)
+        elif platform == "mmdsandbox":
+            ok("%s 含 <script>——沙盒模式的一等公民，装卡即抽出，整张卡只跑一次。" % where)
         # st 不报
 
-    # ES6 语法（仅 MMD 系平台关心）
-    if platform in ("oldmmd", "mmd"):
-        es6 = []
-        if re.search(r"=>", s):
-            es6.append("箭头函数(=>)")
-        if re.search(r"\blet\b", s):
-            es6.append("let")
-        if re.search(r"\bconst\b", s):
-            es6.append("const")
-        if "`" in s:
-            es6.append("模板字符串(反引号)")
-        if re.search(r"\.\.\.", s) and re.search(r"\[\s*\.\.\.|\(\s*\.\.\.", s):
-            es6.append("展开运算符")
-        if re.search(r"\?\.", s):
-            es6.append("可选链(?.)")
-        if es6:
-            if platform == "oldmmd":
-                err("%s 含 ES6+ 语法: %s——旧版MMD会从该处截断，后续代码丢失。" % (where, "、".join(es6)))
-            else:
-                ok("%s 含 ES6+ 语法: %s——当前MMD实测全支持（img载体下）。" % (where, "、".join(es6)))
-        else:
-            ok("%s 全 ES5" % where)
+    # ES6 语法不再检查：在役的 mmd / mmdsandbox 均全面支持，仅退役的 ES5-only 旧平台需要。
 
     # 纯DOM API：innerHTML 拼接 / cssText
     if re.search(r"\.innerHTML\s*=", s):
-        (err if platform == "oldmmd" else warn)("%s 用 innerHTML 赋值——易被平台破坏，改用 createElement/textContent。" % where)
+        warn("%s 用 innerHTML 赋值——易被平台破坏，改用 createElement/textContent。" % where)
     if re.search(r"\.cssText\s*=", s):
-        (err if platform == "oldmmd" else warn)("%s 用 style.cssText——旧版MMD报 Unexpected identifier，改用预定义CSS类。" % where)
+        warn("%s 用 style.cssText——易被平台净化，改用预定义CSS类。" % where)
 
     # alert
     if re.search(r"\balert\s*\(", s):
@@ -326,12 +701,11 @@ def check_double_escape(s, where):
     if bs == 0:
         ok("%s 无残留反斜杠（无双重转义）" % where)
         return
-    # 含 onerror/onclick = JS 载体：内部字符串/正则字面量的 \" \' \d \s \/ 均为合法
-    # JS 转义，不是 HTML 属性引号双重转义。须先于 quote_bs 判断（否则 JS 载体里 >5 个
-    # 合法 \' 会被误判为双重转义）。
-    has_js = bool(re.search(r"on(error|click)\s*=", s, re.I))
+    # 经典 <script> 与 onerror/onclick 都是 JS 载体：内部字符串/正则字面量的
+    # \" \' \d \s \/ 均为合法 JS 转义，不是 HTML 属性引号双重转义。
+    has_js = bool(re.search(r"<script\b|on(error|click)\s*=", s, re.I))
     if has_js:
-        ok("%s 含 %d 个反斜杠，但为 JS 载体（onerror/onclick）的字符串/正则字面量，正常" % (where, bs))
+        ok("%s 含 %d 个反斜杠，但位于 JS 载体（script/onerror/onclick）的字符串或正则中，正常" % (where, bs))
         return
     # 非 JS 载体（纯美化 HTML）：反斜杠后紧跟引号 = 属性引号被多转义（真双重转义）
     quote_bs = len(re.findall(r'\\[\"\']', s))
@@ -344,16 +718,12 @@ def check_double_escape(s, where):
 
 
 def check_interactive_event_newlines(s, where, platform):
-    """检查内联事件处理器，并执行 MMD 当前版 onclick 净化规则。"""
-    if platform not in ("oldmmd", "mmd"):
-        return
-    if platform == "oldmmd":
-        bodies = [body for _attr, body in _extract_event_handler_attrs(s)]
-        bad = [body for body in bodies if "\n" in body or "\r" in body]
-        if bad:
-            err("%s 有 %d 个内联事件处理器(onclick/onerror)含裸换行——旧版MMD的CSP会破坏多行JS，必须单行。" % (where, len(bad)))
-        else:
-            ok("%s 内联事件处理器均单行" % where)
+    """执行当前 MMD 的 inline onclick 净化规则。
+
+    仅 mmd：净化 allowlist 是当前 MMD 面板的实测结论。沙盒模式不适用——普通标签
+    onclick 可用（svg 内会被删），每条气泡的按钮官方要求写在 sdk.on('message:mount') 里。
+    「内联处理器必须单行」是退役旧平台的 CSP 限制，已随之删除。"""
+    if platform != "mmd":
         return
 
     onclicks = [body for attr, body in _extract_event_handler_attrs(s) if attr == "onclick"]
@@ -490,7 +860,7 @@ def _exact_key_error(actual, expected, label):
 def _mmd_regex_top_level_errors(obj):
     errors = []
     if not isinstance(obj, dict):
-        return ["MMD/oldmmd 正则导入必须为 pageDepth/statusbar/beginning/regex_scripts 四字段对象，顶层数组仅适用于 ST"]
+        return ["MMD 正则导入必须为 pageDepth/statusbar/beginning/regex_scripts 四字段对象，顶层数组仅适用于 ST"]
     key_error = _exact_key_error(obj.keys(), MMD_TOP_LEVEL_KEYS, "MMD 顶层")
     if key_error:
         errors.append(key_error)
@@ -567,12 +937,8 @@ def _simple_reversed_class_range(pattern):
     return None
 
 
-def _js_regex_structure_error(fr):
-    """先做保守结构 fallback；Node 可用时再以真实 JS RegExp 语法为准。"""
-    parsed = _split_findregex_literal(fr)
-    if parsed is None:
-        return "必须为 /pattern/flags 形式，且分隔符、字符类、换行和 flags 合法"
-    pattern, flags = parsed
+def _js_regex_pattern_body_error(pattern):
+    """pattern 体的保守结构 fallback（不含分隔符与 flags）。命中项均为确定的 JS 非法写法。"""
     escaped = False
     in_class = False
     depth = 0
@@ -613,10 +979,79 @@ def _js_regex_structure_error(fr):
     reversed_range = _simple_reversed_class_range(pattern)
     if reversed_range:
         return "字符类范围 [%s] 起点大于终点" % reversed_range
+    return None
+
+
+def _js_regex_body_or_oracle_error(pattern, flags):
+    """pattern+flags 是否为合法 JS RegExp。先保守 fallback，Node 可用时以真实语法为准。"""
+    body_error = _js_regex_pattern_body_error(pattern)
+    if body_error:
+        return body_error
     oracle_available, oracle_error = _node_js_regex_error(pattern, flags)
     if oracle_available and oracle_error:
         return "Node JS RegExp SyntaxError: %s" % oracle_error
     return None
+
+
+def _js_regex_structure_error(fr):
+    """当前 MMD 的 findRegex 门禁：必须是 /pattern/flags 字面量且正则体合法。"""
+    parsed = _split_findregex_literal(fr)
+    if parsed is None:
+        return "必须为 /pattern/flags 形式，且分隔符、字符类、换行和 flags 合法"
+    pattern, flags = parsed
+    return _js_regex_body_or_oracle_error(pattern, flags)
+
+
+# 官方 classifyPattern 的正则形态判定式。合法 flags 仅 gimsuy（无 d、无 v）。
+_SANDBOX_SLASH_FORM = re.compile(r"^/([\s\S]+)/([gimsuy]*)$")
+
+
+def classify_sandbox_pattern(raw):
+    """沙盒 worker 源码的匹配式形态判定，逐字对齐 worker 的 p()（事实卡 §5.1）。
+
+    返回 (kind, payload)：
+      ("empty", None) / ("literal", 字面量) / ("regex", None) / ("bad-regex", 错误信息)
+
+    worker 源码有 literal 分支（`if(!n)return new RegExp(m(t),'g')`），实机复验
+    （卡 64304 A/B，2026-08-30）确认**裸字面量确实生效**：裸 `体力` 与 `/灵力/`
+    在真实聊天页同一轮渲染里都被匹配替换（事实卡 §8.21）。宿主包也确认只把 pattern
+    原样转发、不做形态分类。
+    → 交付门禁 sandbox_pattern_delivery_error() 只对「写成 /…/ 但正则语法错」判 ERROR；
+    裸字面量降级为 WARN（仍建议统一写 /…/，见 _validate_sandbox_pattern）。"""
+    trimmed = (raw if isinstance(raw, str) else "").strip()
+    trimmed = re.sub(r"^`|`$", "", trimmed)      # 先 trim 再剥掉首尾反引号
+    if not trimmed:
+        return "empty", None
+    m = _SANDBOX_SLASH_FORM.match(trimmed)
+    if not m:
+        return "literal", trimmed
+    pattern, flags = m.group(1), m.group(2)
+    if "g" not in flags:
+        flags += "g"                              # 缺 g 平台自动补 → 总是全文替换
+    error = _js_regex_body_or_oracle_error(pattern, flags)
+    if error:
+        return "bad-regex", error
+    return "regex", None
+
+
+SANDBOX_BARE_LITERAL_WARN = (
+    "沙盒 findRegex 是裸字面量——实机复验确认裸字面量生效（卡 64304 A/B，2026-08-30），"
+    "但交付仍建议统一写 slash 形态 /…/，与 /mmd 一致、也符合官方校验文案；写斜杠无害。"
+)
+
+
+def sandbox_pattern_delivery_error(raw):
+    """沙盒**交付**门禁：只拦真正会静默失效的形态，返回错误原因，合规返回 None。
+
+    与 classify_sandbox_pattern 分工：那个解释 worker 源码，这个决定放不放行。
+    裸字面量不在此拦（实机生效），改由 _validate_sandbox_pattern 出 WARN。"""
+    if not isinstance(raw, str):
+        return "findRegex 必须是字符串"
+    kind, payload = classify_sandbox_pattern(raw)
+    if kind == "bad-regex":
+        return ("写成 /…/ 但正则语法错（%s）——**整条规则会被静默丢弃**，"
+                "不降级成字面量，页面上看不出异常。" % payload)
+    return None                           # empty 由必填校验管；literal 实机生效，只 WARN
 
 
 def _translate_js_named_groups(pattern):
@@ -872,13 +1307,16 @@ def check_dangling_markers(obj, scripts=None):
 def check_shadowcast(s, platform, where):
     """影渲法（ShadowCast）写法识别。仅 MMD 系平台。
 
+    沙盒模式也适用：attachShadow 降级守卫与平台版本无关，且沙盒模式长期面板应挂舞台
+    （sdk.stage），影渲法只在需要样式隔离时用。
+
     - 含 attachShadow = 影渲法引擎。2.0 起要求 shadow→light DOM 降级链：
       attachShadow 不可用环境（旧 WebView/平台禁用）应回退 light DOM，否则面板静默消失。
     - 判据：attachShadow 调用应被 try/catch 或三元守卫包裹（shadowOf 模式
       `b.shadowRoot||(b.attachShadow?b.attachShadow(...):null)`），且存在 light 兜底
       （document 注 style + 非 shadow 挂载）。裸 attachShadow 无守卫 → 警告（1.0 隐患）。
     """
-    if platform not in ("oldmmd", "mmd"):
+    if platform not in MMD_FAMILY:
         return
     if "attachShadow" not in s:
         return
@@ -897,10 +1335,267 @@ def check_shadowcast(s, platform, where):
              "升级为 `b.shadowRoot||(b.attachShadow?b.attachShadow({mode:'open'}):null)` + light DOM 兜底。" % where)
 
 
+def _sandbox_chat_version_is_one(value):
+    """对齐官方 Number(data.chatVersion) !== 1。bool 不算数字（配错的可能性远大于故意）。"""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        try:
+            return float(value.strip()) == 1
+        except ValueError:
+            return False
+    return False
+
+
+def _validate_sandbox_top_level(obj):
+    """沙盒模式导入 JSON 顶层：恰好 6 键白名单。返回 regex_scripts（非 list 时为 None）。"""
+    # chatVersion 是最要命的一个字段：写错会静默落到旧聊天页，没有 SDK、没有 data-*，
+    # 页面上看不出「哪里错了」，只是所有交互都不工作。
+    if "chatVersion" not in obj:
+        err("沙盒模式导入 JSON 缺 chatVersion——缺省等于 chatVersion:0，"
+            "卡会**静默落到旧聊天页**（无 SDK、无 [data-chat]、无舞台），"
+            "页面上看不出异常但所有交互都不工作。必须写 chatVersion:1。")
+    elif not _sandbox_chat_version_is_one(obj["chatVersion"]):
+        err("沙盒模式 chatVersion 必须是 1，当前为 %r——会**静默落到旧聊天页**"
+            "（无 SDK、无 [data-chat]、无舞台）。" % (obj["chatVersion"],))
+    else:
+        ok("chatVersion=1（新聊天页 / 沙盒模式已开启）")
+
+    for key in SANDBOX_FORBIDDEN_TOP_LEVEL_KEYS:
+        if key in obj:
+            err("沙盒模式导入 JSON 不能有顶层 %s——世界书要单独交付（根对象只留 entries），"
+                "role/presentation 是官方**回归夹具**形状而非导入格式，照抄会被判 ERROR。" % key)
+    unknown = [k for k in obj
+               if k not in SANDBOX_TOP_LEVEL_KEYS and k not in SANDBOX_FORBIDDEN_TOP_LEVEL_KEYS]
+    if unknown:
+        warn("沙盒模式顶层出现未知键 %s——导入页不认，会被忽略。顶层恰好 6 键：%s。"
+             % ("、".join(sorted(unknown)), "/".join(SANDBOX_TOP_LEVEL_KEYS)))
+
+    if "pageDepth" in obj and obj["pageDepth"] != 2:
+        warn("沙盒模式 pageDepth 建议固定 2（当前 %r）——该字段只对旧页有意义，新页不实现。"
+             % (obj["pageDepth"],))
+    for field in ("statusbar", "beginning"):
+        if field not in obj:
+            warn("沙盒模式导入 JSON 缺 %s。" % field)
+
+    limits = (("statusbar", SANDBOX_MAX_STATUSBAR), ("beginning", SANDBOX_MAX_BEGINNING),
+              ("personality", SANDBOX_MAX_PERSONALITY))
+    for field, limit in limits:
+        if field not in obj:
+            continue
+        value = obj[field]
+        if not isinstance(value, str):
+            err("沙盒模式顶层 %s 必须为 string，当前为 %s。" % (field, type(value).__name__))
+            continue
+        if len(value) > limit:
+            err("沙盒模式 %s 共 %d 字，超过上限 %d 字。" % (field, len(value), limit))
+        else:
+            ok("%s %d 字 ≤ %d" % (field, len(value), limit))
+
+    scripts = obj.get("regex_scripts")
+    if "regex_scripts" in obj and not isinstance(scripts, list):
+        err("沙盒模式顶层 regex_scripts 必须为 array，当前为 %s。" % type(scripts).__name__)
+        return None
+    if not isinstance(scripts, list):
+        scripts = []
+    personality = obj.get("personality", "")
+    if not scripts and not (isinstance(personality, str) and personality.strip()):
+        err("沙盒模式导入 JSON 没有可交付物：regex_scripts 为空且 personality 空白。")
+        return None
+    if len(scripts) > SANDBOX_MAX_RULES:
+        err("沙盒模式正则 %d 条，超过上限 %d 条——导入时会被直接截断。"
+            % (len(scripts), SANDBOX_MAX_RULES))
+    else:
+        ok("正则条数 %d ≤ %d" % (len(scripts), SANDBOX_MAX_RULES))
+    return scripts
+
+
+def _strip_style_and_script(s):
+    """剥掉 <style>/<script> 块，判断这条规则是否产出可见内容。
+
+    闭合标签容忍 `<\\/script>` 写法：官方要求 JSON 字符串里把 `</script>` 写成
+    `<\\/script>` 防宿主页面提前截断，作者偶尔会多转义一层留下真实反斜杠。"""
+    return re.sub(r"<(style|script)\b[\s\S]*?<\\?/\1\s*>", "", s, flags=re.I).strip()
+
+
+def _validate_sandbox_rules(obj, scripts):
+    """逐条校验沙盒模式规则，并做字面量去重与触发串接得上的交叉检查。"""
+    # 触发串汤：statusbar / beginning / 其他规则的 replaceString（链式触发被官方认可）
+    # 每项为 (来源下标或 None, 文本)；下标用于把规则自己的 replaceString 排除掉。
+    soup_parts = [(None, obj.get(k, "") if isinstance(obj.get(k, ""), str) else "")
+                  for k in ("statusbar", "beginning")]
+    for idx, sc in enumerate(scripts):
+        if isinstance(sc, dict) and isinstance(sc.get("replaceString"), str):
+            soup_parts.append((idx, sc["replaceString"]))
+    seen_literals = {}
+    seen_names = {}
+
+    for i, sc in enumerate(scripts):
+        label = "沙盒规则[%d]" % i
+        if not isinstance(sc, dict):
+            err("%s 必须为 object，当前为 %s。" % (label, type(sc).__name__))
+            continue
+        name = sc.get("scriptName")
+        if isinstance(name, str) and name.strip():
+            label = "沙盒规则[%s]" % name
+        for field in MMD_SCRIPT_KEYS:
+            if field not in sc:
+                err("%s 缺字段 %s——一条规则恰好四个字段：%s。"
+                    % (label, field, "/".join(MMD_SCRIPT_KEYS)))
+        extra = [k for k in sc if k not in MMD_SCRIPT_KEYS]
+        if extra:
+            warn("%s 有多余字段 %s——一条规则恰好四个字段：%s。"
+                 % (label, "、".join(sorted(extra)), "/".join(MMD_SCRIPT_KEYS)))
+
+        if "id" in sc:
+            rid = sc["id"]
+            if isinstance(rid, bool) or not isinstance(rid, (int, float)) or rid >= 0:
+                err("%s id 必须是**负数**（-1、-2…，导入时会重编号），当前为 %r。" % (label, rid))
+
+        if "scriptName" in sc:
+            if not isinstance(name, str) or not name.strip():
+                err("%s scriptName 必须为非空字符串，当前为 %r。" % (label, name))
+            elif len(name) > SANDBOX_MAX_SCRIPT_NAME_HARD:
+                # 200 是源码归一观察值；录入路径实际失败语义仍未确证。
+                err("%s scriptName 共 %d 字，超过源码归一观察值 %d；为防平台裁切或拒存，保守判 ERROR。"
+                    % (label, len(name), SANDBOX_MAX_SCRIPT_NAME_HARD))
+            else:
+                if len(name) > SANDBOX_MAX_SCRIPT_NAME:
+                    # 20 是编辑器 UI 显示值；是否与导入形成和 replaceString 相同的双轨尚未确证。
+                    warn("%s scriptName 共 %d 字，超过编辑器显示值 %d；导入源码上限是 %d。"
+                         "该字段的编辑器超限行为尚未实测，建议仍按 20 控制。"
+                         % (label, len(name), SANDBOX_MAX_SCRIPT_NAME,
+                            SANDBOX_MAX_SCRIPT_NAME_HARD))
+                if name in seen_names:
+                    warn("%s scriptName 与第 %d 条重名——名称只给自己看，但重名难排查。"
+                         % (label, seen_names[name]))
+                else:
+                    seen_names[name] = i
+
+        fr = sc.get("findRegex")
+        if "findRegex" in sc:
+            if not isinstance(fr, str) or not fr.strip():
+                err("%s findRegex 必须为非空字符串，当前为 %r。" % (label, fr))
+            elif len(fr) > SANDBOX_MAX_FIND_REGEX_HARD:
+                # 4096 是源码归一观察值；录入路径实际失败语义仍未确证。
+                err("%s findRegex 共 %d 字，超过源码归一观察值 %d；为防平台裁切或拒存，保守判 ERROR。"
+                    % (label, len(fr), SANDBOX_MAX_FIND_REGEX_HARD))
+            else:
+                if len(fr) > SANDBOX_MAX_FIND_REGEX:
+                    # 1000 是编辑器 UI 显示值；双轨及超限行为尚未实测，保守 WARN。
+                    warn("%s findRegex 共 %d 字，超过编辑器显示值 %d；导入源码上限是 %d。"
+                         "该字段是否同样双轨尚未确证，建议仍按 1000 控制。"
+                         % (label, len(fr), SANDBOX_MAX_FIND_REGEX,
+                            SANDBOX_MAX_FIND_REGEX_HARD))
+                _validate_sandbox_pattern(fr, label, i, seen_literals, soup_parts, sc)
+
+        rs = sc.get("replaceString")
+        if "replaceString" in sc:
+            if not isinstance(rs, str):
+                err("%s replaceString 必须为 string，当前为 %s。" % (label, type(rs).__name__))
+            elif len(rs) > SANDBOX_MAX_REPLACE_STRING_HARD:
+                # 双阈值见文件头 SANDBOX_MAX_* 注释（基座事实卡 §6）：
+                # 100000 是源码真值 content:1e5，超出必被 Ws() 静默截断 → ERROR。
+                err("%s replaceString 共 %d 字，超过平台硬上限 %d 字，会被静默截断，请拆条。"
+                    % (label, len(rs), SANDBOX_MAX_REPLACE_STRING_HARD))
+            elif len(rs) > SANDBOX_MAX_REPLACE_STRING:
+                # 20000 是创卡页编辑器 UI 的计数器上限 → 只 WARN，不拦。
+                warn("%s replaceString 共 %d 字，超过编辑器上限 %d 字（导入能绕过），"
+                     "规则编辑器保存会静默拒绝整次修改，不是截断；建议拆条。导入源码上限是 %d 字。"
+                     % (label, len(rs), SANDBOX_MAX_REPLACE_STRING,
+                        SANDBOX_MAX_REPLACE_STRING_HARD))
+
+
+# 判断 /…/ 的正则体是否其实是个「普通触发词」（不含正则元字符）。
+# 用途：这种形态才适合做「触发串接不接得上」与重复判罚，含元字符的真正则不适用。
+# 刻意不把 {} 当元字符：触发标记常写 /{{hud}}/，那对花括号是标记的一部分。
+_SANDBOX_REGEX_METACHARS = re.compile(r"[.*+?^$()|\[\]\\]")
+
+
+def _validate_sandbox_pattern(fr, label, index, seen_literals, soup_parts, sc):
+    """触发串接得上检查 + 重复判罚；bad-regex 判 ERROR，裸字面量判 WARN。"""
+    check_sandbox_find_regex_content(fr, label)
+    delivery_error = sandbox_pattern_delivery_error(fr)
+    if delivery_error:
+        err("%s findRegex %s" % (label, delivery_error))
+        return
+    kind, payload = classify_sandbox_pattern(fr)
+    if kind == "literal":
+        # 实机生效，但建议统一 slash；WARN 后仍按字面触发词做可达性/重复检查。
+        warn("%s findRegex %s" % (label, SANDBOX_BARE_LITERAL_WARN))
+        literal = payload
+    elif kind == "regex":
+        # 取 /…/ 里的正则体；只有「纯触发词」形态才继续做可达性与重复检查。
+        body = _SANDBOX_SLASH_FORM.match(re.sub(r"^`|`$", "", fr.strip()))
+        if not body:
+            return
+        literal = body.group(1)
+        if _SANDBOX_REGEX_METACHARS.search(literal):
+            return                   # 真正则：匹配目标是文本模式，不做字面串可达性判断
+    else:
+        return                       # empty：必填校验已管
+    # 规则按顺序跑且自动补 g（全文替换）：前一条把全文换完，后一条同触发词永远匹配不到。
+    if literal in seen_literals:
+        err("%s 触发词 %r 与第 %d 条重复——规则按顺序跑且匹配式自动补 g，"
+            "前一条会把全文都换掉，这条**永远匹配不到**。" % (label, literal, seen_literals[literal]))
+        return
+    seen_literals[literal] = index
+    # 可见 HTML 的匹配式必须能在 statusbar/beginning/另一条规则的 replaceString 里找到
+    rs = sc.get("replaceString")
+    if not isinstance(rs, str) or not _strip_style_and_script(rs):
+        return   # 只放 <style>/<script> 的规则，匹配式故意谁都不引用
+    if not any(literal in text for src, text in soup_parts if src != index):
+        warn("%s 触发词 %r 会产出可见内容，但它在 statusbar / beginning / "
+             "其他规则的 replaceString 里都找不到——**页面上永远不会出现**。"
+             "把触发串写进 statusbar 或 beginning（人设的输出约定也要对得上）。"
+             % (label, literal))
+
+
 def validate_regex(obj, platform):
     """MMD 导入 JSON 必须是严格四字段 dict；ST 保持正则数组兼容。"""
     scripts = []
-    mmd_platform = platform in ("oldmmd", "mmd")
+    if platform == "mmdsandbox":
+        if not isinstance(obj, dict):
+            err("沙盒模式导入 JSON 顶层必须是对象（恰好 6 键：%s），当前为 %s。"
+                % ("/".join(SANDBOX_TOP_LEVEL_KEYS), type(obj).__name__))
+            return
+        scripts = _validate_sandbox_top_level(obj)
+        if scripts is None:
+            return
+        ok("识别为 沙盒模式导入json 格式（%d 条正则）" % len(scripts))
+        _validate_sandbox_rules(obj, scripts)
+        for i, sc in enumerate(scripts):
+            if not isinstance(sc, dict):
+                continue
+            name = sc.get("scriptName")
+            tag = ("沙盒规则[%s]" % name if isinstance(name, str) and name.strip()
+                   else "沙盒规则[%d]" % i)
+            rs = sc.get("replaceString")
+            if not isinstance(rs, str) or not rs:
+                continue
+            check_sandbox_redlines(rs, tag)
+            check_sandbox_sdk_names(rs, tag)
+            check_sandbox_content_warnings(rs, tag)
+            check_sandbox_sanitization(rs, tag)
+            # 输出预算按「本条输入文本」算。规则输入是正文，取 statusbar+beginning
+            # 作为保守样本（真实输入通常更长 → 预算更宽；本地只对样本判定）。
+            check_sandbox_output_budget(
+                sc.get("findRegex"), rs,
+                _sandbox_pipeline_input_text(obj), tag)
+            check_platform_redlines(rs, platform, tag)
+            # `<\/script>` 是官方**要求**的写法（防宿主页面提前截断），先还原再查双重转义，
+            # 否则每条正确的脚本规则都会被误报成"残留反斜杠"。
+            check_double_escape(rs.replace("<\\/", "</"), tag)
+            check_shadowcast(rs, platform, tag)
+        for field in ("statusbar", "beginning"):
+            value = obj.get(field)
+            if isinstance(value, str) and value:
+                check_sandbox_content_warnings(value, "顶层 %s" % field)
+        return
+
+    mmd_platform = platform == "mmd"
     if mmd_platform:
         schema_errors = _mmd_regex_schema_errors(obj)
         for message in schema_errors:
@@ -988,7 +1683,7 @@ def validate_regex(obj, platform):
             # 容器事件冒泡（仅实际内联 onclick 属性需要；动态 el.onclick= 不属于属性）
             has_inline_onclick = any(attr == "onclick" for attr, _body
                                      in _extract_event_handler_attrs(rs))
-            if platform in ("oldmmd", "mmd") and has_inline_onclick:
+            if platform == "mmd" and has_inline_onclick:
                 if "stopPropagation" not in rs:
                     warn("%s 有 onclick 但未见 stopPropagation——交互模块最外层应加 onclick=\"event.stopPropagation()\" 防事件冒泡。" % tag)
 
@@ -1001,15 +1696,22 @@ def validate_card(obj, platform):
     if not isinstance(data, dict):
         data = {}
 
-    if platform in ("oldmmd", "mmd"):
+    if platform in ("mmd", "mmdsandbox"):
+        # 更正（原锁定决策 D6 已推翻）：沙盒模式**可以**导入 v2 整卡（PNG/JSON）。
+        # 依据【用户实测】：编辑页导入 v2 卡按「新卡」处理，故创卡页「新版聊天页」单选
+        # 仍可改 → 整卡路线能到达新页。因此 MMD 系两个平台套同一份 v2 强制检查。
         if spec != "chara_card_v2":
-            err("MMD 仅识别 chara_card_v2，当前 spec=%s。必须输出 v2（spec=\"chara_card_v2\", spec_version=\"2.0\", 删除 data.group_only_greetings）。" % spec)
+            err("MMD 系（当前MMD/沙盒模式）仅识别 chara_card_v2，当前 spec=%s。必须输出 v2（spec=\"chara_card_v2\", spec_version=\"2.0\", 删除 data.group_only_greetings）。" % spec)
         else:
             ok("v2 规范 spec 正确")
         if "group_only_greetings" in data:
             err("MMD v2 卡不应含 data.group_only_greetings（v3 专有字段），请删除。")
         else:
             ok("无 v3 专有字段 group_only_greetings")
+        if platform == "mmdsandbox":
+            warn("沙盒模式整卡交付：必须在交付说明里写明「①导入走新建卡；"
+                 "②首次保存前在创卡页把『新版聊天页』选成使用新版，该选择首次保存后永久不可改」。"
+                 "漏了第②步，卡能进但 sdk.*／[data-chat]／舞台全不在，且页面无任何报错。")
     else:
         if spec not in ("chara_card_v2", "chara_card_v3"):
             warn("spec=%s 非标准 v2/v3" % spec)
@@ -1067,8 +1769,8 @@ def main():
     p = argparse.ArgumentParser(description="tavern-mmd 静态审核")
     p.add_argument("file", help="待审核的 json 文件")
     p.add_argument("--type", choices=["regex", "card", "worldbook"], help="不填则自动猜测")
-    p.add_argument("--platform", choices=["oldmmd", "mmd", "st"], default="oldmmd",
-                   help="目标平台，默认 oldmmd（最严格）")
+    p.add_argument("--platform", choices=["mmd", "mmdsandbox", "st"], default="mmd",
+                   help="目标平台，默认 mmd（当前MMD）。mmdsandbox = MMD沙盒模式（chatVersion:1 新聊天页）")
     args = p.parse_args()
 
     try:

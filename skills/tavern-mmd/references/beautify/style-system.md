@@ -46,6 +46,8 @@
 4. 静态换肤也应使用自有前缀；只有维护历史选择器时才允许旧方言 adapter。
 5. token 负责视觉值，不夹带 owner、路由或存储逻辑；运行时合同见 `theme-runtime.md`。
 
+> **沙盒模式（`/mmdsandbox`）**：本文的**制作期**六维风格模型、规范 token、整体性检查与 light/dark 配对可以复用；当前 MMD 的 owner/route/native 运行时合同**不可复用**。沙盒产物由 SBK 编译器把六维 bundle 映射到平台 14 个 `--chat-*` 与自有 `--sbk-*`，主题状态只读平台 `data-theme="light|dark"` 并订 `theme:change`。作者不能新增主题状态 `data-*`（会被净化），也不使用 `:root/html/body` 作为 token 源。见 `sandbox-kit.md` 与 `../platforms/mmd-sandbox.md` §6。
+
 ## 2. 三套旧方言的兼容边界
 
 仓库已有三套方言，保留兼容但不继续扩散：

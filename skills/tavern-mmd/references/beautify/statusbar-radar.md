@@ -3,11 +3,15 @@
 > 基于特征嗅探与响应式动态DOM的状态栏架构（社区快照保留署名：黑洞猫）。原 URL 与许可证未记录，仅作兼容研究参考，不据此宣称仓库原创或开源授权。MMD平台**动态/自创NPC状态栏首选本方案**；固定字段可走原生 `$field` 或 KV V4.0（statusbar.md）。
 > 现成社区示例资产在 `../../assets/radar-examples/`，新做状态栏时可优先改造其中的状态栏案例；旧日夜集成包仍按 legacy 边界处理。
 >
-> 🆕 **另一选项——影渲法（ShadowCast，statusbar-shadowcast.md）**：把 UI 渲进 Shadow DOM，markdown 空白条/平台染色/CSS 冲突全免疫（本方案那些防御补丁都不需要），含固态+情境双轨代谢，有生成器。二者数据恢复地基相同（扫历史 light DOM）；雷达法成熟、示例多、支持嗅探未知键名，影渲法隔离更干净、维护更省。追求干净隔离选影渲法，需嗅探涌现选雷达法。
+> 🆕 **另一选项——影渲法（ShadowCast，statusbar-shadowcast.md）**：把 UI 渲进 Shadow DOM，平台染色/CSS 类名冲突免疫（本方案对应的防御补丁不需要），含固态+情境双轨代谢，有生成器。⚠️ **换行空白条不在免疫范围**——`white-space` 是继承属性会穿过 shadow 边界，shadow 内仍须写 `:host{white-space:normal}`（2026-08-28 实测，详见本文「MMD换行空白条陷阱」）。二者数据恢复地基相同（扫历史 light DOM）；雷达法成熟、示例多、支持嗅探未知键名，影渲法隔离更干净、维护更省。追求干净隔离选影渲法，需嗅探涌现选雷达法。
 
 > ⚠️ **载体红线（当前 MMD 实测）：per-message 状态栏引擎只能用 `<img onerror>`，不能用 `<script>`。** 即便当前 MMD 已解禁 `<script>`，把雷达引擎改成 `<script>` 载体会导致**状态栏整块空白**——原因：①`<script>` 拿不到自身位置（`document.currentScript` 在 MMD 不可用），无法 per-message 自定位；②同一段 `<script>` 只加载一次（官方原文），每条消息带同一份引擎会被去重、不逐条执行。document-level 一次性 `<script>` bootstrap 或全局 handler 定义仍可用，但属于全局单例职责，不是状态栏引擎的替代载体。详见 ../platforms/mmd.md §4。
 
-> 💡 **引擎语法（当前 MMD）：默认用 ES6 版引擎，ES5 版作兜底回退。** 当前 MMD 在 img onerror 载体下实测全支持 ES6（见 ../platforms/mmd.md §1），引擎用 ES6 重写后更短、可读可改。`../../assets/radar-examples/` 下 ES6 版引擎为默认资产；若实机异常，切回 ES5 版引擎（逻辑等价、仅语法降级）。旧版 MMD（/oldmmd）仍只能 ES5。
+> 💡 **引擎语法（当前 MMD）：默认用 ES6 版引擎，ES5 版作兜底回退。** 当前 MMD 在 img onerror 载体下实测全支持 ES6（见 ../platforms/mmd.md §1），引擎用 ES6 重写后更短、可读可改。`../../assets/radar-examples/` 下 ES6 版引擎为默认资产；若实机异常，切回 ES5 版引擎（逻辑等价、仅语法降级）。
+
+> 🚨 **平台归属：本文档只针对当前 MMD（`/mmd`）与本地酒馆（`/st`）。MMD沙盒模式（`/mmdsandbox`）不可用本方案。** 雷达法的整个地基是 `img onerror` 点火器，而沙盒模式**官方明令禁止 `img onerror` 点火器与 teapot 系写法** —— 因为那里 `<script>` 是一等公民，装卡即抽出、整卡跑一次，点火器不再有存在意义。沙盒模式要写状态栏，走「专开一条规则只放 `<script>`」+ `sdk.on('message:mount')` 绑事件 + 长期面板挂 `sdk.stage`，正文取值一律用 `message:stream` / `message:done` 的 `msg.content`（**不要读 DOM**，读到的可能是平台占位「消息生成中」）。规范见 `../platforms/mmd-sandbox.md`。**本文档的数据协议与信息架构（五级分类、键值对解耦、信息不对称原则）仍可参考，引擎载体与渲染路径必须整体重写。**
+>
+> 但「整体重写」**不必你自己从零动手**：沙盒模式做状态栏/美化请直接用现成基座 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`），方法论见 `sandbox-kit.md`。基座已经把「引擎载体」这一层做完了（脚本点火、冷启动时序、单例幂等、DOM 写入时机、主题与层级），你要搬过去的只有本文档里**仍然成立的那半**——数据协议与字段设计：五级分类落成基座 schema 的字段表，键值对解耦对应块协议的 `键: 值` 逐行解析，信息不对称原则照旧由你决定哪些字段写进模型侧协议。
 
 ## 与 KV V4.0 的选型对比
 
@@ -119,36 +123,52 @@
 2. **基底选择**：优先从 `../../assets/radar-examples/` 选近似状态栏示例改造；全新需求才从零设计HTML原型。该目录中的旧日夜集成包仍仅作 legacy 兼容参考。
 3. **改造CSS**（优先级2正则）：换配色/布局，保留媒体查询折叠与悬浮气泡类
 4. **改造引擎**（优先级4正则）：调整兜底白名单（一/二/五类键名入名单，四类排除）、嗅探特征字典（装备/技能/背包路由词）、UI面板映射。**逐条对照防御体系表核查**：零双引号、无星号、全半角兼容、剪枝探针、自毁巡检
-   - 平台差异：上述"零双引号/无星号"是**旧版 MMD（/oldmmd）**的 onerror 净化规避手段；**当前 MMD（/mmd）实测 onerror 可多行、可用双引号**，引擎可用 ES6 正常书写双引号，不必再统一单引号或乘号改除法。剪枝探针/自毁巡检/全半角兼容（防虚拟DOM劫持与符号集幻觉）两版都要保留，与净化器无关。
+   - **「零双引号」在当前 MMD 仍然要守，但理由变了**：不是净化器，而是 HTML 属性闭合 —— `onerror="..."` 用双引号包裹时，内部 JS 任何 `"` 会提前闭合属性，img 结构破坏、引擎静默不绑定（`../platforms/mmd.md` §2 真红线，已实机三组对照确认）。**修法二选一**：属性用单引号包裹 `onerror='...'`，内部就可以正常写双引号；或属性用双引号包裹、内部字符串统一单引号。注入的配置（CFG/CSS）用单引号 JS 字面量序列化，**勿用 `json.dumps`/`JSON.stringify`**（产双引号）。`validate.py` 已检查此项。
+   - **「无星号（乘号改除法）」在 light DOM 仍建议保留**：起因不是净化器，而是正则跑在 markdown(vditor) **之前**，`*x*` 会被 markdown 吃成斜体（`../platforms/mmd.md` §8）。若 UI 渲进 Shadow DOM（影渲法，`statusbar-shadowcast.md`），shadow 内容完全不过 markdown 管线，此项**可省**。light DOM 下当前 MMD 是否已放宽【待验证】，按保守处理。
+   - **当前 MMD 确实放宽的**：`onerror` 可多行、可写 ES6（`../platforms/mmd.md` §1、§2），引擎不必再挤成一行、不必降级 ES5。
+   - 剪枝探针 / 自毁巡检 / 全半角兼容（防虚拟DOM劫持与符号集幻觉）与净化器无关，**一律保留**。
 5. **写状态栏规则**：按上节骨架定制，与引擎键名严格一致
 6. **打包**：MMD导入json（pageDepth/statusbar/beginning/regex_scripts四字段）+ 状态栏规则进世界书条目；字符数核查（单条≤20000）。**replaceString 必须用脚本序列化生成**（换行转`\n`、引号转`\"`、无BOM），禁止手写多行——详见 ../output/regex-output.md 第2.3节，打包后必跑 `python -m json.tool` 校验
-7. **预览与实机测试**：先跑 `scripts/validate.py 文件 --platform <mmd|oldmmd>`（悬空标记必须 0 错）→ 跑 `scripts/build-preview.py 文件 --platform <平台>`（默认 `--mode both`）生成两份：**三面板沙箱**（①第一句话剩余预览，显示扣除单独抽检的状态栏/悬浮组件后的正文、选项菜单/图片/特殊美化；②状态栏单独预览；③悬浮组件预览，侧边栏/悬浮球）先逐组件审核 → **全景预览**（`-panorama-` 文件，所有组件组合进模拟MMD聊天页，底部固定输入框+发送按钮+占位AI气泡）二次审核组合效果。主AI 用 Preview 工具先看三面板、再看全景并测交互（发送、选项回填、滚动时输入框固定）→ 再实机导入MMD：第一句话贴测试数据块 → 看渲染 → 编辑/翻页测防劫持 → 窄屏测折叠
+7. **预览与实机测试**：先跑 `scripts/validate.py 文件 --platform mmd`（悬空标记必须 0 错）→ 跑 `scripts/build-preview.py 文件 --platform mmd`（默认 `--mode both`）生成两份：**三面板沙箱**（①第一句话剩余预览，显示扣除单独抽检的状态栏/悬浮组件后的正文、选项菜单/图片/特殊美化；②状态栏单独预览；③悬浮组件预览，侧边栏/悬浮球）先逐组件审核 → **全景预览**（`-panorama-` 文件，所有组件组合进模拟MMD聊天页，底部固定输入框+发送按钮+占位AI气泡）二次审核组合效果。主AI 用 Preview 工具先看三面板、再看全景并测交互（发送、选项回填、滚动时输入框固定）→ 再实机导入MMD：第一句话贴测试数据块 → 看渲染 → 编辑/翻页测防劫持 → 窄屏测折叠
 
-## MMD换行空白条陷阱（旧版MMD状态栏必避，浏览器预览查不出）
+## MMD换行空白条陷阱（当前MMD做状态栏必避）
 
 **症状**：状态栏在沙箱/浏览器预览里完全正常，导入MMD后面板内部冒出大片横向空白条；内容少的页（如酒吧页）尤其刺眼，因为没有足够正文遮盖。
 
-**根因**：MMD的AI气泡走markdown管线渲染（类名里能看到 `.vditor-ir`）。markdown解析器遇到注入HTML标签之间的换行/空行时，按标准行为**补一个空`<p>`段落**；空`<p>`继承默认段落margin，渲染成一条等高的横向空白条。浏览器预览则把标签间的`\n`当作可折叠空白（CSS whitespace collapsing），所以同一段HTML在预览里严丝合缝、在MMD里却被空段落撑开。空白条精确出现在源HTML各大区块的换行接缝处——导航/标签栏之后、选项区之前是重灾区；内容少的页（如酒吧页）没有足够正文遮盖，空条尤其刺眼。
+**根因（2026-08-28 实机探针纠正）**：气泡容器 `.content` 带 **`white-space: pre-line`**（实测原文见 ../platforms/mmd.md §13.2）。`pre-line` 的语义是「折叠空格、**保留换行**」，所以注入HTML标签之间的每一个换行都被渲染成**一次真实换行**，撑出一整行行高。
 
-> 形态判定：空白是**带高度的大块矩形**而非一行行高的细缝，指向**带margin的空`<p>`**而非`<br>`。`<br>`只在单换行场景出现，撑不出这么高。但不同换行数/解析器配置下两者都可能产生，防御CSS应两者都覆盖。
+实机探针（把同一段 HTML appendChild 进真实气泡量高度）：
+
+| 注入内容 | 高度 | 子元素合计 | 结论 |
+|---|---|---|---|
+| `<div>l1</div>\n<div>l2</div>\n\n<div>l3</div>` | **102px** | 51px | 多出 51px 全是保留的换行 |
+| 同上，容器加 `white-space:normal` | **51px** | 51px | 空条消失 |
+| `<p>a</p>\n<p>b</p>` | 51px | 34px | 多出 17px = 一行行高 |
+| `<p>a</p><p>b</p>` | 34px | 34px | 无多余 |
+
+同一现场 `p:empty` 数量 = **0**。
+
+> 🚨 **本节旧版根因是错的（已证伪，保留过程供参考）**：旧版写「markdown 解析器把标签间换行补成空 `<p>`，空 `<p>` 带 margin 撑出空条」，并据此给出 `p:empty` / `br{display:none}` 防御 CSS。实测现场既没有空 `<p>`（数量 0）也没有 `<br>`，**那两条 CSS 什么都没做**；把容器改成 `white-space:normal` 则空条立刻消失。误诊来源：只看到"预览正常、真机有空条"，就近归因给两边唯一已知差异（markdown 管线），没有对 `.content` 的 computed style 做探针。教训与 ../platforms/mmd.md §2 撤销"onerror 禁裸 `>`"伪铁律同一条：**症状相关 ≠ 机制正确，立防御措施前先量一次真因**。
+>
+> 顺带纠正：**影渲法（Shadow DOM）对本陷阱不免疫**。`white-space` 是继承属性，穿过 shadow 边界从 host 继承进来（实测 shadow 内 computed 值就是 `pre-line`，同样 102px）。shadow 隔离的是**选择器**，不隔离继承属性。走影渲法仍须在 shadow 内写 `:host{white-space:normal}`。
 
 注意区分两层"换行"：
-- **JSON层**：MMD导入json的`replaceString`里换行必须转义为`\n`（这是合法性要求，见 ../output/regex-output.md 第2.3节）——但转义只保证JSON能解析，`\n`解析后仍是真实换行字符，照样进markdown管线被补成空段落。
-- **HTML载荷层**：真正要消灭的是注入到页面的HTML字符串内部的换行。CSS/HTML模板要写成**单行无缝**，标签与标签之间零换行符。
+- **JSON层**：MMD导入json的`replaceString`里换行必须转义为`\n`（这是合法性要求，见 ../output/regex-output.md 第2.3节）——但转义只保证JSON能解析，`\n`解析后仍是真实换行字符，照样被 `pre-line` 保留。
+- **HTML载荷层**：真正要消灭的是注入到页面的HTML字符串内部的换行。
 
-**三重防御（旧版MMD做状态栏时全部上）**：
+**三重防御（按有效性排序）**：
 
-1. **源头压平（治本）**：CSS模板（优先级2正则）和雷达引擎装配出的HTML之间不留任何换行；`<style>...</style>`、各`<div>`首尾相接写成单行。没有空行，markdown解析器就不会补空`<p>`。装配DOM用`createElement+appendChild`本就不产生文本换行节点，重点是**手写的模板字符串**别留换行。
-2. **防御CSS兜底**（写进优先级2正则的`<style>`，空`<p>`/带margin的`<p>`/`<br>`三种形态全覆盖）：
+1. **给自己的容器关掉 `pre-line`（最省事，首选）**：
    ```css
-   .z-status-box p:empty{display:none!important}
-   .z-status-box p{margin:0!important;padding:0!important}
-   .z-status-box br{display:none!important}
+   .z-status-box{white-space:normal}
    ```
-   `p:empty`直接干掉空段落；`p{margin:0}`兜住非空但被误包的段落；`br{display:none}`覆盖单换行形态。
+   一行解决，且不要求模板严格单行——手改模板时不会重新引入空条。**这是旧版没有的解法**。
+2. **源头压平（治本，配合上一条更稳）**：CSS模板（优先级2正则）和雷达引擎装配出的HTML之间不留任何换行；`<style>...</style>`、各`<div>`首尾相接写成单行。装配DOM用`createElement+appendChild`本就不产生文本换行节点，重点是**手写的模板字符串**别留换行。
 3. **信标尾吞**：数据信标转换器（优先级3正则）`replaceString`尾部已带`\s*`吞噬键值对后的换行，确保隐形数据块不撑高度。
 
-**强制验证**：`build-preview.py` 现在会模拟 `statusbar+beginning` 的真实替换链，并分成第一句话剩余预览/状态栏单独预览/悬浮组件预览三面板；第一句话若有选项菜单、图片、特殊美化，必须在剩余预览或全景预览里检查。脚本还会把 statusbar/beginning 里的悬空标记前移为审核错误（validate.py）并标出标签间裸换行风险。但浏览器预览/沙箱看正常**仍不等于**MMD正常——空白条根因在MMD markdown管线（uni-app/vditor）里，最终交付前必须实机导入MMD看渲染，重点看内容最少的页有没有横向空白条。
+> ~~`p:empty{display:none}` + `p{margin:0}` + `br{display:none}`~~ 三件套**已废弃**（前后两条对本陷阱无效，见上方证伪）。`p{margin:0}` 若为压 markdown 生成的正文段落间距仍可保留，但那是另一个目的。
+
+**验证方式（已升级）**：`build-preview.py` 的 MMD 全景预览自 2026-08-28 起按实机 CSSOM 复刻真实气泡（含 `white-space:pre-line`、真实 padding/圆角/主题变量、rem 缩放律），**空白条现在预览里就能复现**——同一段探针在预览与真机都得到 102px vs 51px。所以"预览查不出"这句话对新版预览不再成立。仍建议交付前实机导入确认一次（预览不模拟 markdown 管线本身），但空白条这一项已可在预览阶段拦下。
 
 ## 常见故障排查
 
@@ -161,7 +181,7 @@
 | 编辑后状态栏消失 | 防劫持探针已过巡检期 | 正常，下一轮回复重新渲染；高频复现则增加巡检次数 |
 | 某数据"失忆" | 该键名误入无兜底名单 / 超渲染深度且引擎未开全量扫描 | 核对兜底白名单；确认引擎用textContent全量扫描 |
 | 窄屏排版挤压 | CSS缺媒体查询 | 补`@media (max-width:650px)`单列折叠规则 |
-| **预览正常但导入MMD后状态栏内部出现大片横向空白条**（内容少的页尤其明显） | **MMD气泡走markdown管线（vditor）渲染：标签之间的换行/空行被解析器补成空`<p>`段落，空`<p>`继承默认段落margin撑出等高空条；浏览器预览把标签间换行当可折叠空白，所以预览看不出来**。空白条出现在源HTML各大区块之间换行处（导航后、选项前） | ①注入HTML整体压成单行，标签之间零换行（治本：没有空行markdown就不补空段落）；②防御CSS兜底 `.z-status-box p:empty{display:none!important}` + `.z-status-box p{margin:0!important}` + `.z-status-box br{display:none!important}`（三种形态全覆盖）；③数据块/锚点前后用信标转换器`\s*`尾吞换行（见标准部署优先级3） |
+| **状态栏内部出现大片横向空白条**（内容少的页尤其明显） | **气泡容器 `.content` 带 `white-space:pre-line`，标签之间每个换行都被保留成真实换行，撑出一整行行高**（实测 102px vs 子元素合计 51px，`p:empty`=0）。**不是**"markdown 补空 `<p>`" | ①`.z-status-box{white-space:normal}`（一行治本，首选）；②注入HTML压成单行、标签间零换行；③数据块/锚点前后用信标转换器`\s*`尾吞换行（见标准部署优先级3）。~~`p:empty`/`br{display:none}`~~ 无效已废弃；Shadow DOM 也不免疫（继承属性穿边界） |
 
 ## 换用风格数据库
 

@@ -4,16 +4,16 @@
 
 | 平台 | 方案 |
 |---|---|
-| 当前 MMD | 先在“静态换肤 / 运行时主题包”二档中选型；运行时档必须再读 `theme-runtime.md` |
-| 旧版 MMD | 只走静态换肤；不得套用当前 MMD 的运行时主题协议 |
-| 本地 SillyTavern | 优先使用原生主题 / 自定义 CSS；卡内注入另按本地平台能力设计 |
+| 当前 MMD `/mmd` | 先在“静态换肤 / 运行时主题包”二档中选型；运行时档必须再读 `theme-runtime.md` |
+| MMD沙盒模式 `/mmdsandbox` | **走平台原生变量换肤**（改 `[data-chat="root"]` 上的 14 个 `--chat-*`），不用本文的激活器骨架、不用运行时主题协议。见下方「沙盒模式换肤」；成套现成基座在 `../../assets/sandbox-kit/`（方法论 `sandbox-kit.md`） |
+| 本地 SillyTavern `/st` | 优先使用原生主题 / 自定义 CSS；卡内注入另按本地平台能力设计 |
 
 ## 两档交付
 
 | 档位 | 适用需求 | 交付边界 |
 |---|---|---|
 | **静态换肤** | 一套固定外观，不需要日夜切换、`native`、玩家微调或持久偏好 | 一条正则可注入激活器 + 公共 CSS + 单套 token；本文后续单规则骨架只适用于本档 |
-| **运行时主题包** | `day / night / native` 三态、玩家分主题微调、重置、持久偏好候选、路由离开/重入或 `destroy()` | 仅适用于当前 MMD；必须遵守 `theme-runtime.md` 的 owner/version 租约、生命周期、单例资源、增量恢复与测试矩阵 |
+| **运行时主题包** | `day / night / native` 三态、玩家分主题微调、重置、持久偏好候选、路由离开/重入或 `destroy()` | **仅适用于当前 MMD**；必须遵守 `theme-runtime.md` 的 owner/version 租约、生命周期、单例资源、增量恢复与测试矩阵。沙盒模式**不走这一档**（平台自带深浅色与 `theme:change`，见下方） |
 
 默认规则：用户提出“日夜”“跟随偏好”“原生模式”“设置面板”“记住选择”或任何玩家微调时，不再向静态骨架叠加按钮，直接选择运行时主题包。日夜共享同一份公共选择器，只切根状态与 token；禁止复制两套长选择器。
 
@@ -21,7 +21,9 @@
 
 ## MMD 静态换肤激活机制
 
-> 本节只描述**静态换肤**。旧版 MMD `<script>` 被过滤，必须用 img onerror；当前 MMD `<script>` 虽可执行，但静态激活只是给 body 加一次开关类，推荐保留 img onerror 作为跨版本写法。运行时主题包不得在此骨架上继续堆切换逻辑，改读 `theme-runtime.md`。
+> 本节只描述**当前 MMD（`/mmd`）的静态换肤**。静态激活只是给 body 加一次开关类，属于幂等的 document-level 一次性 bootstrap —— 当前 MMD 下 `img onerror` 与 `<script>` **两种载体都可用**（`../platforms/mmd.md` §4）。骨架示例保留 `img onerror`：它自包含、自毁、不依赖同段 `<script>` 是否被去重，是这类一次性开关最省心的写法，不是因为 `<script>` 不能用。运行时主题包不得在此骨架上继续堆切换逻辑，改读 `theme-runtime.md`。
+>
+> 🚨 **本节骨架不要用在沙盒模式**：那里 `img onerror` 点火器被官方明令禁止，且 `body{}` 这类全局选择器同样被禁 —— 换肤改走 `[data-chat="root"]` 上的 `--chat-*` 变量，见下方「沙盒模式换肤」。要成套的状态栏/美化地基，直接用 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`），方法论见 `sandbox-kit.md`。
 
 | 部件 | 写法 | 说明 |
 |---|---|---|
@@ -34,9 +36,107 @@
 
 > 可拖动悬浮球与抽屉见 `floating-components.md`。运行时主题的设置入口优先复用主题包自带面板，不另造一套侧栏引擎。
 
+### 🚨 全局美化必须逐个弹窗面板自查
+
+**气泡只是一小部分**。顶栏/底栏按钮拉起的面板（模型设置、对话设置、总结剧情、用户人设、分享、AI帮聊说明）同样吃你的 CSS，而 uview 的 `.u-popup__content` **基线是白底**（`background-color:#fff`），深色全靠各面板自己的 scope 类覆盖出来 —— **漏改哪个面板，那个面板就露白**。
+
+三个容易翻车的点（实测，详见 `../platforms/mmd.md` §13.6）：
+
+1. **`.conv-style-modal`（对话设置）** scope 本身是 `background:transparent`，底色写在 `.u-popup__content` 的**内联 style** 上 → 只改 scope 类改不动它。
+2. **用户人设面板用 `--lo*` 变量族**，那 18 个变量真机**引用但从未定义**、恒走 fallback → 改 `--loBackground-color` 毫无反应，只能直接选 `.role-setting` / `.role-setting .card` 等类名。
+3. **`+` 展开的 `.more-scope` 不是弹窗**，在 `.chat-bottom` 内展开，底栏 105px→317px → 组件若按"底栏 105px"算避让位置，展开后会被压住。
+
+自查方式：`build-preview.py --platform mmd` 生成全景，工具栏「弹窗仿真」六个按钮 + 「＋更多面板」「指令栏切换」逐个开一遍，看有没有露白/错色/被压。
+
+---
+
+## 沙盒模式换肤（`/mmdsandbox`）
+
+沙盒模式（角色卡 `chatVersion: 1` 的新聊天页）的换肤故事比当前 MMD **干净得多**：平台给了官方 CSS 变量与承诺不改名的选择器，不需要激活器、不需要 owner 租约、不需要靠长选择器压平台类名。**有需求就优先用这条路，不要把当前 MMD 那套搬过去。**
+
+| 事实 | 含义 |
+|---|---|
+| 所有规则里的 `<style>` **合成一张全页样式表，后写的盖先写的** | 不需要激活器开关类；但多条规则的 `<style>` 互相覆盖是**预期行为不是 bug**（症状「预览里对、上线不对」）→ 自有类名加前缀，并留意规则顺序 |
+| 平台提供 **14 个 `--chat-*` 变量** | 换肤 = 在 `[data-chat="root"]` 上改这些变量，一处改完全页跟着变 |
+| `[data-chat]` / `[data-slot]` **承诺不偷偷改名** | 不必再维护会失效的平台类名速查表（本文下面两节的类名清单**只对当前 MMD 有效**） |
+| 有 `theme:change` 事件 | 用户切深浅色时能收到通知，JS 涂的颜色可以跟着改 |
+
+### 14 个 `--chat-*` 变量
+
+**官方手册只记了 10 个**，实测（逆向沙盒样式表 + 真机）每套主题是 **14 个**，定义在 `[data-theme=dark]` / `[data-theme=light]` 上（**没有 `:root` 定义**）。下表后 5 个是手册漏记的：
+
+| 变量 | 说明 | 变量 | 说明 |
+|---|---|---|---|
+| `--chat-bg` | 整页背景 | `--chat-accent` | 强调色（按钮高亮、血条） |
+| `--chat-surface` | 卡片 / 面板底色 | `--chat-bubble-user-bg` | 用户气泡背景 |
+| `--chat-text` | 正文颜色 | `--chat-bubble-ai-bg` | AI 气泡背景 |
+| `--chat-text-muted` | 次要文字 | `--chat-bubble-text` | 气泡里的字 |
+| `--chat-border` | 边框颜色 | **`--chat-input-bg`** | 输入框底色（漏记） |
+| **`--chat-input-text`** | 输入框文字（漏记） | **`--chat-shortcut-text`** | 快捷条文字（漏记） |
+| **`--chat-more-item-bg`** | 「更多」面板条目底色（漏记） | **`--chat-share-pick-bg`** | 分享选择态底色（漏记） |
+
+另有 **`--rpx`** = `calc(100vw / 750)` 是平台尺寸基准（不计入 14 个），只读不写，改它整体错位。
+
+> 🚨 **`--chat-viewport-height` 不在这 14 个里**：它不是样式表变量，而是 JS 写在 root 上的**内联 style**（`clientHeight − 键盘 inset`，随 `visualViewport` 更新）→ **CSS 覆盖不了它**，只能读。
+
+气泡那三个默认等于页面背景与文字，只改其中一个也不会和整页脱节。
+
+```html
+<style>
+[data-chat="root"] {
+  --chat-bg: #f7f3ea;
+  --chat-surface: #fffdf8;
+  --chat-text: #2e2a24;
+  --chat-accent: #8c2f39;
+}
+[data-chat="message"][data-from="ai"] [data-chat="message-body"] {
+  background: var(--chat-bubble-ai-bg);
+  border: 1px solid var(--chat-border);
+}
+</style>
+```
+
+### 三条硬规则
+
+> 🚨 **禁全局 CSS：`*{}` / `html{}` / `body{}` / `:root{}` 一律改写成 `[data-chat="root"]`。** 官方校验检测式 `/(^|[\s,};])(\*|html|body|:root)\s*\{/` → WARN。这正是当前 MMD 那套 `body.z-enabled` 开关类**不能直接搬过来**的原因。
+>
+> ⚠️ **但要分清这条禁令的性质**：实测**CSS 选择器零过滤已确证** —— `:root{}` / `html{}` / `body{}` 写下去运行时**不会被拦掉**，它是**文档约定 + 官方校验器 WARN**，不是运行时拦截。所以别把它理解成「写了就失效」，那会让你在排查时找错方向。真正让 `:root` **无效**的是另一件事：平台令牌定义在 `[data-theme]` 上，**根本没有 `:root` 定义**，你覆盖一个不存在的定义自然不生效。换肤请写 `[data-chat="root"][data-theme="dark"]`：两个属性选择器绑在同一个 div 上，特异度 (0,2,0) 稳定高于平台令牌的 (0,1,0)，深浅色切换不会被覆盖回去，也不需要 `!important`（详见 `sandbox-kit.md` 第六节）。仍然建议照约定作用域化 —— 一是过校验，二是避免影响 iframe 内平台自身的样式。
+
+> 🚨 **不要写死颜色**（`#fff` 之类）。用变量，平台深浅色切换时才跟得上；`[data-chat="root"]` 上有 `data-theme="light|dark"` 可读。算出来的值（进度条宽度、血条颜色）写在标签的内联 `style=""` 上（内联会压过 `<style>`），颜色仍尽量用 `var(--chat-accent)`。
+
+> ⚠️ **HTML 仍建议顶格写，但不要把 4 空格当成已证实的运行时故障。** 沙盒 worker 实况会在 Markdown 前删除行首 4+ 空格，因此它不会像官方手册说的那样必然变代码块；官方校验仍会 WARN，且反引号包住 HTML 才会稳定把源码原样印出。
+
+### z-index 分段（约定，平台不执法）
+
+🚨 **手册那套「作者内容 1000–1999 · 平台 chrome 8000–8999」已被实测推翻。** 探针穷举平台真实层级：`10090` snackbar / `9000` alert / `8200` message-menu / `8100` composer-snack / `8000` share-shot-loading / `3000` 舞台 `full` / `2000` 舞台 `content` / `40` sdk-debug / `10` assistant-tip。而 `header`、`statusbar`、`messages`、`composer`、`stage` 实测**全部 `z-index: auto` + `position: static`** —— 它们只是 root 的普通 flex item，**根本不占 8000–8999**。
+
+→ **作者安全带是 3500–7999**：避开舞台 `full` 的 3000，也避开平台弹窗的 8000+。用 1000–1999 **会盖住 header 和输入框**；目前少出事只是因为作者内容大多落在带 `opacity:.9` 的 `message-body` 里被层叠上下文囚禁住了，**属偶然保护，不可依赖**。基座预置 `--sbk-z-panel: 3500` / `--sbk-z-pop: 3600`。
+
+### 功能栏与长期面板
+
+`[data-slot="statusbar"]` 平台只提供槽位，不提供业务样式；作者至少补 `flex-shrink:0`，背景/高度按设计决定。它是 root 的 flex item，天然不随消息列表滚动，一般不必额外写 sticky。
+
+> 🚨 **“功能栏静态”指正则输入不随消息重跑，不等于 JS 节点留不住。** `statusbar` 字段只在装载时过一次正则，因此动态值必须由 `message:done` 等事件里的 JS 改 DOM；实机也确认 JS 插入的宿主节点可保留。挂载必须在 mount/done 回调同步期执行，并做固定 id、幂等与宿主归一。长期大面板仍应挂舞台 `sdk.stage`。
+
+跟主题的 JS 涂色订 `theme:change`：
+
+```html
+<script>
+sdk.on('theme:change', function () {
+  const root = document.querySelector('[data-chat="root"]');
+  if (!root) return;
+  sdk.debug.log('主题切到', root.getAttribute('data-theme'));
+});
+</script>
+```
+
+完整 DOM 钩子树、变量表与校验规则见 `../platforms/mmd-sandbox.md` §5、§6。
+
 ---
 
 ## MMD 页面结构类名清单（基础层）
+
+> 🚨 **本节与下节的类名只对当前 MMD（`/mmd`）有效。** 沙盒模式请用 `[data-chat]` / `[data-slot]`（上一节），平台内部 class 名在那里明确「会变，不要抄」。
 
 > 来源：用户提供的社区文档快照。作者、原 URL 与许可证未记录，仅作兼容研究参考，不宣称原创。它与下节“完整层”速查表有少量出入，两者都收录并标注。
 
@@ -87,8 +187,16 @@
 
 ### 页面背景
 
-- `.page`（页面根容器）
-- `.chat-bg`（聊天背景层）
+> 🚨 **`.page` 与 `.chat-bg` 不存在（2026-08-28 实机验证，别再用）**：这两个类名来自本节那份无出处的社区快照，实机 DOM 与 CSSOM **双双零命中**。真实的页面/背景层是：
+>
+> | 目标 | 真实选择器 | 说明 |
+> |---|---|---|
+> | 主容器 | `.chat` | 所有聊天页规则的前缀 |
+> | 背景层 | `.chat .chat-scope-box` | `position:fixed` 全屏、`z-index:11`，角色背景图由**内联 style** 写在这里 |
+> | 滚动区 | `.chat .chat-scope-box .scroll-view` | 内联 `margin-top:2.8125rem; height:calc(100% - 3.2rem)` |
+> | 页面底色 | `body` | `background-color:var(--background-color)` |
+>
+> ⚠️ 背景图是 `.chat-scope-box` 的**内联 `background` 属性**，不是变量 —— 只改 `--background-color` 换不掉它，要覆盖需 `.chat .chat-scope-box{background:...!important}`。完整层级见 `../platforms/mmd.md` §13。
 
 ### 图片
 
@@ -104,8 +212,9 @@
 | 输入框 | `.chat .chat-bottom .uni-textarea .chat-input-scope textarea` |
 | 发送按钮（补充版） | `.chat .chat-bottom .btn-scope .send-btn` |
 | 发送按钮（档案版） | `.chat .chat-bottom .send-msg` |
-| 整体背景 | `.chat-bg` |
-| 页面容器 | `.page` |
+| 整体背景 | `.chat .chat-scope-box`（~~`.chat-bg` 不存在~~） |
+| 页面容器 | `.chat`（~~`.page` 不存在~~） |
+| 页面底色 | `body` |
 
 ---
 

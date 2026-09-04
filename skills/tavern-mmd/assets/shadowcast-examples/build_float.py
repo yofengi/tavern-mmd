@@ -179,7 +179,7 @@ menu.classList.remove('open');
 };
 menu.appendChild(mi);
 });
-var moved=false,sx=0,sy=0,ox=0,oy=0,GAP=8;
+var moved=false,sx=0,sy=0,ox=0,oy=0,GAP=8,on=false,pid=null;
 var reposition=function(){
 if(menu.classList.contains('open')===false)return;
 var r=ball.getBoundingClientRect();
@@ -202,33 +202,41 @@ ny=Math.max(0,Math.min(vh-bh,ny));
 ball.style.left=nx+'px';ball.style.top=ny+'px';ball.style.bottom='auto';
 reposition();
 };
-var mm=function(ev){onMove(ev.clientX,ev.clientY);};
-var tm=function(ev){var t=ev.touches[0];onMove(t.clientX,t.clientY);ev.preventDefault();};
+var down=function(cx,cy){
+moved=false;sx=cx;sy=cy;
+var r=ball.getBoundingClientRect();ox=r.left;oy=r.top;
+ball.style.cursor='grabbing';
+};
 var up=function(){
-document.removeEventListener('mousemove',mm);
-document.removeEventListener('mouseup',up);
-document.removeEventListener('touchmove',tm);
-document.removeEventListener('touchend',up);
+if(on===false)return;
+on=false;pid=null;
 ball.style.cursor='grab';
 if(moved===false){
 if(menu.classList.contains('open')){menu.classList.remove('open');}
 else{menu.classList.add('open');reposition();}
 }
 };
-var down=function(cx,cy){
-moved=false;sx=cx;sy=cy;
-var r=ball.getBoundingClientRect();ox=r.left;oy=r.top;
-ball.style.cursor='grabbing';
-};
-ball.addEventListener('mousedown',function(ev){
-ev.stopPropagation();down(ev.clientX,ev.clientY);
-document.addEventListener('mousemove',mm);document.addEventListener('mouseup',up);
+ball.addEventListener('pointerdown',function(ev){
+ev.stopPropagation();
+on=true;pid=ev.pointerId;
+try{ball.setPointerCapture(pid);}catch(er){}
+down(ev.clientX,ev.clientY);
 });
-ball.addEventListener('touchstart',function(ev){
-ev.stopPropagation();var t=ev.touches[0];down(t.clientX,t.clientY);
-document.addEventListener('touchmove',tm,{passive:false});
-document.addEventListener('touchend',up);
-},{passive:false});
+ball.addEventListener('pointermove',function(ev){
+if(on===false||ev.pointerId!==pid)return;
+onMove(ev.clientX,ev.clientY);
+});
+ball.addEventListener('pointerup',function(ev){
+if(ev.pointerId!==pid)return;
+try{ball.releasePointerCapture(pid);}catch(er){}
+up();
+});
+ball.addEventListener('pointercancel',function(ev){
+if(ev.pointerId!==pid)return;
+try{ball.releasePointerCapture(pid);}catch(er){}
+on=false;pid=null;ball.style.cursor='grab';
+});
+ball.addEventListener('click',function(ev){ev.stopPropagation();});
 document.body.appendChild(wrap);
 img.remove();
 })(this)"""
