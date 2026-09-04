@@ -10,7 +10,7 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 
 - MMD 自己就有**两套互不通用的聊天页**：当前 MMD（旧聊天页）支持 `<script>` 与 ES6（实测全支持），但状态栏只能靠 `img onerror` 载体；**沙盒模式**（新聊天页，角色卡 `chatVersion: 1`）把 `<script>` 变成一等公民，另给官方 SDK（30 能力 / 12 事件）、稳定 `[data-chat]` 选择器、舞台与跨设备存档，且**明令禁止 `img onerror` 点火器**
 - 正则限额 130 条（findRegex ≤ 1000 字符、replaceString ≤ 20000 字符），导入格式与本地酒馆不同：当前 MMD 是 4 键 json 且 findRegex 必须包斜杠，沙盒模式是 6 键 json 且纯字面量标记才是首选写法
-- 角色卡：当前 MMD 仅支持 chara_card_v2（不识别 v3），整卡只能用 png 导入；沙盒模式**不用 v2 卡、官方禁 PNG 整卡**，交付的是导入正则 json + 独立人设文本
+- 角色卡：MMD 系（当前 MMD 与沙盒模式）都仅支持 chara_card_v2（不识别 v3），整卡只能用 png 导入。沙盒模式**同样可导 v2 整卡** —— 编辑页导入 v2 卡按**新卡**处理，创卡页「新版聊天页」单选仍可选；也可改走分离式的导入正则 json + 独立人设文本
 - 不支持酒馆助手、MVU 变量框架、STScript
 
 通用的角色卡创作流程在 MMD 上会产出无法运行的卡。本 skill 内置 **平台差异矩阵**，根据目标平台自动选择可行的技术方案（如 MMD 状态栏首选混合态雷达法：模型只输出纯键值对，JS 引擎动态装配 UI）。
@@ -143,8 +143,8 @@ clone 本仓库到任意位置，在该 agent 的规则文件（AGENTS.md / 系�
 
 | 产出 | 本地酒馆 `/st` | 当前 MMD `/mmd` | 沙盒模式 `/mmdsandbox` |
 |---|---|---|---|
-| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD 仅识别 v2），整卡走 png | **不产 v2 卡、不产整卡 PNG**；交付 = 6 键导入正则 json + 独立 persona 文本 |
-| 世界书 | SillyTavern 世界书 json | 同左 | 独立 json（根对象只留 `entries`），不能并进正则 json |
+| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD 仅识别 v2），整卡走 png | **chara_card_v2 json / 整卡 png**（同当前 MMD，导入按新卡处理）；或分离式 = 6 键导入正则 json + 独立 persona 文本 |
+| 世界书 | SillyTavern 世界书 json | 同左 | 同左：走整卡进卡内 `character_book`，走分离式出独立 json（根对象只留 `entries`）。**只是不能并进那份 6 键正则 json** |
 | 正则 | 正则脚本 json（直接导入） | MMD 导入 json（4 键，首选）；手填清单 .md 备选 | 导入正则 json（**6 键**，多 `chatVersion`/`personality`）；手填清单 .md 备选 |
 
 ## 目录结构

@@ -22,7 +22,7 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 |---|---|---|---|
 | `<script>` 标签 | ✅ | ✅ 可执行；**per-message 自渲染/定位不可用**，状态栏仍走 img onerror；document-level 一次性 bootstrap 与全局 handler 定义可用 | ✅ **一等公民**：装卡即抽出（不需被匹配命中）、**整卡只跑一次**；per-message 绑定由 `sdk.on('message:mount')` 顶替；**`img onerror` 点火器被官方明令禁止** |
 | ES6+ 语法 | ✅ | ✅ 实测全支持（img onerror 载体下，7/7 语法探针全绿），**推荐 ES6** | ✅ 实机与官方示例均确认 |
-| 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 创卡页「导入正则」json（**6键格式**，多 `chatVersion`/`personality`）或UI手填；**不能导入整卡** |
+| 正则导入方式 | json 直接导入 | json导入（MMD专用4字段格式）或UI手填 | 创卡页「导入正则」json（**6键格式**，多 `chatVersion`/`personality`）、UI手填，或**内嵌进 v2 整卡**（`data.extensions.regex_scripts`） |
 | 正则限额 | 无硬限制 | ≤130条；findRegex≤1000字符；replaceString≤20000字符 | ≤130条；保守交付按 scriptName≤20 / findRegex≤1000 / replaceString≤20000。源码可见归一常量为 200 / 4096 / 100000；只有 replaceString 的编辑器 20000／导入 100000 双路径已确证，scriptName/findRegex 的双路径与超限语义仍待验证；另 statusbar 200 / **beginning 4000** / personality 10000 |
 | `findRegex` 形态 | 任意正则 | **强制 `/pattern/flags` slash literal**，固定标记也要包斜杠 | **交付统一 `/pattern/flags` slash 形态**（约定，非硬性）：实机复验裸字面量也生效（卡 64304 A/B，2026-08-30），与 worker 源码一致；统一 slash 为跨平台一致，校验器对裸字面量出 WARN 不出 ERROR |
 | 稳定选择器 | 正常 DOM | ❌ 平台 class 名会变 | ✅ `[data-chat]` / `[data-slot]` 承诺不改名（作者自写 `data-*` 会被净化删掉，自己的元素用 class/id） |
@@ -31,8 +31,8 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | 事件处理 | 正常 | inline onclick 使用已验证的干净形式 `window.__fn&&__fn()` 或 `eval(getElementById('FUNC').dataset.s)`；禁代码字符串字面量与直接DOM赋值；复杂组件可动态绑定 handler；stopPropagation必加 | 顶层 `function`/`const`/`class` 自动挂 `window`，`onclick="tap()"` 直接可用（**`svg` 内的 onclick 会被删**）；气泡内按钮在 `message:mount` 里绑，回调内同步抓引用，跨异步边界不再查询气泡 DOM |
 | MVU/STScript/酒馆助手 | ✅ | ❌（保守） | ❌（官方 SDK 顶替，见下行） |
 | 官方 SDK / 存档 / 舞台 | ❌（走酒馆自身生态） | ❌ 无 | ✅ **30 能力 / 12 事件**；`sdk.save` 落服务端跨设备（上限由宿主动态下发，**不写死 10 key**）、`sdk.cache` 刷新即失、`sdk.stage` 舞台放长期面板 |
-| 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | ❌ **不用 chara_card_v2、官方禁 PNG 整卡**；交付 = 6键正则 json + 独立 persona 文本（导入页不读 `personality`，须手工粘贴） |
-| 世界书导入 | json/png | png/json/角色卡连带 | 独立 json（根对象**只留 `entries`**）；**不能**塞进导入正则 json（顶层出现 `entries`/`character_book` 等判 ERROR） |
+| 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | ✅ **可导 v2 整卡**（png/json）：编辑页导入 v2 卡按**新卡**处理，故「新版聊天页」仍可选 → 沙盒可用整卡路线。也可走 6键正则 json + 独立 persona 文本 |
+| 世界书导入 | json/png | png/json/角色卡连带 | png/json/角色卡连带（创卡页原文：「可导入PNG或json格式世界书」）；**唯一限制**是不能塞进 6键导入正则 json（那份顶层出现 `entries`/`character_book` 等判 ERROR），走整卡时正常放 `character_book` |
 | 世界书条目标题 | 无限制 | **≤20字**（`comment`；中文一字算1、标点计入，超出截断） | **≤20字**（同为 MMD 创卡页限制，本 skill 保留；官方校验脚本不查此项，故降级为 WARN） |
 
 **当前MMD已实测**：`<script>` 与 ES6 解禁、`onerror` 可多行可用双引号、正则上限 130 条。`<script>` 不能做 per-message 自渲染/定位（`document.currentScript` 不可用 + 同段脚本只加载一次被去重），状态栏引擎仍只能 img onerror；这不妨碍 document-level 单例用一次性 `<script>` bootstrap，并在重复入口复用既有实例。MVU/STScript 等未确认能力仍按无处理（保守）。
@@ -99,27 +99,29 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 
 | 产出物 | 本地酒馆 /st | 当前MMD /mmd | 沙盒模式 /mmdsandbox |
 |---|---|---|---|
-| 角色卡 | chara_card_v3 json | **chara_card_v2 json**（MMD不识别v3，见 card-json.md 第5节） | **不产 v2 卡、不产整卡 PNG**；交付 = 6键导入正则 json + 独立 persona 文本（`.txt`） |
-| 世界书 | SillyTavern 世界书 json | 同左 | 独立 json，根对象只留 `entries`；不并入正则 json |
+| 角色卡 | chara_card_v3 json | **chara_card_v2 json**（MMD不识别v3，见 card-json.md 第5节） | **chara_card_v2 json / 整卡 PNG**（同当前MMD，见 card-json.md 第5节）；或分离式的 6键导入正则 json + 独立 persona 文本（`.txt`） |
+| 世界书 | SillyTavern 世界书 json | 同左 | 同左；走整卡时并入卡内 `character_book`，走分离式时独立 json（根对象只留 `entries`）。**只是不能塞进 6键正则 json** |
 | 正则 | 正则脚本 json | MMD导入json（pageDepth/statusbar/beginning/regex_scripts四字段，见 regex-output.md）；手填清单 .md 作备选 | 导入正则 json（`chatVersion/pageDepth/statusbar/beginning/personality/regex_scripts` **六键**）；手填清单 .md 作备选 |
 
 当前 MMD 独立正则导入 JSON 的顶层必须恰好且仅有 `pageDepth/statusbar/beginning/regex_scripts` 四键；沙盒模式恰好且仅有上表那六键（`chatVersion` 必须为 `1`）。两者每条 `regex_scripts` 规则都必须恰好且仅有 `id/scriptName/findRegex/replaceString` 四键；沙盒模式的 `id` 必须是负数。**两个 MMD 路线的交付匹配式统一写 `/pattern/flags` slash 形态**（沙盒是约定而非硬性：实机复验裸字面量也生效，卡 64304 A/B 2026-08-30，与 worker 源码一致；统一 slash 为跨平台一致，校验器对裸字面量出 WARN）。所有 json 交付前必须语法校验：`python -m json.tool <文件> > /dev/null`；再跑 `python scripts/validate.py <文件> --platform <mmd|mmdsandbox|st>`（`--platform` 默认 `mmd`）。
 
-沙盒模式的三件交付物、人设成对标签格式与「必须新建卡」提醒，详见 `references/platforms/mmd-sandbox.md` 第 9 节。
+沙盒模式的交付形态、人设成对标签格式与「必须新建卡 + 首次保存前选新版聊天页」提醒，详见 `references/platforms/mmd-sandbox.md` 第 9 节。
 
-**整张角色卡可导出为图片**（仅 `/mmd` 与 `/st`）：当前 MMD 用 png 导入整卡（不能导入 json 整卡；**jpg 已弃用**，实测 MMD 读不出卡数据），本地酒馆 png/json 均可。交付整卡图片前用弹窗问底图来源（默认米黄底图 / 用户图），用 `scripts/make_card_image.py` 生成（只产 png），详见 output/card-json.md 第 7 节。**沙盒模式不适用**：官方禁 PNG 整卡，不要为它生成卡图。
+**整张角色卡可导出为图片**（`/mmd`、`/st`、`/mmdsandbox` 三平台均可）：MMD 系用 png 导入整卡（不能导入 json 整卡；**jpg 已弃用**，实测 MMD 读不出卡数据），本地酒馆 png/json 均可。交付整卡图片前用弹窗问底图来源（默认米黄底图 / 用户图），用 `scripts/make_card_image.py` 生成（只产 png），详见 output/card-json.md 第 7 节。沙盒模式与当前 MMD 同样传 v2 卡；差别只在导入后**首次保存前必须在创卡页选「使用新版」聊天页**（见下节铁律）。
 
 ## 整卡输出形态（末尾询问）
 
-**仅适用 `/mmd` 与 `/st`。沙盒模式没有这个选择**——它的交付形态固定为「导入正则 json（6键）+ 独立 persona 文本 +（可选）独立世界书 json」，做完直接按此交付并附「必须新建卡、创卡页确认是新页」的提醒，不必弹窗问形态。
+**三个平台都有这个选择**（`/mmd`、`/st`、`/mmdsandbox`）。沙盒模式此前被写成「固定三件交付物、不问形态」，那是基于「官方禁 PNG 整卡」的错误前提，已更正。
 
 做整张角色卡、用户未指定输出方式时，**完成后用 AskUserQuestion 问一次输出形态**（三选一）：
 
 | 形态 | 产出 | 说明 |
 |---|---|---|
 | (a) 内嵌正则的整卡 PNG | 一张 png（卡内含设定+世界书+正则） | 推荐。导入即设定/世界书/正则一次到位 |
-| (b) 内嵌正则的整卡 JSON | 一份 v2 卡 json（含内嵌 regex_scripts） | MMD 不能直接导入 json 整卡，多用于本地酒馆或备份 |
-| (c) 分离式 | 角色卡 + 独立正则 json + 状态栏规则.md | 卡与正则分文件，便于单独维护/复用 |
+| (b) 内嵌正则的整卡 JSON | 一份 v2 卡 json（含内嵌 regex_scripts） | MMD 系不能直接导入 json 整卡，多用于本地酒馆或备份 |
+| (c) 分离式 | 角色卡 + 独立正则 json + 状态栏规则.md | 卡与正则分文件，便于单独维护/复用。沙盒的正则 json 走 6 键格式 |
+
+**沙盒模式（`/mmdsandbox`）附加铁律**：整卡路线要在交付说明里写明「①导入必须走**新建卡**（编辑页导入 v2 卡按新卡处理）；②**首次保存前**在创卡页把「新版聊天页」选成**使用新版**，该选择**首次保存后永久不可改**」。漏了第②步，卡能进但 `sdk.*`/`[data-chat]`/舞台全不在，页面无任何报错。走分离式（c）时，6 键正则 json 里的 `chatVersion: 1` 只在新建卡导入时被读取，同样要提醒。
 
 **整卡内嵌正则（a/b 形态）时的铁律**：状态栏的**生成规则**（模型侧协议：要求 AI 每轮在正文末尾输出 `<status>` 数据块）必须作为一条 constant=true（蓝灯/固定）条目放进卡内 `character_book`。内嵌的 `regex_scripts` 只负责**渲染**，没有这条规则模型不会持续输出数据块、后续轮次状态栏不更新。详见 output/card-json.md 第 8 节。
 
@@ -128,5 +130,5 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 - 提问用 AskUserQuestion 弹窗选项式，一次一个问题
 - 关键节点（条目清单、设计方案、最终交付）必须停下让用户确认
 - 做美化（状态栏/全局）前，先用弹窗问视觉风格（基调组→具体风格，或混搭），默认整套 bundle；详见 beautify/style-system.md
-- 交付整张角色卡前，用弹窗问输出形态（内嵌正则 PNG / 内嵌正则 JSON / 分离式：卡+正则json+规则.md），详见《整卡输出形态》节与 output/card-json.md 第 8 节；**沙盒模式跳过此问**，按其固定三件交付物走
+- 交付整张角色卡前，用弹窗问输出形态（内嵌正则 PNG / 内嵌正则 JSON / 分离式：卡+正则json+规则.md），详见《整卡输出形态》节与 output/card-json.md 第 8 节；**沙盒模式同样要问**（它能导 v2 整卡），只是要额外提醒「新建卡 + 首次保存前选新版聊天页」
 - /cardplanmax 模式额外允许大段开放讨论（见指令文件）

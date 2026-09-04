@@ -1151,19 +1151,27 @@ class TestSandboxOutputBudget(unittest.TestCase):
 
 
 class TestSandboxCardDeliverable(unittest.TestCase):
-    def test_v2_card_under_sandbox_is_warn_not_error(self):
-        """锁定决策 D6：沙盒模式不走 chara_card_v2 / PNG 整卡。"""
+    """原锁定决策 D6（沙盒不走 chara_card_v2 / PNG 整卡）已被【用户实测】推翻：
+    编辑页导入 v2 卡按「新卡」处理，创卡页「新版聊天页」单选仍可改，故整卡路线可达沙盒。
+    现在沙盒与当前 MMD 套同一份 v2 强制检查，另加一条前置铁律提醒。"""
+
+    def test_v2_card_under_sandbox_passes_v2_enforcement(self):
         reset()
         v.validate_card({"spec": "chara_card_v2", "data": {}}, "mmdsandbox")
         self.assertEqual(v.ERRORS, [])
-        self.assertTrue(any("6 键" in m and "persona" in m for m in v.WARNS))
 
-    def test_v3_card_under_sandbox_does_not_trigger_v2_enforcement(self):
+    def test_v2_card_under_sandbox_warns_about_new_card_and_new_page(self):
+        """整卡路线最容易漏的一步：首次保存前要把「新版聊天页」选成使用新版。"""
+        reset()
+        v.validate_card({"spec": "chara_card_v2", "data": {}}, "mmdsandbox")
+        self.assertTrue(any("新建卡" in m and "新版" in m for m in v.WARNS))
+
+    def test_v3_card_under_sandbox_is_rejected_like_mmd(self):
         reset()
         v.validate_card({"spec": "chara_card_v3",
                          "data": {"group_only_greetings": []}}, "mmdsandbox")
-        self.assertFalse(any("仅识别 chara_card_v2" in m for m in v.ERRORS))
-        self.assertFalse(any("group_only_greetings" in m for m in v.ERRORS))
+        self.assertTrue(any("仅识别 chara_card_v2" in m for m in v.ERRORS))
+        self.assertTrue(any("group_only_greetings" in m for m in v.ERRORS))
 
 
 class TestSandboxCLI(unittest.TestCase):

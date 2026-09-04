@@ -125,23 +125,29 @@
 |---|---|---|---|
 | 本地酒馆 `/st` | ✅ 可导入 | ✅ 卡内 `character_book` | **无限制**（不检查） |
 | 当前 MMD `/mmd` | ✅ 世界书管理界面导入 | ✅ 卡内 `character_book` 随卡载入 | **ERROR**（硬拦） |
-| MMD沙盒模式 `/mmdsandbox` | ✅ 独立导入入口 | ❌ **不能内嵌进导入正则 JSON** | **WARN**（提示但不阻断） |
+| MMD沙盒模式 `/mmdsandbox` | ✅ 独立导入入口 | ✅ 卡内 `character_book` 随卡载入（同当前 MMD） | **WARN**（提示但不阻断） |
 
 - 两种导入方式产出的条目结构对应关系见第 3 节对照表。
-- 当前 MMD：将角色卡 JSON 导入时，其中内嵌的 `character_book` 也会同步载入。
+- MMD 系（`/mmd` 与 `/mmdsandbox`）：将角色卡导入时，其中内嵌的 `character_book` 也会同步载入。创卡页原文写明「可导入PNG或json格式世界书」。
 
-### 5.1 沙盒模式：世界书必须单独交付
+### 5.1 沙盒模式：可以随卡内嵌，只是不能进那份 6 键正则 JSON
 
-> 🚨 **沙盒模式的世界书不能塞进「导入正则」JSON。** 那份 JSON 的顶层是**恰好 6 键白名单**，一旦出现 `entries` / `worldbook` / `world_book` / `lorebook` / `lore_book` / `characterBook` / `character_book` 中任何一个，官方直接判 ERROR。
+> ✅ **更正**：旧版本本小节标题是「沙盒模式：世界书必须单独交付」，结论是「沙盒没有整卡内嵌，世界书只能独立文件」。**那是错的，已删除。** `【用户实测】`沙盒能导 v2 整卡，世界书正常放卡内 `character_book`，与当前 MMD 一致。
 
-所以沙盒模式的世界书是一个**独立文件**（`<短名>-worldbook.json`），走世界书独立导入入口，并且：
+仍然成立的那一条是**格式约束，范围只限一份文件**：
 
-- **根对象只保留 `entries`** —— 官方校验要求顶层键恰好一个且为 `entries`。本文第 1 节的结构正好就是这个形状，照写即可，别顺手加 `name` / `description` 之类。
-- `entries` 是**对象映射**（键建议连续数字字符串），不是数组；空 `entries` → ERROR。
-- 沙盒模式对条目 `content` 另有两条约束：必须**至少含一组成对章节标签**，且不得含 `$#char#$` / `$#user#$` / `{{char}}`（均 ERROR）。这与人设格式同源，见 `card-json.md` 第 9.2 节。
-- 兜底：若世界书导入失败或入口不可用，官方的退路是把内容压进 `personality`（会吃掉 10000 字额度）。
+> 🚨 **世界书不能塞进「导入正则」那份 6 键 JSON。** 那份 JSON 的顶层是**恰好 6 键白名单**，一旦出现 `entries` / `worldbook` / `world_book` / `lorebook` / `lore_book` / `characterBook` / `character_book` 中任何一个，官方直接判 ERROR。
 
-沙盒模式也**不走**「状态栏生成规则内嵌进卡内世界书」那条路（`card-json.md` §8.2 是当前 MMD / 本地酒馆的形态）：它没有整卡内嵌，规则要么进这份独立世界书，要么写在 persona 的 `<输出格式>` 里。
+所以沙盒的世界书有**两条路**，按 `card-json.md` §8.1 选定的输出形态走：
+
+- **随整卡（路线 A）**：放卡内 `character_book`，字段名按第 3 节对照表的卡内一侧。状态栏生成规则也照 `card-json.md` §8.2 作蓝灯条目进卡。
+- **独立文件（路线 B）**：`<短名>-worldbook.json`，走世界书独立导入入口，并且：
+  - **根对象只保留 `entries`** —— 官方校验要求顶层键恰好一个且为 `entries`。本文第 1 节的结构正好就是这个形状，照写即可，别顺手加 `name` / `description` 之类。
+  - `entries` 是**对象映射**（键建议连续数字字符串），不是数组；空 `entries` → ERROR。
+
+两条路共同的条目 `content` 约束（沙盒特有）：必须**至少含一组成对章节标签**，且不得含 `$#char#$` / `$#user#$` / `{{char}}`（均 ERROR）。这与人设格式同源，见 `card-json.md` 第 9.2 节。
+
+兜底：若世界书导入失败或入口不可用，官方的退路是把内容压进人设（走路线 A 是 `data.description`、路线 B 是 `personality`，都会吃掉 10000 字额度）。
 
 ### 5.2 条目标题 20 字：沙盒模式是 WARN 而非 ERROR
 

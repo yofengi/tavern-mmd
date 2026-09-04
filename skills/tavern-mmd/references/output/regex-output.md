@@ -11,7 +11,7 @@
 
 三者结构互不兼容，**不要把一个平台的 JSON 直接改平台名交付**：第二节与第三节的顶层键数、`findRegex` 铁律、`id` 取值三处全都不同（沙盒模式还多一份独立 persona 文本，见第三节 3.5）。
 
-> **单独美化 / 状态栏流程的默认交付** = 正则 json + 规则.md（独立的状态栏生成规则文档/模型侧协议），不强制塞进某张卡。若是做整张角色卡，正则默认内嵌进卡、状态栏规则进卡内世界书（蓝灯），见 card-json.md 第 8 节。**沙盒模式例外**：它不走整卡内嵌（见 card-json.md 第 9 节），正则 JSON 始终是独立交付物。
+> **单独美化 / 状态栏流程的默认交付** = 正则 json + 规则.md（独立的状态栏生成规则文档/模型侧协议），不强制塞进某张卡。若是做整张角色卡，正则默认内嵌进卡、状态栏规则进卡内世界书（蓝灯），见 card-json.md 第 8 节。**沙盒模式同样适用这条**（旧版本写「沙盒例外、不走整卡内嵌」是基于「禁 PNG 整卡」的错误前提，已更正）：沙盒能导 v2 整卡，所以整卡内嵌与独立交付两条路都在，见 card-json.md 第 9 节。
 
 ---
 
@@ -238,7 +238,9 @@ MMD 平台正则的 `replaceString` 内除了 HTML/CSS/JS，还可用平台内�
 
 > **仅适用于沙盒模式（`--platform mmdsandbox`）。** 「沙盒模式」是本 skill 的叫法，官方口径是「新页 / 新聊天页」，开关是角色卡 `chatVersion: 1`。平台能力全集见 `../platforms/mmd-sandbox.md`。
 >
-> 导入入口是创卡页的「**导入正则**」（也叫「设置正则」），吃 **JSON 文本**。沙盒模式**不走** chara_card_v2、**不走 PNG 整卡**（官方明令禁止），所以正则 JSON 是主交付物而不是附件。
+> 导入入口是创卡页的「**导入正则**」（也叫「设置正则」），吃 **JSON 文本**。
+>
+> ✅ **更正**：旧版本这里写「沙盒不走 chara_card_v2、不走 PNG 整卡（官方明令禁止），所以正则 JSON 是主交付物」—— **错的，已删除**。`【用户实测】`沙盒**能导 v2 整卡**（编辑页导入按新卡处理）。所以本节这份 6 键 JSON 是**分离式路线（路线 B）**的格式；走整卡路线（路线 A）时正则内嵌进 `data.extensions.regex_scripts`，见 `card-json.md` 第 8-9 节。
 
 顶层必须**恰好 6 键**，多一个不认、少一个报错：
 
@@ -344,7 +346,9 @@ worker 源码的 `classifyPattern` 包含裸字面量分支：非空非斜杠串
 
 反过来，只放 `<style>` / `<script>` 的规则，匹配式**故意谁都不引用**（`{{卡名-style}}` / `{{卡名-kit}}`）：它们装卡时就被抽走，不需要被匹配命中。这也意味着**不能靠「让规则不匹配」来关掉样式**。
 
-### 3.5 三件交付物（沙盒模式特有）
+### 3.5 分离式路线（路线 B）的交付物
+
+> 走**整卡路线（路线 A）**时不用本小节 —— 正则内嵌进 `data.extensions.regex_scripts`、世界书进 `character_book`、人设进 `data.description`，一张 PNG 交付完事，见 `card-json.md` 第 8-9 节。本小节是**分离式**的形态。
 
 | 交付物 | 内容 | 去哪 |
 |---|---|---|
@@ -353,9 +357,9 @@ worker 源码的 `classifyPattern` 包含裸字面量分支：非空非斜杠串
 | `<短名>-worldbook.json`（可选） | 独立世界书，根对象**只留 `entries`** | 世界书独立导入入口 |
 
 - `personality` **仍要写进 JSON**（供校验与留档），但**同时**必须另出一份纯文本。两份内容要一致。
-- 世界书**不能**塞进导入正则 JSON（顶层出现 `entries` / `worldbook` / `characterBook` 等直接 ERROR），字段规范见 `worldbook-json.md`。
+- 世界书**不能**塞进这份 6 键导入正则 JSON（顶层出现 `entries` / `worldbook` / `characterBook` 等直接 ERROR）。这是**这份文件**的格式约束，**不是**「沙盒的世界书必须单独交付」—— 走整卡时它正常并进 `character_book`。字段规范见 `worldbook-json.md`。
 - 人设格式要点（`<角色设定 名字：真实角色名>` 成对单行标签、只用 `{{user}}`、禁 `{{char}}` / `$#char#$` / `$#user#$`、禁 `【章节】` 方括号标题）见 `card-json.md` 第 9 节。
-- 交付说明里**必须写明「必须新建卡，并在创卡页确认这张卡是新页」** —— `chatVersion` 只在新建卡导入时被读取，给已存在的卡导入会被忽略，表现是「按钮全不响应、样式对一半」且无任何报错。
+- 交付说明里**必须写明「必须新建卡；首次保存前在创卡页把『新版聊天页』选成使用新版，该选择首次保存后永久不可改」** —— `chatVersion` 只在新建卡导入时被读取，给已存在的卡导入会被忽略，表现是「按钮全不响应、样式对一半」且无任何报错。
 
 ### 3.6 交付前强制审核
 
@@ -374,7 +378,7 @@ python <skill>/scripts/build-preview.py output/文件-regex.json --platform mmds
 - **被禁写法**：`img onerror` 点火器与 teapot 系 → ERROR（官方明令，沙盒模式 `<script>` 装卡即执行，点火器不再有意义）。
 - **WARN 项**：作者自写 `data-*`（会被净化删掉）；`iframe` / `link` / `meta` / `form` / `object` / `embed` 等被删标签；全局 CSS（`*{}` / `html{}` / `body{}` / `:root{}` → 改用 `[data-chat="root"]`）；HTML 缩进 4 空格（官方 WARN；实机当前会在 Markdown 前剥掉缩进，不据此断言会变代码块，仍保守顶格写）；`sdk.on` 写进 `message:mount` 回调（每挂一条气泡多订一份）；`message:done` 里 `message.send` 自问自答死循环。
 - 世界书条目标题 20 字在沙盒模式是 **WARN**（当前 MMD 仍是 ERROR），理由见 `worldbook-json.md` 与 `../platforms/mmd-sandbox.md` §10.1。
-- 若误把 chara_card_v2 卡传进来审沙盒，会 WARN 提示沙盒真正的交付物是本节的导入 JSON。
+- 拿 chara_card_v2 卡审沙盒是**合法**的（沙盒能导 v2 整卡）：用 `--type card --platform mmdsandbox`，会执行与 `/mmd` 相同的 v2 检查。旧版本在这种情况下 WARN 提示「沙盒真正的交付物是导入 JSON」，那条已删除。
 
 `build-preview.py --platform mmdsandbox` 使用共享契约 v1.1.0 复刻真实新聊天页：dark root flex 外壳、header/statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、author-stage、静态 composer/toolbar/input/send，以及 **14 个 `--chat-*` 设计令牌**。另注入 `--rpx`；`--chat-viewport-height` 由模拟宿主以内联 style 写入并随 iframe resize/键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍装卡即抽出执行，但 script 审计角标只在诊断页展示，不挤占全景 iframe。预览自带 `chat`/`thin-preview` SDK profile、能力精度表、默认折叠的仿真控制与证据说明；真实宿主握手、AI 分块节奏、完整 Markdown/净化、跨设备 save、CSP 与最终人工验收仍需真实站。
 

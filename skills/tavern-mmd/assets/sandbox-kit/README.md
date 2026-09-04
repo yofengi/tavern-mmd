@@ -158,8 +158,10 @@ python ../../scripts/validate.py dist/my-card.json --type regex --platform mmdsa
 chatVersion(=1) / pageDepth(=2) / statusbar / beginning / personality / regex_scripts
 ```
 
-- **沙盒不用 PNG 整卡、不用 `chara_card_v2`**。导入路径是创卡页的「**导入正则**」按钮（原生文件选择器），不是角色卡导入。
-- `personality` 虽然写在 JSON 里，但**导入页不读这个字段**——它只是随 JSON 归档。你得自己把它从 JSON 里复制出来，**手工粘贴**进创卡页的人设框。这是唯一需要手工搬运的部分。
+- 这份 JSON 走的是**分离式路线**：导入路径是创卡页的「**导入正则**」按钮（原生文件选择器）。
+- ✅ **更正**：旧版本这里写「沙盒不用 PNG 整卡、不用 `chara_card_v2`」，**那是错的**。`【用户实测】`沙盒**能导 v2 整卡**（编辑页导入 v2 卡按新卡处理，「新版聊天页」单选仍可改）。生成器本身不产整卡，但你可以把它的产物搬进 v2 卡：`regex_scripts` → `data.extensions.regex_scripts`、`personality` → `data.description`、世界书 → `character_book`，再用 `../../scripts/make_card_image.py` 出 PNG。走整卡就**没有手工粘贴那一步**。
+- 🚨 **两条路线都要**：导入必须走**新建卡**，且**首次保存前**在创卡页把「新版聊天页」选成**使用新版**（该选择首次保存后永久不可改）。漏了这步，脚本装上但 `sdk.*` 一个都不在，页面无任何报错。
+- `personality` 虽然写在 JSON 里，但**导入页不读这个字段**——它只是随 JSON 归档。走分离式时你得自己把它从 JSON 里复制出来，**手工粘贴**进创卡页的人设框。这是分离式路线唯一需要手工搬运的部分。
 - 模型侧输出约定（要模型每轮吐 `[状态]` 块）必须写进 `personality`，否则状态栏永远没数据。模板见 `sbk/协议说明.md` 第六节。
 
 ### 自动拆条：为什么会有 `sbk-core-1..4` / `sbk-ui-1..5`
@@ -245,6 +247,6 @@ for f in sbk/*.js; do node --check "$f"; done
 ## 相关文档
 
 - `../../references/beautify/sandbox-kit.md` —— **方法论与设计思路**（为什么长这样、怎么选模式、避坑清单）
-- `../../references/platforms/mmd-sandbox.md` —— 沙盒平台技术规范（1231 行，含全部实测修正）
+- `../../references/platforms/mmd-sandbox.md` —— 沙盒平台技术规范（含全部实测修正）
 - `sbk/协议说明.md` —— 协议格式与 schema 完整参考
 

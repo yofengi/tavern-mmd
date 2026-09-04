@@ -20,13 +20,14 @@
 - [ ] json语法校验通过：python -m json.tool <文件> > /dev/null（能拦截裸换行/未转义引号/BOM）
 - [ ] MMD导入json：replaceString内所有换行已转义为\n（非真实换行）、HTML双引号转义为\"、文件无UTF-8 BOM；`</script>` 写成 `<\/script>`
 - [ ] （/st）chara_card_v3：顶层与data字段同步；spec/spec_version正确
-- [ ] （/mmd）角色卡为v2格式：spec="chara_card_v2"、spec_version="2.0"、无group_only_greetings（当前MMD不识别v3）
-- [ ] **（/mmdsandbox）没有角色卡json、没有PNG整卡这两样产出**——沙盒交付=导入正则json+独立persona文本（+可选独立世界书json）；官方明令禁PNG整卡，见 output/card-json.md 第9节
+- [ ] （/mmd、/mmdsandbox）角色卡为v2格式：spec="chara_card_v2"、spec_version="2.0"、无group_only_greetings（MMD系不识别v3）
+- [ ] **（/mmdsandbox）交付形态已按 output/card-json.md §8.1 弹窗选定**：路线A（v2整卡 PNG/JSON，含内嵌世界书与正则）或路线B（6键正则json+独立persona文本+可选独立世界书json）。**沙盒能导v2整卡**（编辑页导入按新卡处理），旧版「禁PNG整卡、固定三件套」已更正
+- [ ] **（/mmdsandbox）交付说明里写明两条前置铁律**：①导入走**新建卡**；②**首次保存前**在创卡页把「新版聊天页」选成**使用新版**（首次保存后永久不可改）。漏②则规则装上但 sdk.*／[data-chat]／舞台全不在，且页面无任何报错
 - [ ] 世界书：蓝灯constant:true（key可为空）、绿灯constant:false有keys；递归控制按设计
 - [ ] （/mmd）世界书每条 `comment` ≤20字（中文一字算1、标点计入，超出平台截断）；跑 `validate.py --platform mmd` 无标题超限报错
 - [ ] （/mmdsandbox）世界书条目标题同样按 ≤20 字写，但判罚降为 WARN 不阻断（限制来自创卡页UI仍在，官方校验脚本不查该项）；见 output/worldbook-json.md 5.2
 - [ ] （整张图片卡）png 能被 stdlib 解出 `chara` chunk 并还原 JSON：跑 `python -m unittest test_make_card_image -v` 通过；v3 卡 `chara`+`ccv3` 都在，v2 卡仅 `chara`
-- [ ] （整张图片卡）嵌入的卡规格与平台匹配：当前MMD=v2、本地酒馆=v3（沙盒模式不做整张图片卡）
+- [ ] （整张图片卡）嵌入的卡规格与平台匹配：当前MMD=v2、**沙盒模式=v2**、本地酒馆=v3（沙盒同样可做整张图片卡）
 - [ ] （整张图片卡）只导 PNG（jpg 已弃用：MMD 实测读不出卡数据）
 - [ ] output/文件齐全且main.md索引已更新
 
@@ -162,11 +163,13 @@
 - [ ] **真实 MMD 不是日常默认回归环境**：AI 不自行登录账号、不把正式卡/公开卡当夹具。只有出现 `probe-needed` 平台边界，或用户授权最终人工验收时才回真实站；任何「保存编辑」/公开提交先确认对外影响
 - [ ] 若做最终实站验收，已区分瘦预览真实行为：`save.get/save.keys` 会同步抛 `SdkError`，`cache.get` 返回 `undefined`，`composer.visible()` 与 stage 读能力仍可用；不能概括成“一律 NOT_SUPPORTED”
 
-## 整卡输出形态（做整张角色卡时，当前MMD / 本地酒馆）
+## 整卡输出形态（做整张角色卡时，三平台通用）
 
-> 沙盒模式没有这道选择题：交付形态固定为「导入正则json + 独立persona文本（+可选独立世界书json）」，见 output/card-json.md 第 9 节。
+> **沙盒模式同样有这道选择题**（旧版写「沙盒没有、固定三件套」已更正）：它能导 v2 整卡，见 output/card-json.md 第 8-9 节。沙盒额外要核「新建卡 + 首次保存前选新版聊天页」两条铁律。
 
 - [ ] 已用 AskUserQuestion 问过输出形态：内嵌正则 PNG / 内嵌正则 JSON / 分离式（卡+正则json+规则.md）
 - [ ] （内嵌正则的整卡）状态栏**生成规则**已作为 constant=true（蓝灯）条目放入卡内 character_book——渲染正则≠生成规则，缺这条后续轮次状态栏不更新（见 output/card-json.md 第 8 节）
-- [ ] （内嵌正则的整卡）卡内 regex_scripts 用当前MMD的 4 字段格式；分离式时独立正则 json 的 beginning/regex_scripts 与卡内 first_mes/regex_scripts 一致
+- [ ] （内嵌正则的整卡）卡内 regex_scripts 为 4 字段结构；`/mmd`、`/st` 按各自纪律写，**沙盒的规则内容按沙盒纪律**（`<script>` 一等公民、禁 img onerror 点火器、id 负数、slash 形态）
+- [ ] （内嵌正则的整卡）**正则同时另出一份独立 json**——卡内是否被读取尚有未决矛盾 `【待验证】`（见 output/card-json.md 第 4 节的保守交付纪律），双份可保证用户补导即可补齐
+- [ ] （分离式）独立正则 json 的 beginning/regex_scripts 与卡内 first_mes/regex_scripts 一致；沙盒的分离式正则 json 走 6 键格式
 - [ ] （单独美化/状态栏流程）默认交付含 正则 json + 规则.md（状态栏生成规则文档）

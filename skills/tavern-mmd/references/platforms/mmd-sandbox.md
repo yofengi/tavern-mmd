@@ -47,7 +47,7 @@
 | `findRegex` 必须 slash literal | ✅ 强制（实测铁律，见 `mmd.md` §8） | ⚠️ **建议统一写 `/…/`（约定，非硬性）**：`【实机实测 2026-08-30】`（卡 64304 A/B）裸字面量 `体力` 与斜杠 `/灵力/` 都生效；交付统一 slash 是为跨平台一致，校验器对裸字面量出 WARN 不出 ERROR，见 §7.1 |
 | 导入 JSON 顶层键 | 4 键 `pageDepth` / `statusbar` / `beginning` / `regex_scripts` | **恰好 6 键**（多 `chatVersion` / `personality`） |
 | `id` 取值 | 时间戳类 | **必须负数**，导入时重编号 |
-| 整卡 PNG / chara_card_v2 | ✅ 仅 v2，PNG 承载 | ❌ **官方禁 PNG 整卡**；交付 = 正则 JSON + persona 文本 |
+| 整卡 PNG / chara_card_v2 | ✅ 仅 v2，PNG 承载 | ✅ **同样可用**（`【用户实测】`）：编辑页导入 v2 卡按**新卡**处理，「新版聊天页」单选仍可改 → 整卡路线可达沙盒。交付可走整卡，也可走 6 键正则 JSON + persona 文本，见 §9 |
 | `<script>` 地位 | 可执行，但 per-message 自渲染/定位不可用 | **一等公民**：装卡即抽出、整卡跑一次；per-message 由 `message:mount` 事件顶替 |
 | 状态栏引擎载体 | `img onerror`（唯一可靠 per-message 载体） | **`<script>` + SDK**；`img onerror` 点火器被官方明令禁止 |
 | 官方 SDK | ❌ 无 | ✅ 30 能力 / 12 事件 |
@@ -1114,15 +1114,17 @@ i.length > a && (i = t, r.push(f(e.name, o ? `empty-match` : `volume`)));
 | `imageUrl` | **2048 字**（源码真值，官方未记录） | 静默截断 |
 | `regex_scripts` 条数 | **130 条** | 官方 ERROR；导入时会被直接截断（**与源码真值一致**） |
 | 世界书条目标题（`comment`） | **20 字** | 本 skill 保留，降级为 WARN（见 §10） |
-| 角色卡格式 | **不用 chara_card_v2 / PNG 整卡** | 官方禁 PNG 整卡（见 §9） |
+| 角色卡格式 | **chara_card_v2**（同当前 MMD；不识别 v3） | 走整卡路线时按 v2 打包，PNG 承载（见 §9） |
 
 ### 8.1 顶层键白名单（恰好 6 键）
+
+> 🚨 **这个白名单只约束「导入正则」那份独立 JSON，不约束 v2 整卡。** 走整卡路线时，世界书正常放卡内 `character_book`、正则正常放 `data.extensions.regex_scripts`，那是 v2 卡的合法结构，与本白名单无关。别把这条限制误读成「沙盒的世界书必须单独交付」。
 
 ```
 chatVersion  pageDepth  statusbar  beginning  personality  regex_scripts
 ```
 
-**出现以下顶层键 → 官方判 ERROR**：`role`、`presentation`、`worldbook`、`world_book`、`lorebook`、`lore_book`、`entries`、`characterBook`、`character_book`。其他未知顶层键 → WARN（导入页不认）。
+**（仅这份独立正则 JSON）出现以下顶层键 → 官方判 ERROR**：`role`、`presentation`、`worldbook`、`world_book`、`lorebook`、`lore_book`、`entries`、`characterBook`、`character_book`。其他未知顶层键 → WARN（导入页不认）。
 
 `regex_scripts` 为空数组**且** `personality` 空白 → ERROR「没有可交付物」。
 
@@ -1164,15 +1166,34 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 
 ## 9. 交付形态与人设格式
 
-> 🚨 **沙盒模式不走 chara_card_v2、不走 PNG 整卡。** 官方明令「不写对话示例、**PNG 整卡**」。导入入口是创卡页的「**导入正则**」（也叫「设置正则」），格式是 **JSON 文本**。这与当前 MMD（`mmd.md` §7：仅 chara_card_v2、仅 PNG）完全不同 —— 别把 `card-json.md` 那套 v2 打包流程套过来。
+> ✅ **更正（`【用户实测】`，本节已按此重写）：沙盒模式可以走 chara_card_v2 整卡（PNG 或 JSON）。** 依据是**编辑页导入 v2 角色卡时按「新卡」处理**，因此那张「新版聊天页」单选仍然可改 —— 整卡路线能到达新页。世界书同理：创卡页原文写明「可导入PNG或json格式世界书」，所以世界书**可以**和正则一起并进同一份 v2 卡（`character_book` + `data.extensions.regex_scripts`），与当前 MMD 的做法一致。
+>
+> 旧版本文档写的「官方禁 PNG 整卡、交付固定三件套、世界书必须单独交付」是**错的**，已删除。唯一仍然成立的限制是 §8.1 那份**独立正则 JSON** 的 6 键白名单 —— 那是那一份文件的格式约束，不是平台不支持整卡。
 
-### 9.1 三件交付物
+### 9.1 两条交付路线（做整卡时用弹窗二选一，见 `../output/card-json.md` §8.1）
+
+**路线 A：v2 整卡（推荐，与当前 MMD 同流程）**
+
+- `<短名>.png`（内嵌 v2 卡：人设 + `character_book` 世界书 + `data.extensions.regex_scripts` 正则），或 `<短名>-v2.json` 备份形态。
+- 打包规范完全复用 `../output/card-json.md` 第 5 节（v2 骨架）与第 7 节（PNG 嵌入）。
+- 好处：**没有手工粘贴步骤**，人设随卡进 `data.description`，不必再单独交一份 persona 文本。
+
+**路线 B：分离式（正则 JSON + persona 文本）**
 
 - **导入正则 JSON**（顶层恰好 6 键，见 §8.1）→ 创卡页「导入正则」入口。
-- **独立 persona 文本**（未转义正文，纯文本）→ **导入页不会读 `personality` 字段**，必须让用户手工粘贴到人设框。
-- **独立世界书 JSON**（可选，根对象**只留 `entries`**）→ 世界书**不能**塞进导入正则 JSON（塞了判 ERROR），有独立导入入口。
+- **独立 persona 文本**（未转义正文，纯文本）→ 这份 JSON 的 `personality` **导入页不读**，必须让用户手工粘贴到人设框。
+- **独立世界书 JSON**（可选，根对象只留 `entries`）→ 走世界书独立导入入口。世界书不能塞进这份 6 键 JSON，但这只是**该文件**的限制；要一次到位就走路线 A。
 
-导入 JSON 的完整形状：
+### 9.1a 🚨 两条路线共同的前置铁律：新建卡 + 首次保存前选「使用新版」
+
+`chatVersion` 在 UI 上的真身是创卡页的**「新版聊天页」单选**（`( ) 使用旧版　( ) 使用新版`），并标注**「首次保存后不可再改」**（`【实机实测】`）。因此：
+
+1. **必须新建卡**。给已存在的卡导入，`chatVersion` 字段被直接忽略；整卡导入虽按新卡处理，但仍要确认落地的是一张新卡。
+2. **首次保存前**把单选切到**使用新版**。这一步是人工的，无论走路线 A 还是 B 都要在交付说明里写清楚。
+3. 选错**没有回头路**，只能重开一张卡。
+4. 漏了第 2 步的症状：规则装上了，但 `sdk.*`、`[data-chat]`、`[data-slot]`、舞台**全部不在**，表现是「按钮全不响应、样式对一半」，**页面上没有任何报错**。
+
+路线 B 的导入 JSON 完整形状（路线 A 的 v2 骨架见 `../output/card-json.md` §5.2）：
 
 ```json
 {
@@ -1187,7 +1208,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 }
 ```
 
-`personality` 仍要写进 JSON（供校验与留档），但**同时**必须另出一份纯文本给用户粘贴。落盘命名沿用 `../output/regex-output.md` 的约定；官方侧的命名习惯是 `<短名>-regex.json` / `<短名>-persona.txt` / `<短名>-worldbook.json`。
+走路线 B 时，`personality` 仍要写进 JSON（供校验与留档），但**同时**必须另出一份纯文本给用户粘贴。落盘命名沿用 `../output/regex-output.md` 的约定：`<短名>-regex.json` / `<短名>-persona.txt` / `<短名>-worldbook.json`。走路线 A 则是 `<短名>.png`（或 `<短名>-v2.json`）单文件，人设进卡内 `data.description`，**不需要** persona.txt。
 
 ### 9.2 人设格式要点
 
@@ -1215,8 +1236,9 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 
 ## 10. 世界书
 
-- 世界书**有独立导入 JSON**，但**不能**放进「导入正则」JSON（顶层出现 `entries` / `worldbook` / `characterBook` 等 → ERROR）。
-- 独立文件根对象**只保留 `entries`**（官方校验：顶层键必须恰好一个且为 `entries`）。
+- **世界书可以和正则一起并进 v2 整卡**（路线 A：卡内 `character_book`），也可以走**独立导入 JSON**（路线 B）。创卡页原文：「可导入PNG或json格式世界书」。
+- 唯一限制：**不能**放进那份 6 键「导入正则」JSON（顶层出现 `entries` / `worldbook` / `characterBook` 等 → ERROR）。这是那**一份文件**的格式约束，不是平台不支持世界书连带。
+- 走独立文件时根对象**只保留 `entries`**（官方校验：顶层键必须恰好一个且为 `entries`）；走整卡时按 `character_book` 的字段名，两套字段名有差异，见 `../output/worldbook-json.md` 第 3 节对照表。
 - `entries` 是**对象映射**（键建议连续数字字符串），不是数组；空 `entries` → ERROR。
 - 每条目 12 个必需字段全给，其中 `probability` 必须是**两位小数字符串**（如 `"100.00"`），`key` / `keysecondary` 必须是**JSON 字符串**（不能直接写数组）。字段细节见 `../output/worldbook-json.md`。
 - 条目 `content` 必须**至少包含一组成对章节标签**，且不得含 `$#char#$` / `$#user#$` / `{{char}}`（均 ERROR）。
@@ -1310,7 +1332,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 - **`[sta` + `tus]` 拆词绕检测** → `/\[status\]([\s\S]*?)\[\/status\]/` 一条真正则吃整块。
 - 🚨 **Shadow DOM 状态栏（`attachShadow` / 影渲法 / ShadowCast）** → **扔掉，理由已升级为硬理由**：`【实机实测 2026-08-26】`沙盒本身就是**跨源 iframe**（作者节点 `getRootNode() === document`，不是 shadow root）→ **iframe 已经完成了全部隔离，再套一层 Shadow DOM 是纯负债、零收益**：样式要重复注入、和平台的 `querySelector` 收窄机制打架、`--chat-*` 变量继承链变复杂。原文这里写的理由是「沙盒形态未说明所以别移植」，那是证据不足时的保守判断；**现在的理由是「没有任何东西需要再隔离」**（§2.3）。
 - **`document.currentScript` 自定位** → 扔掉，**它恒为 `null`**（`【源码确证】`内联脚本走 `(0,eval)`，根本没有 script 节点；`【实机实测】`顶层与回调内均为 `null`）。定位改用固定 id/class 约定 + `message:mount`（§2.3）。
-- **chara_card_v2 / PNG 打包** → 正则 JSON + persona 文本（§9）。
+- ~~**chara_card_v2 / PNG 打包**~~ → **这条已删除**：v2 整卡（PNG/JSON）在沙盒**可用**，见 §9。从当前 MMD 迁过来时 v2 打包流程**可以照搬**，只需额外确认「新建卡 + 首次保存前选新版聊天页」。
 
 对抗检定 `〖⚔=①…〗` 这类，用户没点名就不要做；骰子标记用 ASCII 分隔 `〖骰=检定名|属性|目标|出目|成功或失败〗`。
 
@@ -1327,7 +1349,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 7. **零外部依赖**：CSP 封死 `fetch`、外部字体、外部样式表（§13）→ 用系统字体栈、内联 `<style>`、`data:` 图片；状态只能来自 AI 正文 / `save` / `cache` / `localStorage`。
 8. **模型侧协议用方括号** `[状态]…[/状态]`，**绝不用中文尖括号**（会被剥壳删掉，§9.3）；匹配式**不能匹配空串**、别写太松（输出预算，§7.6）。
 9. **验证顺序**：`validate.py` → 本地沙盒仿真 `chat` + `thin-preview` → 桌面/窄屏/横屏 GUI 与截图；能力矩阵标为 `probe-needed` 时才回真实站做隔离探针。AI 不默认登录账号、不对正式卡或公开卡执行保存编辑；最终实站验收由用户授权并负责账号侧操作。
-10. **交付**：正则 JSON + persona 文本（+ 可选世界书 JSON），并在交付说明里写明「必须新建卡、创卡页确认新页」。`beginning` **按 4000 字卡**（§8.2）。
+10. **交付**：做整卡时用弹窗问形态 —— 路线 A（v2 整卡 PNG/JSON，含世界书与正则，无手工粘贴）或路线 B（6 键正则 JSON + persona 文本 + 可选世界书 JSON）。两条都要在交付说明里写明「**必须新建卡；首次保存前在创卡页选「使用新版」，此选择首次保存后永久不可改**」。`beginning` **按 4000 字卡**（§8.2）。
 
 ---
 

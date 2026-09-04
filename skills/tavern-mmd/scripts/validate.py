@@ -1696,21 +1696,22 @@ def validate_card(obj, platform):
     if not isinstance(data, dict):
         data = {}
 
-    if platform == "mmdsandbox":
-        # 锁定决策 D6：沙盒模式不走 chara_card_v2 / PNG 整卡，故不套 v2 强制检查。
-        warn("沙盒模式不使用 chara_card_v2 / PNG 整卡（官方明令禁 PNG 整卡）。"
-             "交付物应为「顶层恰好 6 键的导入正则 JSON」+「独立 persona 文本文件」"
-             "（导入页不读 personality 字段，须手工粘贴）+（可选）独立世界书 JSON。"
-             "请改用 --type regex 审核导入 JSON。")
-    elif platform == "mmd":
+    if platform in ("mmd", "mmdsandbox"):
+        # 更正（原锁定决策 D6 已推翻）：沙盒模式**可以**导入 v2 整卡（PNG/JSON）。
+        # 依据【用户实测】：编辑页导入 v2 卡按「新卡」处理，故创卡页「新版聊天页」单选
+        # 仍可改 → 整卡路线能到达新页。因此 MMD 系两个平台套同一份 v2 强制检查。
         if spec != "chara_card_v2":
-            err("MMD 仅识别 chara_card_v2，当前 spec=%s。必须输出 v2（spec=\"chara_card_v2\", spec_version=\"2.0\", 删除 data.group_only_greetings）。" % spec)
+            err("MMD 系（当前MMD/沙盒模式）仅识别 chara_card_v2，当前 spec=%s。必须输出 v2（spec=\"chara_card_v2\", spec_version=\"2.0\", 删除 data.group_only_greetings）。" % spec)
         else:
             ok("v2 规范 spec 正确")
         if "group_only_greetings" in data:
             err("MMD v2 卡不应含 data.group_only_greetings（v3 专有字段），请删除。")
         else:
             ok("无 v3 专有字段 group_only_greetings")
+        if platform == "mmdsandbox":
+            warn("沙盒模式整卡交付：必须在交付说明里写明「①导入走新建卡；"
+                 "②首次保存前在创卡页把『新版聊天页』选成使用新版，该选择首次保存后永久不可改」。"
+                 "漏了第②步，卡能进但 sdk.*／[data-chat]／舞台全不在，且页面无任何报错。")
     else:
         if spec not in ("chara_card_v2", "chara_card_v3"):
             warn("spec=%s 非标准 v2/v3" % spec)

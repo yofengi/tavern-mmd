@@ -128,7 +128,7 @@ python make_card_image.py <卡JSON> [--bg 底图路径] [-o 输出路径]
 - JPG：**已弃用**。实测 MMD 无法从 jpg 读出卡数据（EXIF UserComment 与 JPEG COM 段两种方案均验证不可用）。`--format jpg` 会直接报错退出；底层 embed_jpg/read_jpg_chara 仅保留作历史参考。MMD 整卡只用 PNG（或 JSON，本地酒馆）。
 - 自动按卡 JSON 的 `spec` 决定写 v2（仅 chara）还是 v3（chara+ccv3）。
 - 退出码：0 成功，1 失败（JSON 不合法/底图缺失或非法/请求 jpg），2 用法错误。
-- **只服务当前 MMD（v2）与本地酒馆（v3）**。沙盒模式不要用本脚本 —— 官方明令禁 PNG 整卡，它的交付物是导入正则 JSON + 独立 persona 文本。
+- **服务三个平台**：当前 MMD 与沙盒模式传 v2、本地酒馆传 v3。旧版本这里写「沙盒不要用本脚本，官方明令禁 PNG 整卡」，`【用户实测】`已推翻 —— 沙盒能导 v2 整卡（编辑页导入按新卡处理），照样用本脚本产 PNG。沙盒的额外要求只在交付说明：**新建卡 + 首次保存前在创卡页选「使用新版」聊天页**。
 
 测试：`python -m unittest test_make_card_image -v`（往返一致性）。
 

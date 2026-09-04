@@ -11,7 +11,7 @@
 > **当前本地 GUI 已覆盖**单宿主/单状态面板、preset 切换、tooltip 原生按钮、多轮/switch 与 chat/thin profile。拖动、真实舞台几何、系统主题/触控/软键盘及真实多轮 AI 仍属 `probe-needed` 或最终人工验收范围。
 > 🚨 **要在预览里验证，必须点底部「保存编辑」——预览只读卡片正式数据，不读草稿。** 正则面板的「保存配置」只进内存草稿、底部「保存草稿」只写服务端草稿，两者预览都看不到。这一条踩错会让你误以为基座坏了（实机验收时正是它造成四轮误判）。操作纪律见 `../../assets/sandbox-kit/README.md` 的「怎么在实机验证自己的卡」节。
 
-平台事实一律不在本文档展开，指向 `../platforms/mmd-sandbox.md`（1231 行，已含全部实测修正）。本文档只讲**方法论与设计思路**：为什么必须这么做。
+平台事实一律不在本文档展开，指向 `../platforms/mmd-sandbox.md`（已含全部实测修正）。本文档只讲**方法论与设计思路**：为什么必须这么做。
 
 ## 一、为什么沙盒需要一套新方法论
 
@@ -509,9 +509,11 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 
 ## 八、工作流
 
-① 复制配置 → ② 修改主题/schema/正文 → ③ 生成器与 validator → ④ 本地 sandbox `chat` + `thin-preview` → ⑤ 桌面/竖屏/横屏 GUI 与截图。只有能力矩阵标为 `probe-needed`，或用户授权最终人工验收时才进真实站；AI 不默认登录账号、不把正式卡/公开卡当日常夹具。真实站操作仍按固定交付形态导入 6 键 JSON，并手工粘贴 persona。
+① 复制配置 → ② 修改主题/schema/正文 → ③ 生成器与 validator → ④ 本地 sandbox `chat` + `thin-preview` → ⑤ 桌面/竖屏/横屏 GUI 与截图。只有能力矩阵标为 `probe-needed`，或用户授权最终人工验收时才进真实站；AI 不默认登录账号、不把正式卡/公开卡当日常夹具。
 
-**沙盒不用 PNG 整卡、不用 `chara_card_v2`**——交付物就是一份 6 键 JSON。
+**SBK 生成器的产物是一份 6 键 JSON**（即分离式路线：导入正则 JSON + 手工粘贴 persona）。但要区分两件事：生成器只产这一份，而**沙盒平台本身能导 v2 整卡**（`【用户实测】`，见 `../output/card-json.md` 第 9 节）—— 旧版本这里写「沙盒不用 PNG 整卡、不用 `chara_card_v2`」是**错的，已更正**。
+
+要把 SBK 产物走整卡路线时，把生成器输出里的 `regex_scripts` 搬进卡的 `data.extensions.regex_scripts`、`personality` 搬进 `data.description`、世界书放 `character_book`，再用 `scripts/make_card_image.py` 出 PNG。两条路线都必须提醒用户「**新建卡 + 首次保存前在创卡页选「使用新版」聊天页**」。
 
 生成器替你兜住的事：剥注释、按文件边界自动拆条并保持装载顺序、估算每条规则的输出预算、校验标签白名单与净化合规、`</script>` 在 JSON 序列化层转义。这些都是「不做会静默失效」的类别。
 
@@ -591,7 +593,7 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 
 ## 相关文档
 
-- `../platforms/mmd-sandbox.md` —— 沙盒平台技术规范（1231 行，含全部实测修正）。**平台事实以它为准**
+- `../platforms/mmd-sandbox.md` —— 沙盒平台技术规范（含全部实测修正）。**平台事实以它为准**
 - `../../assets/sandbox-kit/README.md` —— 资产目录、生成器用法、`modes` 语义、**已知缺陷与限制**、**怎么在实机验证自己的卡**
 - `../../assets/sandbox-kit/sbk/协议说明.md` —— 协议格式、schema、控件类型、模型侧输出约定
 - `statusbar-shadowcast.md` / `statusbar-radar.md` —— 当前 MMD 的两套方法（**不可用于沙盒**，模型侧协议可复用）
