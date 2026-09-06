@@ -725,10 +725,10 @@ test("thin profile 把未探到的 cache 写操作降级为 probe-needed", () =>
   assert.equal(acc["composer.visible"], "exact");
 });
 
-test("契约声明 ready 无 late replay、裸字面量政策为 ERROR", () => {
+test("契约声明 ready 无 late replay、裸字面量政策为 WARN", () => {
   assert.deepEqual(CONTRACT.events.lateReplay.notReplayed, ["ready"]);
   assert.equal(CONTRACT.regexPipeline.patternPolicy.delivery, "slash");
-  assert.equal(CONTRACT.regexPipeline.patternPolicy.severity, "ERROR");
+  assert.equal(CONTRACT.regexPipeline.patternPolicy.severity, "WARN");
   assert.equal(CONTRACT.regexPipeline.outputBudget.floor, 262144);
   assert.equal(CONTRACT.regexPipeline.outputBudget.inputMultiplier, 4);
   // 2026-08-29 实测：[data-theme=dark]/[data-theme=light] 各 29 条（旧记 14 条漏 15 个，

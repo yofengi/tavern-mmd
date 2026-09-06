@@ -5,6 +5,7 @@ import unittest
 import html as html_mod
 import importlib
 import io
+import re
 import json
 import os
 import re
@@ -1915,11 +1916,103 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertLess(prologue_at, user_at)
 
     def test_sandbox_longpress_menu_variants_per_role(self):
-        """实测 2026-08-31：长按菜单随角色变。AI/用户：复制/删除/回溯/开启新的故事；
-        「第一句话」仅复制。气泡绑 pointerdown 计时长按，menu 按 data-msg-kind 重建选项。"""
+        """长按菜单随角色变：AI 复制/删除/回溯/开启新的故事（4）；
+        用户 复制/删除/回溯（**3，无新故事**）；「第一句话」仅复制（1）。
+        气泡绑 pointerdown 计时长按，menu 按 data-msg-kind 重建选项。
+
+        🚨 用户菜单的 3 项依据是**卡作者口述**（2026-09-06 任务原文明确区分了 AI 与玩家两套
+        菜单），不是本仓库自行截图复核的结果。此前被当成"同 AI 四项"写死，与作者所述矛盾。
+        若将来实机复核与此不符，以实机为准并同步改这里。"""
         self.assertEqual([a for a, _l, _g in bp.SANDBOX_MENU_OPTIONS["ai"]],
                          ["copy", "delete", "backtrack", "newstory"])
+        self.assertEqual([a for a, _l, _g in bp.SANDBOX_MENU_OPTIONS["user"]],
+                         ["copy", "delete", "backtrack"])
         self.assertEqual([a for a, _l, _g in bp.SANDBOX_MENU_OPTIONS["first"]], ["copy"])
+        # 用户菜单不得含「开启新的故事」
+        self.assertNotIn("newstory", [a for a, _l, _g in bp.SANDBOX_MENU_OPTIONS["user"]])
+
+    def test_runtime_menu_table_generated_from_single_source(self):
+        """运行时 MENU 表必须由 SANDBOX_MENU_OPTIONS 生成，不能手抄。
+
+        🚨 2026-09-06 踩过的坑：脚手架里手抄了一份 JS MENU 表。当时把
+        SANDBOX_MENU_OPTIONS 的 user 改成 3 项、静态 HTML 也改了，但手抄副本没动 ——
+        155 个单测全绿（它们只断言常量与静态 HTML），浏览器里长按用户气泡照旧弹 4 项。
+        顺带发现手抄副本连 glyph 码位都抄漂了（\\u2a19 vs 常量的 \\u29c9）。
+
+        所以这里断言的是**运行时表本身**：user 段不得出现 newstory，且三种角色的项数
+        与常量一致。只要有人再手抄一份，这条就会红。
+        """
+        table = bp._sandbox_menu_js_table()
+        # 逐角色切出运行时表里的片段
+        ai_seg = table.split("ai:[", 1)[1].split("]],user:", 1)[0]
+        user_seg = table.split("user:[", 1)[1].split("]],first:", 1)[0]
+        first_seg = table.split("first:[", 1)[1].rsplit("]]", 1)[0]
+        self.assertIn("newstory", ai_seg)
+        self.assertNotIn("newstory", user_seg)      # 关键：用户段无「开启新的故事」
+        self.assertNotIn("newstory", first_seg)
+        for kind, seg in (("ai", ai_seg), ("user", user_seg), ("first", first_seg)):
+            with self.subTest(kind=kind):
+                self.assertEqual(seg.count("['"), len(bp.SANDBOX_MENU_OPTIONS[kind]))
+        # glyph 必须是单反斜杠 \\uXXXX（双反斜杠会被 JS 当字面文本）
+        self.assertNotIn("\\\\u", table)
+        # 🚨 返回的是**值**（JS 源码），不能带字面引号。带了就会在脚手架里拼出一个悬空
+        # 字符串字面量、紧跟 function → SyntaxError，整段脚手架不执行、__sbxPanels 不挂。
+        # 2026-09-06 真踩过：156 个单测全绿，浏览器里 __sbxPanels 是 undefined。
+        self.assertFalse(table.startswith('"'), "生成器不得返回带引号的字面量")
+        self.assertTrue(table.startswith("var MENU={"))
+        self.assertTrue(table.endswith("};"))
+        # 生成的表要真的进产物
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        self.assertIn("var MENU={ai:[", chrome)
+        runtime = chrome.split("var MENU={", 1)[1].split("};", 1)[0]
+        self.assertNotIn("newstory", runtime.split("user:[", 1)[1].split("]],first:", 1)[0])
+
+    def test_panel_scaffold_js_is_syntactically_valid(self):
+        """脚手架 JS 必须能解析通过。
+
+        🚨 2026-09-06 踩过：`_sandbox_menu_js_table()` 返回值带了字面引号，拼进脚手架后
+        变成「悬空字符串字面量 + function」→ SyntaxError: Unexpected token 'function'。
+        整段脚手架不执行，window.__sbxPanels 是 undefined，预览里所有浮层开关全废 ——
+        而 156 个单测**全绿**，因为它们只做子串断言，没人真去解析这段 JS。
+
+        这里用括号/引号配平做轻量结构校验（不引入 JS 引擎依赖）：任何一处提前闭合或
+        多余引号都会让配平失败。
+        """
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        m = re.search(r'<script data-preview-panels="1">([\s\S]*?)</script>', chrome)
+        self.assertIsNotNone(m, "未找到面板脚手架 script")
+        js = m.group(1)
+        # 逐字符扫描：跳过字符串内部，统计括号配平
+        depth = {"(": 0, "[": 0, "{": 0}
+        close_of = {")": "(", "]": "[", "}": "{"}
+        quote = None
+        esc = False
+        for ch in js:
+            if quote:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == quote:
+                    quote = None
+                continue
+            if ch in "'\"":
+                quote = ch
+            elif ch in depth:
+                depth[ch] += 1
+            elif ch in close_of:
+                depth[close_of[ch]] -= 1
+                self.assertGreaterEqual(depth[close_of[ch]], 0,
+                                        "括号提前闭合，JS 结构已坏：%r" % ch)
+        self.assertIsNone(quote, "有未闭合的字符串字面量（多余引号会引发 SyntaxError）")
+        for br, n in depth.items():
+            with self.subTest(bracket=br):
+                self.assertEqual(n, 0, "括号未配平：%s 差 %d" % (br, n))
+        # 关键符号都得在，且 MENU 表不能被引号包成字符串
+        self.assertIn("window.__sbxPanels={", js)
+        self.assertIn("function buildMenu(", js)
+        self.assertNotIn('"var MENU=', js)
+        self.assertNotIn(';"function', js)
         chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
         self.assertIn("function longPress(", chrome)
         self.assertIn("function buildMenu(", chrome)
@@ -1949,7 +2042,8 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         明确标注平台侧，绝不套 --chat-modal-* —— 套了就是撒谎，作者会白写选择器。
         """
         chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
-        for name in ("model", "conv", "summary", "role", "share"):
+        for name in ("model", "conv", "summary", "role", "share",
+                     "conversation", "assist-alert", "model-switch"):
             with self.subTest(name=name):
                 self.assertIn('data-host-popup="%s"' % name, chrome)
         self.assertIn("平台侧 · 卡片改不动", chrome)
@@ -1962,6 +2056,77 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         # 实测 z-index 差异：总结剧情 1000000000，分享 9000（旧聊天页是 10075）
         self.assertIn('.pano-host-popup[data-host-popup="summary"]{z-index:1000000000}', css)
         self.assertIn("z-index <b>9000</b>", chrome)
+        # 2026-09-06 实机复刻的内容块也一律不吃 --chat-modal-*（画得像 ≠ 能改）
+        ph_rules = [ln for ln in css.splitlines() if ".pano-host-popup .ph-" in ln]
+        self.assertTrue(ph_rules, "ph-* 内容复刻样式缺失")
+        for ln in ph_rules:
+            with self.subTest(rule=ln[:48]):
+                self.assertNotIn("--chat-", ln)
+
+    def test_host_second_layer_popups_stack_over_parent(self):
+        """二层弹窗（实机 2026-09-06）：对话设置的 .intro-icon → .alert-scope（315x577，
+        z-10075）；记忆面板的 .summary-pi-help → .summary-prompt-intro（371x143，
+        z-1000000001，整页最高）。
+
+        🚨 二层必须 **压在父面板之上**、关闭时**只回到父面板**。所以 open2 不调 closeAll，
+        关闭钮按 SECOND 名单走 closeOne。若退回 open()/closeAll()，预览会骗作者说
+        「点说明会把设置页一起关掉」，与真机相反。
+        """
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        for name in ("conv-intro", "summary-intro"):
+            with self.subTest(name=name):
+                self.assertIn('data-host-popup="%s"' % name, chrome)
+        # 二层入口挂在父面板内容里
+        self.assertIn('data-host-open2="conv-intro"', chrome)
+        self.assertIn('data-host-open2="summary-intro"', chrome)
+        # open2 不关父面板；关闭钮对二层走 closeOne
+        self.assertIn("function open2(name){", chrome)
+        self.assertNotIn("function open2(name){closeAll()", chrome)
+        self.assertIn("var SECOND={'conv-intro':1,'summary-intro':1};", chrome)
+        self.assertIn("if(SECOND[n]){closeOne(n);}else{closeAll();}", chrome)
+        self.assertIn("open2:open2", chrome)
+        # 层级：summary-intro 必须比父面板 summary(1000000000) 高
+        css = bp._sandbox_chrome_css()
+        self.assertIn('.pano-host-popup[data-host-popup="summary-intro"]{z-index:1000000001}', css)
+        self.assertIn('.pano-host-popup[data-host-popup="conv-intro"]{z-index:10076}', css)
+
+    def test_message_edit_face_is_a_host_popup_not_in_iframe(self):
+        """消息编辑面（点气泡下「编辑」圆钮）**渲染在宿主页**，不在 iframe 内。
+
+        实机判据（2026-09-06，卡 316991，宿主页 evaluate 直读）：
+          ① 宿主 document.querySelector('.msg-edit-scope') 直接取到；
+          ② 祖先链 uni-view.sandbox-host < uni-page-body < uni-page < uni-app；
+          ③ 自带 data-host="message-edit"；
+          ④ 内联 style 是宿主变量族（--background-color / --input-background-color /
+             --btn-bg-color / --lo* …），**一个 --chat-* 都没有**；
+          ⑤ position:fixed, z-index:9999, 遮罩 rgba(0,0,0,.7)，关闭时 display:none
+             （所以量到 0x0 是"关着"，不是"死模板"）。
+
+        🚨 本仓库曾据 0x0 反推成"宿主那份是死模板、可见的编辑面在 iframe 内"，并按
+        「吃 --chat-* 令牌」实现了一版。那是错的：作者照那版给 [data-chat=message-edit]
+        写美化，真机纹丝不动。此测试锁住"归宿主弹窗家族 + 不吃令牌"，防止回退。
+        """
+        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
+        # 归宿主弹窗家族
+        self.assertIn('data-host-popup="message-edit"', chrome)
+        # 不得再作为 iframe 内浮层出现
+        self.assertNotIn('data-chat="message-edit"', chrome)
+        sel = chrome.split("var SEL='", 1)[1].split("';", 1)[0]
+        self.assertNotIn('[data-chat="message-edit"]', sel)
+        # 四个选项 chip 的实机文案（从宿主 DOM 逐字读出）
+        self.assertEqual(bp.SANDBOX_EDIT_OPTIONS,
+                         ("简转繁", "繁转简", "去除异常符号", "去除异常文字"))
+        for label in bp.SANDBOX_EDIT_OPTIONS:
+            with self.subTest(label=label):
+                self.assertIn(label, chrome)
+        # note 里写明"不在 iframe 内"与 data-host 判据，作者才不会白写选择器
+        self.assertIn("它不在 iframe 内", chrome)
+        self.assertIn('data-host="message-edit"', chrome)
+        # 实测层级与遮罩
+        css = bp._sandbox_chrome_css()
+        self.assertIn('.pano-host-popup[data-host-popup="message-edit"]{z-index:9999', css)
+        self.assertIn('.pano-host-popup[data-host-popup="message-edit"] .pano-host-mask'
+                      '{background:rgba(0,0,0,.7)}', css)
 
     STATUSBAR_NODE = "&lt;div data-slot=&quot;statusbar&quot;"
 

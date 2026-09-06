@@ -1805,9 +1805,29 @@ SANDBOX_PANEL_TOOLS_IN = (
     ("history-loading", "历史加载", "[data-probe=history-loading]，会把 messages 整块隐藏"),
 )
 
+# 宿主弹窗工具钮。第 3 项是提示文案：写清这一层在真机的尺寸/层级，作者判断遮挡用。
+# 2026-09-06 实机补齐 conversation / assist-alert / model-switch 与两个二层。
 SANDBOX_PANEL_TOOLS_HOST = (
-    ("model", "模型设置"), ("conv", "对话设置"), ("summary", "总结剧情"),
-    ("role", "用户人设"), ("share", "分享"),
+    ("model", "模型设置", "快捷条第1钮 → .model-setting-scope，414x348 底升，z-9000"),
+    ("conv", "对话设置", "快捷条第2钮 → .conv-style-modal，414x618 底升，z-10075，"
+                     "7 组卡；文风/总结项的 ⓘ 可再开二层"),
+    ("summary", "总结剧情", "快捷条第4钮 → .summary-sheet，414x607 底升，z-1000000000"
+                        "（整页次高）；提示词项的「?」可再开二层"),
+    ("conversation", "新的聊天", "快捷条第5钮 → .conversation-list-scope，414x273 底升，z-9000"),
+    ("role", "用户人设", "快捷条第6钮 → .role-profile-modal，414x618 底升，z-10075"),
+    ("assist-alert", "AI帮聊介绍", "底栏灯泡 [data-chat=assistant] → .alert-scope，"
+                              "287x256 居中 fade-zoom，z-9000（与 SDK 的 [data-chat=alert] 不同物）"),
+    ("model-switch", "模型切换", "底栏 [data-chat=model-chip] → .model-switch-scope，z-9000"
+                             "（与快捷条「模型设置」是两个面板）"),
+    ("share", "分享", "顶栏第2钮 → .share-popup，z-9000（旧聊天页是 10075）"),
+)
+
+# 二层：从某个一层面板内部再点开，z-index 压住父面板，关闭只回到父面板。
+SANDBOX_PANEL_TOOLS_HOST2 = (
+    ("conv-intro", "└二层·文风说明", "对话设置里点 .intro-icon → .alert-scope，"
+                                "315x577 居中，z-10075（同层靠后挂载压住父面板）"),
+    ("summary-intro", "└二层·提示词说明", "记忆面板里点 .summary-pi-help「?」→ "
+                                   ".summary-prompt-intro，371x143 居中，z-1000000001（整页最高）"),
 )
 
 
@@ -1834,12 +1854,19 @@ def _sandbox_panel_tools_html():
             'onclick="%s.__sbxPanels.stage(\'%s\')">舞台 %s</button>' % (mode, win, mode, mode))
     parts.append('<span class="preview-tools-label">宿主页弹窗（平台侧 · 卡片改不动，'
                  '只看遮挡层级）</span>')
-    for name, label in SANDBOX_PANEL_TOOLS_HOST:
+    for name, label, tip in SANDBOX_PANEL_TOOLS_HOST:
         parts.append(
-            '<button class="preview-tool" type="button" '
-            'title="渲染在宿主页 uni-app，跨源 iframe 之外；探针验证在卡里改 '
-            '--chat-modal-* 对它无效" '
-            'onclick="%s.__sbxPanels.open(\'%s\')">%s</button>' % (win, name, label))
+            '<button class="preview-tool" type="button" title="%s（渲染在宿主页 uni-app，'
+            '跨源 iframe 之外；探针验证在卡里改 --chat-modal-* 对它无效）" '
+            'onclick="%s.__sbxPanels.open(\'%s\')">%s</button>'
+            % (html_mod.escape(tip, quote=True), win, name, label))
+    # 二层用 open2：**不关父面板**，与真机一致（点说明后设置页仍在下面）
+    for name, label, tip in SANDBOX_PANEL_TOOLS_HOST2:
+        parts.append(
+            '<button class="preview-tool" type="button" title="%s。用 open2 打开，'
+            '不关父面板；关闭只回到父面板" '
+            'onclick="%s.__sbxPanels.open2(\'%s\')">%s</button>'
+            % (html_mod.escape(tip, quote=True), win, name, label))
     parts.append('<span class="preview-tools-label">输入框三态</span>')
     for state, lab, tip in (
             ("", "折叠", "基线态：min-height 82rpx、单行居中（实测）"),
@@ -3101,6 +3128,28 @@ body{display:flex;flex-direction:column;background:#17181a}
 .pano-host-popup[data-host-popup="share"],
 .pano-host-popup[data-host-popup="assist-alert"]{z-index:9000}
 .pano-host-popup[data-host-popup="summary"]{z-index:1000000000}
+/* 消息编辑面：实测 position:fixed、z-9999、遮罩 rgba(0,0,0,.7)（比别的宿主弹窗深）、
+   整屏而非底升。仍归 .pano-host-popup 家族 —— 它在宿主页，卡片 CSS 打不到。 */
+.pano-host-popup[data-host-popup="message-edit"]{z-index:9999;top:0}
+.pano-host-popup[data-host-popup="message-edit"][data-open="on"]{display:flex;
+  align-items:stretch;justify-content:center}
+.pano-host-popup[data-host-popup="message-edit"] .pano-host-mask{background:rgba(0,0,0,.7)}
+.pano-host-popup[data-host-popup="message-edit"] .pano-host-sheet{width:100%%;
+  border-radius:0;display:flex;flex-direction:column}
+.pano-host-popup .ph-edit-surface{flex:1;min-height:140px;white-space:pre-wrap}
+/* 模型行（对话模型选择）：实机每行含名称/简介/电量/解锁/成功率，选中行有勾与描边 */
+.pano-host-popup .ph-mi{background:#2c2e32;border-radius:8px;padding:9px 10px;
+  margin-bottom:7px;border:1px solid transparent}
+.pano-host-popup .ph-mi.is-sel{border-color:#ff6d97}
+.pano-host-popup .ph-mi.is-sel::before{content:'\2713';float:right;color:#ff6d97;
+  font-size:12px;margin-left:6px}
+.pano-host-popup .ph-mi-top{display:flex;align-items:center;gap:6px}
+.pano-host-popup .ph-newbadge{font-style:normal;font-size:9px;background:#ff6d97;
+  color:#fff;border-radius:3px;padding:1px 5px}
+.pano-host-popup .ph-mi-bot{display:flex;align-items:center;gap:10px;margin-top:6px;
+  flex-wrap:wrap}
+.pano-host-popup .ph-badge{font-size:9px;background:#33353b;color:#c5c5c5;
+  border-radius:10px;padding:2px 7px}
 /* AI帮聊 alert：实测 u-fade-zoom + flex 居中 + 260px 定宽 + radius 10px（不是底部升起） */
 .pano-host-popup[data-host-popup="assist-alert"][data-open="on"]{display:flex;
   align-items:center;justify-content:center;top:0}
@@ -3119,6 +3168,88 @@ body{display:flex;flex-direction:column;background:#17181a}
 .pano-host-popup .pano-host-note{font-size:11px;line-height:1.5;color:#c5c5c5}
 .pano-host-popup .pano-host-close{position:absolute;top:10px;right:12px;width:22px;height:22px;
   border:0;border-radius:50%%;background:rgba(255,255,255,.08);color:#c5c5c5;font-size:14px;cursor:pointer}
+
+/* ── 宿主弹窗内容复刻（ph-* = preview-host，2026-09-06 实机）─────────────────
+   刻意**不吃** --chat-modal-*：这层在跨源 iframe 之外，作者改不动。写死取值就是
+   为了让作者在预览里试着改 --chat-modal-bg 时**看不到变化**，与真机一致。
+   实测高度：model 348 / conv 618 / summary 607 / conversation 273 / role 618。
+   二层：conv-intro 315x577、summary-intro 371x143，都是 fade-zoom 居中。 */
+.pano-host-popup .ph-body{margin-top:10px;font-size:11px;color:#e6e6e6;
+  max-height:60vh;overflow:auto}
+.pano-host-popup .ph-body b{color:#fff;font-size:12px}
+.pano-host-popup .ph-desc,.pano-host-popup .ph-hint{display:block;color:#8d949d;font-size:10px}
+.pano-host-popup .ph-hint{display:inline;margin-left:6px}
+.pano-host-popup .ph-bar{display:flex;justify-content:space-between;align-items:center;
+  padding:6px 0 10px;border-bottom:1px solid #333;margin-bottom:8px}
+.pano-host-popup .ph-ok{color:#ff6d97;font-weight:600}
+.pano-host-popup .ph-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.pano-host-popup .ph-model{color:#fff}
+.pano-host-popup .ph-pill{background:#3a2d33;color:#ff6d97;border-radius:11px;padding:2px 9px;font-weight:600}
+.pano-host-popup .ph-pill i{font-style:normal;font-size:9px;opacity:.75}
+.pano-host-popup .ph-card{background:#2c2e32;border-radius:8px;padding:9px 10px;margin-bottom:8px}
+.pano-host-popup .ph-card-head{display:flex;justify-content:space-between;align-items:center}
+.pano-host-popup .ph-caret{color:#8d949d}
+.pano-host-popup .ph-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.pano-host-popup .ph-chips.ph-right{justify-content:flex-end}
+.pano-host-popup .ph-chip{position:relative;background:#33353b;border-radius:6px;
+  padding:5px 10px;font-size:10px;color:#c5c5c5}
+.pano-host-popup .ph-chip.is-sel{background:#ff6d97;color:#fff}
+.pano-host-popup .ph-chip.is-off{opacity:.45}
+.pano-host-popup .ph-chip i{display:block;font-style:normal;font-size:9px;opacity:.8}
+/* 二层入口标记：ⓘ 与 ? 都做成可点小圆，提示"这里还能再开一层" */
+.pano-host-popup .ph-intro,.pano-host-popup .ph-help{display:inline-flex;align-items:center;
+  justify-content:center;width:13px;height:13px;margin-left:5px;border-radius:50%%;
+  border:1px solid currentColor;font-size:9px;font-style:normal;cursor:pointer;vertical-align:middle}
+.pano-host-popup .ph-sw-row{display:flex;justify-content:space-between;align-items:center}
+.pano-host-popup .ph-sw{flex:0 0 auto;width:34px;height:18px;border-radius:9px;background:#4a4d55;position:relative}
+.pano-host-popup .ph-sw.is-sel{background:#ff6d97}
+.pano-host-popup .ph-sw::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;
+  border-radius:50%%;background:#fff}
+.pano-host-popup .ph-sw.is-sel::after{left:auto;right:2px}
+.pano-host-popup .ph-label{display:flex;justify-content:space-between;margin:10px 0 6px;color:#fff;font-size:11px}
+.pano-host-popup .ph-textbox{background:#1e1f24;border-radius:6px;padding:9px;min-height:34px;color:#8d949d}
+.pano-host-popup .ph-input{background:#1e1f24;border-radius:6px;padding:9px;margin-top:6px;color:#8d949d;
+  display:flex;justify-content:space-between}
+.pano-host-popup .ph-pi{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:6px;
+  margin-bottom:5px;background:#33353b}
+.pano-host-popup .ph-pi>span:first-child{flex:1;color:#fff}
+.pano-host-popup .ph-pi.is-sel{background:rgba(255,109,151,.16);border:1px solid #ff6d97}
+.pano-host-popup .ph-radio{flex:0 0 auto;width:13px;height:13px;border-radius:50%%;border:1px solid #8d949d}
+.pano-host-popup .ph-pi.is-sel .ph-radio{border-color:#ff6d97;background:#ff6d97}
+.pano-host-popup .ph-dashed{border:1px dashed #4a4d55;border-radius:8px;padding:12px;
+  text-align:center;color:#8d949d}
+.pano-host-popup .ph-cost{margin:10px 0;text-align:center;color:#c5c5c5;font-size:10px}
+.pano-host-popup .ph-btn{margin-top:10px;background:#ff6d97;color:#fff;border-radius:23px;
+  padding:11px;text-align:center;font-weight:600;font-size:12px}
+.pano-host-popup .ph-item{display:flex;align-items:center;gap:9px;padding:7px 0}
+.pano-host-popup .ph-avatar{flex:0 0 auto;width:34px;height:34px;border-radius:50%%;background:#4a4d55}
+.pano-host-popup .ph-item>span:nth-child(2){flex:1}
+.pano-host-popup .ph-cur{color:#ff6d97;font-size:10px}
+.pano-host-popup .ph-radios{display:flex;gap:6px;justify-content:space-between}
+.pano-host-popup .ph-rd{font-size:10px;color:#c5c5c5;display:flex;align-items:center;gap:4px}
+.pano-host-popup .ph-rd::before{content:'';width:12px;height:12px;border-radius:50%%;border:1px solid #8d949d}
+.pano-host-popup .ph-rd.is-sel{color:#fff}
+.pano-host-popup .ph-rd.is-sel::before{border-color:#ff6d97;background:#ff6d97}
+.pano-host-popup .ph-note-inline{margin:8px 0 6px;color:#d29922;font-size:10px}
+.pano-host-popup .ph-center{text-align:center}
+.pano-host-popup .ph-alert-title{font-size:14px;font-weight:600;color:#fff;margin-bottom:9px}
+.pano-host-popup .ph-alert-text{font-size:11px;line-height:1.65;color:#e6e6e6;text-align:left}
+.pano-host-popup .ph-check{display:flex;align-items:center;justify-content:center;gap:6px;
+  margin:12px 0;font-size:10px;color:#c5c5c5}
+.pano-host-popup .ph-check i{width:12px;height:12px;border:1px solid #8d949d;border-radius:2px}
+.pano-host-popup .ph-alert-btns{display:flex;justify-content:space-around;align-items:center;
+  margin-top:12px;padding-top:10px;border-top:1px solid #333;font-size:12px}
+/* 二层：与 assist-alert 同为 fade-zoom 居中。conv-intro 实测 315 宽、summary-intro 371 宽。
+   z-index 必须压住各自的父面板，否则作者会以为二层被吞了。 */
+.pano-host-popup[data-host-popup="conv-intro"][data-open="on"],
+.pano-host-popup[data-host-popup="summary-intro"][data-open="on"]{display:flex;
+  align-items:center;justify-content:center;top:0}
+.pano-host-popup[data-host-popup="conv-intro"]{z-index:10076}
+.pano-host-popup[data-host-popup="conv-intro"] .pano-host-sheet{width:315px;
+  border-radius:10px;background:#2c2e32;max-height:70vh;overflow:auto}
+.pano-host-popup[data-host-popup="summary-intro"]{z-index:1000000001}
+.pano-host-popup[data-host-popup="summary-intro"] .pano-host-sheet{width:371px;
+  border-radius:10px;background:#2c2e32}
 
 /* legacy 自造类：骨架上仍挂着这些 class（.pano-shortcuts/.pano-shortcut/.pano-compose-row/
    .pano-compose-icon/.pano-send/.pano-input-shell），但**不再给它们任何样式** ——
@@ -3189,18 +3320,59 @@ SANDBOX_HISTORY_LOADING = (
     '</div>'
 )
 
-# 长按菜单（实测 [data-chat=message-menu]）：选项**随被长按消息的角色而变**（实测 2026-08-31）。
-#   AI 消息：复制（仅文本）/ 删除（从上下文移除）/ 回溯（删本条及下方全部）/ 开启新的故事（保留本条及以上，进新聊天）
-#   用户消息：同 AI 四项（回溯对用户消息同样成立；实测未逐字复核用户菜单，标 probe-needed）
-#   角色卡「第一句话」(msg-id=-1)：仅「复制」
+# 长按菜单（实测 [data-chat=message-menu]）：选项**随被长按消息的角色而变**。
+#   AI 消息：复制 / 删除 / 回溯 / 开启新的故事  —— 4 项
+#   用户消息：复制 / 删除 / 回溯               —— **3 项，没有「开启新的故事」**
+#   角色卡「第一句话」(msg-id=-1)：仅「复制」   —— 1 项
+#
+# 🚨 2026-09-06 依据 = **卡作者口述**（任务原文：「ai消息（复制、删除、回溯、开启新的故事）
+#    和玩家消息（复制、删除、回溯）的菜单列表不一样」）。此前这里给用户菜单也写了 4 项
+#    （含 newstory），是当时标了 probe-needed 却按"同 AI"猜着填，与作者所述矛盾，已改回 3 项。
+#    ⚠️ 尚未由本仓库自行截图复核（长按需按住 ~800ms，跨源 iframe 内不易稳定复现）。
+#    若后续实机复核与此不符，以实机为准并同步改 test_build_preview 的断言。
+#    预览侧由 __sbxPanels.longPress(kind) 直接触发，不依赖真长按手势。
 # 静态 HTML 先放 AI 四项占位；面板脚手架在长按时按 data-msg-kind 重建 .menu-options。
 SANDBOX_MENU_OPTIONS = {
     "ai": (("copy", "复制", "&#10697;"), ("delete", "删除", "&#10005;"),
            ("backtrack", "回溯", "&#8630;"), ("newstory", "开启新的故事", "&#10022;")),
     "user": (("copy", "复制", "&#10697;"), ("delete", "删除", "&#10005;"),
-             ("backtrack", "回溯", "&#8630;"), ("newstory", "开启新的故事", "&#10022;")),
+             ("backtrack", "回溯", "&#8630;")),
     "first": (("copy", "复制", "&#10697;"),),
 }
+
+
+def _sandbox_menu_js_table():
+    """把 SANDBOX_MENU_OPTIONS 生成运行时 JS 的 MENU 表。
+
+    🚨 必须生成、不能手抄。2026-09-06 踩过：脚手架里手抄了一份表，改了
+    SANDBOX_MENU_OPTIONS（user 去掉 newstory）与静态 HTML，却漏改手抄副本 ——
+    155 个单测全绿，但浏览器里长按用户气泡仍弹 4 项。单测断言的是常量与静态
+    HTML，碰不到运行时表，所以这种漂移测不出来，只能靠「单一来源」从结构上消灭。
+
+    glyph 在 Python 常量里是 HTML 实体（如 &#10697;），JS 字符串里要转 \\uXXXX。
+    产物会被 srcdoc 转义一层，所以这里输出的反斜杠要写成 4 个。
+    """
+    def esc_js(text):
+        out = []
+        for ch in text:
+            if ch.isascii() and (ch.isalnum() or ch in " _-"):
+                out.append(ch)
+            else:
+                out.append("\\u%04x" % ord(ch))
+        return "".join(out)
+
+    def glyph_to_js(entity):
+        m = re.fullmatch(r"&#(\d+);", entity)
+        return "\\u%04x" % (int(m.group(1)) if m else ord(entity[0]))
+
+    parts = []
+    for kind in ("ai", "user", "first"):
+        items = []
+        for act, label, glyph in SANDBOX_MENU_OPTIONS[kind]:
+            items.append("['%s','%s','%s']"
+                         % (act, esc_js(label), glyph_to_js(glyph)))
+        parts.append("%s:[%s]" % (kind, ",".join(items)))
+    return "var MENU={%s};" % ",".join(parts)
 
 
 def _sandbox_menu_options_html(kind):
@@ -3286,6 +3458,10 @@ SANDBOX_SHARE_PICK_BAR = (
     '</div>'
 )
 
+# 消息编辑面的四个选项 chip（实机 2026-09-06 从宿主 DOM 逐字读出）。
+# 面板本身是**宿主页**弹窗，见 SANDBOX_HOST_POPUPS 里的 "message-edit" 条目。
+SANDBOX_EDIT_OPTIONS = ("简转繁", "繁转简", "去除异常符号", "去除异常文字")
+
 SANDBOX_SHARE_SHOT = (
     '<div data-chat="share-shot-loading" data-open="off">正在生成长图…（z-8000）</div>'
 )
@@ -3314,6 +3490,13 @@ SANDBOX_PANEL_SCAFFOLD = (
     "||D.querySelector('.pano-host-popup[data-host-popup=\"'+name+'\"]');}"
     "function open(name){closeAll();var el=nodeOf(name);"
     "if(el){el.setAttribute('data-open','on');}return !!el;}"
+    # 二层弹窗名单（实机：都是从某个一层宿主面板内部再点开、z-index 压住父面板）。
+    # open2 不调 closeAll —— 父面板必须留在下面，否则预览会骗作者说"打开说明会关掉设置页"。
+    "var SECOND={'conv-intro':1,'summary-intro':1};"
+    "function open2(name){var el=nodeOf(name);"
+    "if(el){el.setAttribute('data-open','on');}return !!el;}"
+    "function closeOne(name){var el=nodeOf(name);"
+    "if(el){el.setAttribute('data-open','off');}return !!el;}"
     "function toggleInstr(){var sb=D.querySelector('[data-chat=\"shortcut\"]');"
     "var ib=D.querySelector('[data-chat=\"instruction-bar\"]');"
     "if(!sb||!ib)return false;var on=sb.className.indexOf('hidden')<0;"
@@ -3332,6 +3515,7 @@ SANDBOX_PANEL_SCAFFOLD = (
     "function themeOf(t){var r=D.querySelector('[data-chat=\"root\"]');"
     "if(r)r.setAttribute('data-theme',t);return t;}"
     "window.__sbxPanels={open:open,closeAll:closeAll,"
+    "open2:open2,closeOne:closeOne,"
     "toggleInstruction:toggleInstr,assistantTip:assistantTip,"
     "stage:stage,theme:themeOf,"
     "list:function(){var o=[],l=all();for(var i=0;i<l.length;i++){"
@@ -3341,9 +3525,16 @@ SANDBOX_PANEL_SCAFFOLD = (
     "if(l[i].getAttribute('data-open')==='on'){"
     "o.push(l[i].getAttribute('data-chat')||l[i].getAttribute('data-probe')"
     "||l[i].getAttribute('data-host-popup'));}}return o;}};"
+    # 关闭钮：**二层**弹窗只关自己、把父面板留着（真机点「知道了」就是回到对话设置/记忆面板，
+    # 不是一路关到聊天页）。一层弹窗照旧 closeAll。
     "var cl=D.querySelectorAll('[data-host-close]');"
     "for(var i=0;i<cl.length;i++){cl[i].onclick=function(ev){"
-    "ev.stopPropagation();closeAll();};}"
+    "ev.stopPropagation();var n=this.getAttribute('data-host-close');"
+    "if(SECOND[n]){closeOne(n);}else{closeAll();}};}"
+    # 一层面板内部的 ⓘ / ? → 开二层，**不关父面板**
+    "var o2=D.querySelectorAll('[data-host-open2]');"
+    "for(var k2=0;k2<o2.length;k2++){o2[k2].onclick=function(ev){"
+    "ev.stopPropagation();open2(this.getAttribute('data-host-open2'));};}"
     "var sc=D.querySelectorAll('[data-chat=\"shortcut\"] > button');"
     "var map={model:'model',style:'conv',summary:'summary',"
     "conversations:'model',persona:'role'};"
@@ -3419,15 +3610,15 @@ SANDBOX_PANEL_SCAFFOLD = (
     "if(!r)return null;return setChatState(r.getAttribute('data-chat-state')==='sent'?'initial':'sent');}"
     "window.__sbxPanels.setChatState=setChatState;"
     "window.__sbxPanels.toggleChatState=toggleChatState;"
-    # 长按菜单：选项随被长按消息角色变（实测）。ai/user 四项（复制/删除/回溯/开启新的故事），
-    # 「第一句话」(data-msg-kind=first) 仅「复制」。真机是 touch 长按，预览额外暴露 longPress(kind)
-    # 供工具栏与真实长按共用；每条气泡也绑 pointerdown 计时（>420ms 触发），移动/抬起取消。
-    "var MENU={"
-    "ai:[['copy','\\u590d\\u5236','\\u2a19'],['delete','\\u5220\\u9664','\\u2715'],"
-    "['backtrack','\\u56de\\u6eaf','\\u21ba'],['newstory','\\u5f00\\u542f\\u65b0\\u7684\\u6545\\u4e8b','\\u2726']],"
-    "user:[['copy','\\u590d\\u5236','\\u2a19'],['delete','\\u5220\\u9664','\\u2715'],"
-    "['backtrack','\\u56de\\u6eaf','\\u21ba'],['newstory','\\u5f00\\u542f\\u65b0\\u7684\\u6545\\u4e8b','\\u2726']],"
-    "first:[['copy','\\u590d\\u5236','\\u2a19']]};"
+    # 长按菜单：选项随被长按消息角色变。AI 四项；用户三项（**无**「开启新的故事」）；
+    # 「第一句话」(data-msg-kind=first) 仅「复制」。真机是 touch 长按，预览额外暴露
+    # longPress(kind) 供工具栏与真实长按共用；每条气泡也绑 pointerdown 计时
+    # （>420ms 触发），移动/抬起取消。
+    #
+    # 🚨 这张运行时表**从 SANDBOX_MENU_OPTIONS 生成**，不要再手抄一份。
+    #    2026-09-06 踩过：手抄的 user 数组留着 newstory，改了 Python 常量与静态 HTML
+    #    却漏改这里 —— 单测全绿，但浏览器里长按用户气泡仍弹 4 项，预览与自己的断言矛盾。
+    + _sandbox_menu_js_table() +
     "function buildMenu(kind,previewText){var m=D.querySelector('[data-chat=\"message-menu\"]');"
     "if(!m)return false;var opts=MENU[kind]||MENU.ai;"
     "var pv=m.querySelector('.menu-preview');if(pv)pv.textContent=previewText||'';"
@@ -3459,7 +3650,14 @@ SANDBOX_PANEL_SCAFFOLD = (
 )
 
 
-def _host_popup(name, title, note):
+def _host_popup(name, title, note, body=""):
+    """宿主弹窗占位。
+
+    body 给的是**实机真实内容的复刻**（2026-09-06 探到），让作者看到真机这一层长什么样、
+    占多高、盖住哪段消息流；note 仍写 scope 类名/z-index/"卡片改不动"的判据。
+    仍然刻意保留斜纹底 + 黄标签：这层的样式**不吃** --chat-modal-*，画得再像也不能让作者
+    以为能改它。body 里的类名统一加 `ph-` 前缀（preview-host），与真机类名不撞。
+    """
     return (
         '<div class="pano-host-popup" data-host-popup="%s" data-open="off">'
         '<div class="pano-host-mask" data-host-close="%s"></div>'
@@ -3468,42 +3666,322 @@ def _host_popup(name, title, note):
         '<span class="pano-host-tag">平台侧 · 卡片改不动</span>'
         '<div class="pano-host-title">%s</div>'
         '<div class="pano-host-note">%s</div>'
-        '</div></div>' % (name, name, name, title, note)
+        '%s'
+        '</div></div>' % (name, name, name, title, note, body)
     )
 
 
-# 五个宿主弹窗（实测 scope 类名与 z-index 都在 note 里写明，供作者判断遮挡）
+# ── 实机内容复刻（2026-09-06，卡 316991，414x896）────────────────────────────
+# 这些常量只喂 _host_popup 的 body，纯观感/高度参照，不参与任何契约断言。
+
+_PH_MODEL_BODY = (
+    '<div class="ph-body">'
+    '<div class="ph-row"><span class="ph-model">gemini-3.1-pro（防截断）</span>'
+    '<span class="ph-pill">45<i>/次</i></span></div>'
+    '<div class="ph-card"><div class="ph-card-head"><b>输出Token上限</b>'
+    '<span class="ph-hint">回复不全时可提高</span></div>'
+    '<div class="ph-chips"><span class="ph-chip is-sel">10000</span>'
+    '<span class="ph-chip">20000</span></div></div>'
+    '<div class="ph-card ph-sw-row"><div><b>流式输出</b>'
+    '<span class="ph-desc">内容过长时开启，避免超时</span></div>'
+    '<span class="ph-sw is-sel"></span></div>'
+    '<div class="ph-btn">确定</div></div>'
+)
+
+# 对话设置：7 个 .cs-group-card，文风/总结项带 ⓘ（点开二层 .alert-scope）
+_PH_CONV_GROUPS = (
+    ("抢话设置", "是否允许AI输出你的行为", ("防抢话", "允许抢话*"), False),
+    ("文风设置", "AI回复文笔风格设置",
+     ("默认文风*", "日式轻小说", "乙女文风", "三体文风", "男性向文风", "日式游戏文风",
+      "电影感文风", "春秋文风", "极简文风", "细腻文风", "奇幻网文风", "恐怖文风",
+      "鲁迅文风", "抒情文风", "日常搞笑文风", "古风文风", "✨自定义+"), True),
+    ("人称视角", "设置AI输出内容所使用的人称", ("第三人称*", "第二人称", "第一人称"), False),
+    ("输出字数", "可控制AI输出字数范围，提高字数需要同时提高token上限。",
+     ("500以上", "1000以上", "2000以上*"), False),
+    ("剧情推进模式", "仅限DeepSeek可用，可决定AI推进剧情的速度和风格",
+     ("正常推进*", "慢速推进", "快速推进", "瑟瑟推进"), False),
+    ("平行故事", "仅对DeepSeek生效，可在消息尾部生成一段NPC的故事",
+     ("关闭*", "单人视角", "多人视角"), False),
+    ("总结剧情", "可切换总结模型/总结预设的输出格式，也可自定义总结格式及具体",
+     ("折叠-角色优先*", "折叠-剧情优先", "表格总结", "✨自定义+"), True),
+)
+
+
+def _ph_conv_body():
+    cards = []
+    for title, sub, chips, has_intro in _PH_CONV_GROUPS:
+        cs = []
+        for c in chips:
+            sel = c.endswith("*")
+            label = c[:-1] if sel else c
+            intro = ('<i class="ph-intro" data-host-open2="conv-intro" '
+                     'title="点开二层说明弹窗">i</i>') if has_intro and "自定义" not in label else ""
+            cs.append('<span class="ph-chip%s">%s%s</span>'
+                      % (" is-sel" if sel else "", label, intro))
+        cards.append(
+            '<div class="ph-card"><div class="ph-card-head"><b>%s</b>'
+            '<span class="ph-caret">&#94;</span></div>'
+            '<span class="ph-desc">%s</span>'
+            '<div class="ph-chips">%s</div></div>' % (title, sub, "".join(cs)))
+    return ('<div class="ph-body">'
+            '<div class="ph-bar"><span>取消</span><b>对话设置</b>'
+            '<span class="ph-ok">确定</span></div>'
+            '<div class="ph-scroll">%s</div></div>' % "".join(cards))
+
+
+_PH_SUMMARY_BODY = (
+    '<div class="ph-body">'
+    '<div class="ph-card ph-sw-row"><div><b>🧠 记忆总结</b>'
+    '<span class="ph-desc">已开启 · 对话将传输记忆内容</span></div>'
+    '<span class="ph-sw is-sel"></span></div>'
+    '<div class="ph-card ph-sw-row"><div><b>🔄 自动总结</b>'
+    '<span class="ph-desc">每 <u>8</u> 轮触发 · 25⚡/次</span>'
+    '<span class="ph-desc">自动总结触发轮数区间为：6~10</span></div>'
+    '<span class="ph-sw"></span></div>'
+    '<div class="ph-label"><span>总结内容</span><span class="ph-hint">0/20000 字</span></div>'
+    '<div class="ph-card"><div class="ph-textbox">暂无总结内容</div>'
+    '<div class="ph-chips ph-right"><span class="ph-chip">📝 编辑</span>'
+    '<span class="ph-chip is-off">↩ 恢复上一次</span></div></div>'
+    '<div class="ph-label"><span>总结字数上限</span></div>'
+    '<div class="ph-card"><div class="ph-chips">'
+    '<span class="ph-chip is-sel">20000<i>免费</i></span>'
+    '<span class="ph-chip">30000<i>+15⚡/条</i></span>'
+    '<span class="ph-chip">40000<i>+30⚡/条</i></span></div></div>'
+    '<div class="ph-label"><span>总结模型</span></div>'
+    '<div class="ph-card">'
+    '<div class="ph-pi is-sel"><span>剧情总结模型-flash</span>'
+    '<span class="ph-hint">25⚡/次</span><i class="ph-radio"></i></div>'
+    '<div class="ph-pi"><span>剧情总结模型-pro</span>'
+    '<span class="ph-hint">60⚡/次</span><i class="ph-radio"></i></div>'
+    '<div class="ph-pi"><span>claude-4-sonnet(总结版)</span>'
+    '<span class="ph-hint">45⚡/次</span><i class="ph-radio"></i></div>'
+    '<div class="ph-pi"><span>claude-4.5-sonnet(总结版)</span>'
+    '<span class="ph-hint">45⚡/次</span><i class="ph-radio"></i></div></div>'
+    '<div class="ph-label"><span>总结提示词</span></div>'
+    '<div class="ph-card">'
+    '<div class="ph-pi is-sel"><span>折叠-角色优先</span>'
+    '<i class="ph-help" data-host-open2="summary-intro" title="点开二层说明弹窗">?</i>'
+    '<i class="ph-radio"></i></div>'
+    '<div class="ph-pi"><span>折叠-剧情优先</span>'
+    '<i class="ph-help" data-host-open2="summary-intro">?</i><i class="ph-radio"></i></div>'
+    '<div class="ph-pi"><span>表格总结</span>'
+    '<i class="ph-help" data-host-open2="summary-intro">?</i><i class="ph-radio"></i></div>'
+    '<div class="ph-pi"><span>✨ 自定义预设+</span>'
+    '<i class="ph-help" data-host-open2="summary-intro">?</i><i class="ph-radio"></i></div></div>'
+    '<div class="ph-label"><span>📌 记忆锚点</span>'
+    '<span class="ph-hint">0/5 · 0/2000 字</span></div>'
+    '<div class="ph-dashed">+ 添加锚点（还可添加 5 条）</div>'
+    '<div class="ph-cost">当前方案：20000字 免费档 · 每轮容量附加 0⚡<br>'
+    '<span class="ph-hint">AI总结费用按所选模型另计</span></div>'
+    '<div class="ph-btn">保存设置</div></div>'
+)
+
+_PH_CONVERSATION_BODY = (
+    '<div class="ph-body">'
+    '<div class="ph-item"><span class="ph-avatar"></span>'
+    '<span><b>主会话</b></span><span class="ph-cur">当前会话</span></div>'
+    '<div class="ph-btn">创建新的聊天</div></div>'
+)
+
+_PH_ROLE_BODY = (
+    '<div class="ph-body">'
+    '<div class="ph-bar"><span>取消</span><b>用户人设</b>'
+    '<span class="ph-ok">保存</span></div>'
+    '<div class="ph-card ph-radios">'
+    '<span class="ph-rd is-sel">仅使用称呼</span><span class="ph-rd">全局人设</span>'
+    '<span class="ph-rd">单独设置</span></div>'
+    '<div class="ph-card"><b>称呼</b>'
+    '<div class="ph-input">角色对我的称呼<span class="ph-hint">2/20</span></div></div>'
+    '<div class="ph-note-inline">切「全局人设」后额外出现（称呼框转 disabled）：</div>'
+    '<div class="ph-card"><b>性别</b><span class="ph-desc">角色对我的性别认知</span>'
+    '<div class="ph-chips"><span class="ph-chip">男</span><span class="ph-chip">女</span>'
+    '<span class="ph-chip is-sel">其他</span></div></div>'
+    '<div class="ph-card"><b>我是谁</b><span class="ph-desc">角色对我的身份认知</span>'
+    '<div class="ph-textbox">描述你所扮演角色的性格特征和事实设定'
+    '<span class="ph-hint ph-right">0/500</span></div></div></div>'
+)
+
+# 对话模型选择（底栏电量芯片）。实测 .model-switch-scope 414x607：
+# .title-row「对话模型选择」+ .model-filter-tabs（7 个 .model-filter-tab）
+# + .model-list（.model-item，选中行是 .model-item-active 且左上角有 .corner-check）。
+# 行内：.model-title（可带 .model-new-badge「NEW」）/ .model-opt-btn / .model-intro /
+# .model-battery「N /每条消息」/ 可选 .model-peak-label「谷时价」/
+# .model-perm「已解锁此模型」/ .model-success-rate > .success-badge「成功率 X%」。
+_PH_MODELSWITCH_TABS = ("最近使用*", "全部", "国产之光", "总结模型",
+                        "Gemini", "Claude", "MMD")
+
+# (名称, 简介, 电量, 成功率, 是否NEW, 是否选中, 是否已解锁)
+_PH_MODELSWITCH_ROWS = (
+    ("GLM-5.3-flash", "glm最新模型，活人感强", "20",
+     "成功率 100.00%", True, False, True),
+    ("gemini-3.1-pro（防截断）", "截断自动续写版本，需要开启流式", "45",
+     "成功率 82.76%", False, True, True),
+    ("gemini-3.1-pro", "gemini最新模型！审查可能会驳回消息", "45",
+     "成功率 65.73%", False, False, True),
+    ("deepseek-v4-flash（推荐）", "正式版！低价之神，回复速度快。截断请提高token", "25",
+     "成功率 98.86%", False, False, False),
+    ("M2-pro（测试）", "没有甲，回复速度快，状态栏稳定", "15",
+     "成功率 99.33%", False, False, False),
+)
+
+
+def _ph_modelswitch_body():
+    tabs = "".join(
+        '<span class="ph-chip%s">%s</span>'
+        % (" is-sel" if t.endswith("*") else "", t.rstrip("*"))
+        for t in _PH_MODELSWITCH_TABS)
+    rows = []
+    for name, intro, cost, rate, is_new, is_sel, unlocked in _PH_MODELSWITCH_ROWS:
+        badge = '<i class="ph-newbadge">NEW</i>' if is_new else ""
+        perm = '<span class="ph-hint">已解锁此模型</span>' if unlocked else ""
+        rows.append(
+            '<div class="ph-mi%s"><div class="ph-mi-top"><b>%s</b>%s</div>'
+            '<span class="ph-desc">%s</span>'
+            '<div class="ph-mi-bot"><span class="ph-hint">&#9889; %s /每条消息</span>%s'
+            '<span class="ph-badge">%s</span></div></div>'
+            % (" is-sel" if is_sel else "", name, badge, intro, cost, perm, rate))
+    return ('<div class="ph-body">'
+            '<div class="ph-chips">%s</div>%s</div>' % (tabs, "".join(rows)))
+
+
+# 分享角色（顶栏第 2 钮）。实测 .share-popup 414x205，内容极简：
+# .share-title「分享角色」+ .share-sub-title（整条链接）+ .gen-link-btn「复制链接」。
+# 🚨 只有**一个**按钮，没有九宫格/微信/QQ 那些 —— 别照别的 App 想象补。
+# 另有框架自带的 .u-popup__content__close--top-right 关闭钮（18x18，绝对定位）。
+_PH_SHARE_BODY = (
+    '<div class="ph-body">'
+    '<div class="ph-input">https://www.meimoai15.com/#/pages/chat/host'
+    '?roleId=…&amp;prePath=1</div>'
+    '<div class="ph-btn">&#9741; 复制链接</div></div>'
+)
+
+_PH_EDIT_BODY = (
+    '<div class="ph-body">'
+    '<div class="ph-textbox ph-edit-surface">被编辑的消息正文（占位）。'
+    '真机这里是可编辑区，直接改这条消息的正文。</div>'
+    '<div class="ph-chips">'
+    + "".join('<span class="ph-chip">%s</span>' % t for t in SANDBOX_EDIT_OPTIONS) +
+    '</div>'
+    '<div class="ph-btn">保存</div></div>'
+)
+
+_PH_ASSIST_BODY = (
+    '<div class="ph-body ph-center">'
+    '<div class="ph-alert-text">不知道怎么回？让AI做你的嘴替！AI将模仿你的语气，'
+    '提供5条精彩回复供你选择。每次使用消耗8电量，若未能成功生成，则不消耗。</div>'
+    '<div class="ph-check"><i></i>不再弹出此提示</div>'
+    '<div class="ph-alert-btns"><span>取消</span><span class="ph-ok">确认生成</span></div></div>'
+)
+
+
+# 宿主弹窗（实测 scope 类名与 z-index 都在 note 里写明，供作者判断遮挡）
+#
+# 2026-09-06 实机复刻：这些弹窗过去只画一句 note 的灰底斜纹块，作者看不出真机这层
+# **占多高、盖住哪段消息流**，判断状态栏/悬浮组件会不会被埋掉时只能靠猜。现在按实测把
+# 内容与高度一起复刻进去（body 参数），note 保留类名/z-index/"改不动"的判据。
+# 仍然保留斜纹底 + 黄标签：画得像不等于能改它，样式一律不吃 --chat-modal-*。
 SANDBOX_HOST_POPUPS = "".join([
     _host_popup("model", "模型设置（快捷条第 1 钮）",
                 "真机 <b>.model-setting-scope.theme-dark</b>，渲染在宿主页 uni-app（h5 域），"
-                "z-index <b>9000</b>。内容是<b>参数</b>设置（输出 Token 上限 / 流式输出 / 预设提示词），"
-                "不是模型列表。吃宿主 <b>--background-color</b> 系变量；"
+                "z-index <b>9000</b>，实测 <b>414x348</b>（底部升起，radius 10/10/0/0）。"
+                "内容是<b>参数</b>设置，不是模型列表。吃宿主 <b>--background-color</b> 系变量；"
                 "在卡里改 --chat-modal-* <b>对它无效</b>（已探针验证：注入 #00ff00 后仍 #17181a、"
-                "该变量在其上解析为 undefined）。"),
-    _host_popup("model-switch", "对话模型选择（底栏模型芯片）",
-                "真机 <b>.model-switch-scope</b>，宿主页，z-index <b>9000</b>。"
-                "点底栏 <b>[data-chat=model-chip]</b> 打开（与快捷条「模型设置」是<b>两个不同面板</b>）。"
-                "内含 .title-row / .model-filter-tabs / .model-list 三段。卡片 CSS 打不到。"),
-    _host_popup("conv", "对话设置",
-                "真机 <b>.conv-style-modal</b>，宿主页，z-index 10075，无圆角，"
-                "底色由 .u-popup__content 内联 style 给。卡片 CSS 打不到。"),
-    _host_popup("summary", "总结剧情 / 记忆管理面板",
+                "该变量在其上解析为 undefined）。",
+                _PH_MODEL_BODY),
+    _host_popup("model-switch", "对话模型选择（底栏电量芯片）",
+                "真机 <b>.model-switch-scope</b>，宿主页，z-index <b>9000</b>，"
+                "实测 <b>414x607</b>（底部升起）。点底栏 <b>[data-chat=model-chip]</b> 打开"
+                "（与快捷条「模型设置」是<b>两个不同面板</b>：这个选模型，那个调参数）。"
+                "内含 .title-row「对话模型选择」/ .model-filter-tabs（<b>7</b> 个页签：最近使用/"
+                "全部/国产之光/总结模型/Gemini/Claude/MMD）/ .model-list。"
+                "行内：.model-title（可带 .model-new-badge「NEW」）/ .model-opt-btn / "
+                ".model-intro / .model-battery「N /每条消息」/ 可选 .model-peak-label「谷时价」/ "
+                ".model-perm「已解锁此模型」/ .success-badge「成功率 X%」；"
+                "选中行 <b>.model-item-active</b> 左上角有 .corner-check 勾。卡片 CSS 打不到。",
+                _ph_modelswitch_body()),
+    _host_popup("conv", "对话设置（快捷条第 2 钮）",
+                "真机 <b>.conv-style-modal</b>，宿主页，z-index <b>10075</b>，无圆角，"
+                "实测 <b>414x618</b>（占 2/3 屏）。底色由 .u-popup__content 内联 style 给。"
+                "内含 <b>7 个 .cs-group-card</b>（抢话/文风/人称/字数/推进/平行故事/总结），"
+                "文风与总结项带 <b>.intro-icon</b> → 点开<b>二层</b> .alert-scope 说明弹窗。"
+                "卡片 CSS 打不到。",
+                _ph_conv_body()),
+    _host_popup("summary", "总结剧情 / 记忆管理面板（快捷条第 4 钮）",
                 "真机 <b>.summary-sheet.theme-dark</b>，宿主页，"
-                "z-index <b>1000000000</b>（比别的高 5 个数量级，组件永远盖不过它）。"),
-    _host_popup("role", "用户人设",
-                "真机 <b>.role-profile-modal</b> + <b>.role-setting</b>，宿主页，z-index 10075。"
-                "用 <b>--lo*</b> 变量族（沙盒宿主页<b>有定义</b>，与旧聊天页不同）。"),
+                "z-index <b>1000000000</b>（比别的高 5 个数量级，组件永远盖不过它），"
+                "实测 <b>414x607</b>。含记忆总结/自动总结开关、总结内容、字数上限三档、"
+                "总结模型四选、总结提示词四选（每项带 <b>.summary-pi-help</b>「?」→ "
+                "<b>二层</b> .summary-prompt-intro，z-index <b>1000000001</b>）、记忆锚点。",
+                _PH_SUMMARY_BODY),
+    _host_popup("role", "用户人设（快捷条第 6 钮）",
+                "真机 <b>.role-profile-modal</b> + <b>.role-setting</b>，宿主页，"
+                "z-index <b>10075</b>，实测 <b>414x618</b>。"
+                "顶部 .header-box（取消 / 用户人设 / 保存），下面 <b>.switch-card</b> 三选"
+                "（仅使用称呼 / 全局人设 / 单独设置）。切「全局人设」才出现"
+                "<b>性别</b>（.gender-box 男/女/其他）与<b>我是谁</b>（textarea 0/500），"
+                "同时称呼输入框加 .disabled。用 <b>--lo*</b> 变量族"
+                "（沙盒宿主页<b>有定义</b>，与旧聊天页不同）。",
+                _PH_ROLE_BODY),
     _host_popup("share", "分享角色（顶栏第 2 钮）",
                 "真机 <b>.share-popup</b>，宿主页，z-index <b>9000</b>"
-                "（旧聊天页是 10075，这里不同）。带框架自带右上角关闭钮 .u-popup__content__close。"),
+                "（旧聊天页是 10075，这里不同），实测 <b>414x205</b>（底部升起）。"
+                "内容极简：.share-title「分享角色」+ .share-sub-title（整条角色链接）+ "
+                "<b>.gen-link-btn「复制链接」</b>。"
+                "<br>🚨 <b>只有这一个按钮</b> —— 没有微信/QQ/九宫格那些，别照别的 App 想象补。"
+                "另有框架自带 .u-popup__content__close--top-right（18x18，绝对定位）。",
+                _PH_SHARE_BODY),
     _host_popup("conversation", "开启新的聊天（快捷条第 5 钮）",
-                "真机 <b>.conversation-list-scope</b>，宿主页，z-index <b>9000</b>，实测高 187px。"
-                "内含 .title-row / .conversation-list / .bottom &gt; .btn「创建新的聊天」。卡片 CSS 打不到。"),
-    _host_popup("assist-alert", "AI帮聊功能介绍（底栏左下角）",
+                "真机 <b>.conversation-list-scope</b>，宿主页，z-index <b>9000</b>，"
+                "实测 <b>414x273</b>（旧记 187px 偏小，2026-09-06 复测更正）。"
+                "内含 .title-row / .conversation-list（.conversation-item &gt; 69x69 头像 + "
+                "会话名 + .cur-conversation「当前会话」）/ .bottom &gt; .btn「创建新的聊天」。"
+                "卡片 CSS 打不到。",
+                _PH_CONVERSATION_BODY),
+    _host_popup("assist-alert", "AI帮聊功能介绍（底栏左下角灯泡）",
                 "真机 <b>.alert-scope</b> 在宿主页，z-index <b>9000</b>，"
-                "过渡是 <b>u-fade-zoom</b>（居中 260px，不是底部升起）。"
-                "点 <b>[data-chat=assistant]</b> 首次触发。注意：这与 SDK 的 "
-                "<b>[data-chat=alert]</b>（iframe 内、卡片能改）<b>是两个东西</b>。"),
+                "过渡是 <b>u-fade-zoom</b>，实测 <b>287x256</b> 居中（不是底部升起）。"
+                "点 <b>[data-chat=assistant]</b> 首次触发。带 .alert-checkbox"
+                "「不再弹出此提示」+ .alert-bottom-double 双钮（取消 / 确认生成）。"
+                "注意：这与 SDK 的 <b>[data-chat=alert]</b>（iframe 内、卡片能改）"
+                "<b>是两个东西</b>。",
+                _PH_ASSIST_BODY),
+    _host_popup("message-edit", "消息编辑面（气泡下「编辑」圆钮）",
+                "真机 <b>.msg-edit-scope</b>，<b>宿主页</b>，"
+                "<b>position:fixed，z-index 9999</b>，遮罩 rgba(0,0,0,.7)，关闭时 display:none。"
+                "内含 .edit-input-box &gt; .edit-surface（可编辑正文）+ .option-box &gt; "
+                "4 个 .option-item（简转繁 / 繁转简 / 去除异常符号 / 去除异常文字）+ "
+                ".save-btn-box &gt; .save-btn「保存」。"
+                "<br>🚨 <b>它不在 iframe 内</b>，卡片 CSS 打不到。判据（2026-09-06 实机）："
+                "① 宿主页 document 直接 querySelector 就能取到；"
+                "② 祖先链 uni-view.sandbox-host &lt; uni-page-body &lt; uni-app；"
+                "③ 自带 <b>data-host=\"message-edit\"</b>；"
+                "④ 内联 style 用宿主变量族（--background-color / --input-background-color / "
+                "--btn-bg-color / --lo* 等），<b>没有</b>任何 --chat-*。",
+                _PH_EDIT_BODY),
+    # ── 二层弹窗（从上面某个宿主弹窗内部再点开，z-index 压住父面板）──────────
+    _host_popup("conv-intro", "文风/总结说明（对话设置的二层）",
+                "真机 <b>.alert-scope</b>，宿主页，z-index <b>10075</b>（与父 .conv-style-modal "
+                "同层，靠后挂载压住），过渡 <b>u-fade-zoom</b>，实测 <b>315x577</b> 居中。"
+                "由 .cs-style-item 上的 <b>.intro-icon</b>（z-999）点开。"
+                "结构：.alert-title（文风名）+ .alert-content（富文本 p/strong，可滚）+ "
+                ".alert-bottom &gt; .ok-btn「知道了」。",
+                '<div class="ph-body ph-center">'
+                '<div class="ph-alert-title">默认文风</div>'
+                '<div class="ph-alert-text">以对白为核心驱动剧情，减少铺垫与评价性描述。'
+                '人物性格鲜明可爱，带有ACG作品特质。长短句结合营造节奏感<br><br>'
+                '<b>【文风示例】</b><br><br>（真机此处是整段富文本示例，可滚动）</div>'
+                '<div class="ph-alert-btns"><span class="ph-ok">知道了</span></div></div>'),
+    _host_popup("summary-intro", "总结提示词说明（记忆面板的二层）",
+                "真机 <b>.summary-prompt-intro</b>，宿主页，z-index <b>1000000001</b> "
+                "——比父面板 .summary-sheet（1000000000）<b>高 1</b>，是整页最高的一层。"
+                "过渡 <b>u-fade-zoom</b>，实测 <b>371x143</b> 居中。"
+                "由 .summary-preset-item 上的 <b>.summary-pi-help</b>「?」点开。"
+                "结构：.summary-prompt-intro-title + -body(scroll) &gt; -rich &gt; p + "
+                "-bottom &gt; <b>-ok</b>（底色 rgb(255,109,151)）「我知道了」。",
+                '<div class="ph-body ph-center">'
+                '<div class="ph-alert-title">折叠-角色优先</div>'
+                '<div class="ph-alert-text">折叠总结模式 - 角色优先</div>'
+                '<div class="ph-alert-btns"><span class="ph-ok">我知道了</span></div></div>'),
 ])
 
 
@@ -3714,7 +4192,8 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
                  alertbox=SANDBOX_ALERT,
                  snack=SANDBOX_SNACK, snackbar=SANDBOX_SNACKBAR,
                  sharebar=SANDBOX_SHARE_BAR, sharepickbar=SANDBOX_SHARE_PICK_BAR,
-                 shareshot=SANDBOX_SHARE_SHOT, hostpopups=SANDBOX_HOST_POPUPS)
+                 shareshot=SANDBOX_SHARE_SHOT,
+                 hostpopups=SANDBOX_HOST_POPUPS)
     elif platform == "mmd":
         page = _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold)
     else:

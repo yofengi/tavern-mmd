@@ -27,6 +27,14 @@
 >
 > 🚨 **进门先记三条（新增，全是头号坑，详见 §2.6）**：① **作者脚本早于 DOM 执行** → 顶层任何 DOM 写入必失败，只能写在事件回调里。② **事件顺序是 `message:new → message:mount → message:done → ready`，`ready` 最后到** → 首屏只能挂 `message:mount`/`message:done`。③ **沙盒是跨源 iframe，不是 Shadow DOM** → 隔离已由 iframe 完成，`attachShadow` 是纯负债。
 
+> **域名会变，按结构记，别按字面记。**
+> 2026-08 的实测记录写的是 `h5.aitchat.org`（宿主）/ `c<卡片ID>.sbx.aitchat.org`（沙盒 iframe）；
+> 2026-09-06 复测时实机已是 `www.meimoai15.com`（宿主）/ `c<roleId>.sbx.meimoai15.com`（沙盒 iframe）。
+> 本文其余处保留原始域名不动 —— 它们各自挂着当次的日期与卡号，改字面会让证据与日期对不上。
+> 读的时候把 `aitchat.org` 当成「当时的站点域」即可；**结构没变**：宿主主域 + 每卡一个
+> `c<roleId>.sbx.<站点域>` 子域、跨源 iframe 嵌入、必须 postMessage 握手。
+
+
 ## 0. `chatVersion` 开关：进得去才谈别的
 
 | 事实 | 来源 |
@@ -860,7 +868,7 @@ linearGradient radialGradient stop clipPath title
 
 ### 6.3b 🚨 弹窗分两类：iframe 内的能改，宿主页的改不动（2026-08-29 实测）
 
-沙盒卡片跑在 **`c<roleId>.sbx.aitchat.org` 的跨源 iframe** 里，宿主是 `h5.aitchat.org`。这条边界决定了作者的 CSS 能碰到什么。
+沙盒卡片跑在 **`c<roleId>.sbx.<站点域>` 的跨源 iframe** 里，宿主是站点主域。这条边界决定了作者的 CSS 能碰到什么。（2026-09-06 实机：iframe `c316991.sbx.meimoai15.com`，宿主 `www.meimoai15.com`；2026-08 的记录里是 `*.aitchat.org`，见文首「域名」备注。）
 
 **A. iframe 内浮层 —— 卡片 CSS 能打到，全局美化必须照顾它们**
 
@@ -881,21 +889,74 @@ linearGradient radialGradient stop clipPath title
 
 **B. 宿主页弹窗 —— 卡片 CSS 打不到，别白写选择器**
 
-| 入口 | 真机 scope | z-index |
-|---|---|---|
-| 模型设置 | `.model-setting-scope.theme-dark` | 10075 |
-| 对话设置 | `.conv-style-modal` | 10075（无圆角，底色由 `.u-popup__content` 内联 style 给） |
-| 总结剧情 / 记忆管理面板 | `.summary-sheet.theme-dark` | **1000000000**（比别的高 5 个数量级，作者组件永远盖不过） |
-| 用户人设 | `.role-profile-modal` + `.role-setting` | 10075（用 `--lo*` 变量族，沙盒宿主页**有定义**，与旧聊天页 18 个全未定义不同） |
-| 分享角色 | `.share-popup` | **9000**（旧聊天页同名弹窗是 10075，这里不同） |
+实机复测 2026-09-06（卡 316991，414x896，宿主页 `evaluate` 直读；已由 5 个补到 **10 个**）：
 
-这五个渲染在宿主页的 uni-app 里，外壳是 uview 三层（`.u-popup > .u-transition.u-fade-*|.u-slide-up-* > .u-popup__content > scope`），吃宿主 `body` 上那 51 个 `--background-color` / `--lo*` 系变量。
+| 入口 | 真机 scope | 实测尺寸 | z-index |
+|---|---|---|---|
+| 快捷条① 模型设置 | `.model-setting-scope.theme-dark` | 414x348 底升，radius 10/10/0/0 | **9000**（旧记 10075 有误，已订正） |
+| 快捷条② 对话设置 | `.conv-style-modal` | 414x618 底升，无圆角 | 10075 |
+| 快捷条④ 总结剧情 | `.summary-sheet.theme-dark` | 414x607 底升 | **1000000000**（比别的高 5 个数量级，作者组件永远盖不过） |
+| 快捷条⑤ 新的聊天 | `.conversation-list-scope` | 414x273 底升（旧记 187px 偏小，已订正） | 9000 |
+| 快捷条⑥ 用户人设 | `.role-profile-modal` + `.role-setting` | 414x618 底升 | 10075（用 `--lo*` 变量族，沙盒宿主页**有定义**） |
+| 顶栏② 分享角色 | `.share-popup` | 414x205 底升 | **9000**（旧聊天页同名弹窗是 10075） |
+| 底栏灯泡 AI帮聊介绍 | `.alert-scope`（双钮变体） | 287x256 居中 `u-fade-zoom` | 9000 |
+| 底栏电量芯片 模型切换 | `.model-switch-scope` | 414x607 底升 | 9000 |
+| 气泡「编辑」圆钮 消息编辑面 | `.msg-edit-scope` | 整屏 `position:fixed`，遮罩 `rgba(0,0,0,.7)` | **9999** |
+| ↳二层 文风/总结说明 | `.alert-scope` | 315x577 居中 `u-fade-zoom` | 10075（与父同层，靠后挂载压住） |
+| ↳二层 总结提示词说明 | `.summary-prompt-intro` | 371x143 居中 `u-fade-zoom` | **1000000001**（整页最高，父面板 +1） |
+
+这些都渲染在宿主页 `www.meimoai15.com` 的 uni-app 里，外壳多为 uview 三层
+（`.u-popup > .u-transition.u-fade-*|.u-slide-up-* > .u-popup__content > scope`），
+吃宿主 `body` 上那批 `--background-color` / `--lo*` 系变量。
 
 **探针证据**：在卡片 iframe 内注入 `[data-chat=root]{--chat-modal-bg:#00ff00}` 后打开模型设置 —— 弹窗仍 `#17181a`、卡片面仍 `#2c2e32`，且 `--chat-modal-bg` 在其上解析为**未定义**。同一次注入下，iframe 内的「+」面板**立刻变绿**。
 
 > 官方手册把 `--chat-modal-bg` 描述为「更多面板壳、**宿主**列表弹窗底」。前半句实测成立，后半句容易被读成"能改模型设置那类弹窗"——**不成立**。手册用了"宿主"这个词但没区分"iframe 内重绘的"与"宿主页原生组件"，按上表办。
 
-**全景预览的对应处理**：iframe 内那批做成可开关的完整仿真；宿主页那五个只画灰底斜纹的层级占位并标注「平台侧 · 卡片改不动」——不套 `--chat-modal-*`，否则等于宣称能改。
+**🚨 消息编辑面（`.msg-edit-scope`）是宿主页的，不是 iframe 内的。**
+本仓库 2026-09-06 一度反过来判过：量到它 `0x0` 就推断"宿主那份是死模板、真正可见的编辑面在 iframe 内"，
+还照"吃 `--chat-*` 令牌"实现了一版预览仿真。**错**。0x0 只是因为它关着（`display:none`）。判据：
+
+- 宿主页 `document.querySelector('.msg-edit-scope')` 直接取到；
+- 祖先链 `uni-view.sandbox-host < uni-page-body < uni-page < uni-app`；
+- 自带 `data-host="message-edit"`；
+- 内联 style 全是宿主变量族（`--background-color` / `--input-background-color` /
+  `--btn-bg-color` / `--lo*` …），**一个 `--chat-*` 都没有**。
+
+内部结构：`.edit-input-box > .edit-surface`（可编辑正文）+ `.option-box > 4 个 .option-item`
+（简转繁 / 繁转简 / 去除异常符号 / 去除异常文字）+ `.save-btn-box > .save-btn`「保存」。
+作者想改编辑面外观 —— **改不了**，别写选择器。
+
+**二层弹窗的关闭语义**：二层压在父面板之上，关掉二层只回到父面板、**不会**把父面板一起关掉
+（真机点「知道了」/「我知道了」就是回到对话设置 / 记忆面板）。做仿真时若把二层也走
+"先 closeAll 再 open"，预览就会骗作者说"看说明会把设置页关掉"，与真机相反。
+
+**几个面板的实机字段**（供判断遮挡与观感）：
+
+- **对话设置**：7 个 `.cs-group-card` —— 抢话设置 / 文风设置（16 项 + ✨自定义+）/ 人称视角 /
+  输出字数 / 剧情推进模式 / 平行故事 / 总结剧情。文风与总结项带 `.intro-icon`（z-999）→ 点开二层。
+- **记忆管理面板**：记忆总结开关 + 自动总结（轮数输入 + 区间提示 6~10）+ 总结内容（0/20000 字）+
+  字数上限三档（20000 免费 / 30000 +15⚡ / 40000 +30⚡）+ 总结模型四选 + 总结提示词四选
+（每项带 `.summary-pi-help`「?」→ 二层）+ 记忆锚点（0/5 · 0/2000 字）+ 底部「保存设置」。
+- **用户人设**：`.switch-card` 三选（仅使用称呼 / 全局人设 / 单独设置）。切「全局人设」才出现
+  `性别`（`.gender-box` 男/女/其他）与 `我是谁`（textarea 0/500），同时称呼输入框加 `.disabled`。
+- **模型切换**：7 个 `.model-filter-tab`（最近使用/全部/国产之光/总结模型/Gemini/Claude/MMD）+
+  `.model-list`。行内含 `.model-title`（可带 `.model-new-badge`「NEW」）/ `.model-intro` /
+  `.model-battery`「N /每条消息」/ 可选 `.model-peak-label`「谷时价」/ `.model-perm`「已解锁此模型」/
+  `.success-badge`「成功率 X%」；选中行 `.model-item-active` 左上角有 `.corner-check`。
+- **分享角色**：内容极简 —— 标题 + 整条链接 + **单个**`.gen-link-btn`「复制链接」。
+  **没有**微信/QQ/九宫格那些，别照别的 App 想象补。另有框架自带 `.u-popup__content__close--top-right`。
+
+**全景预览的对应处理**：iframe 内那批做成可开关的完整仿真；宿主页这批按实机复刻内容与高度
+（让作者能判断状态栏/悬浮组件会不会被埋掉），但仍保留斜纹底 + 「平台侧 · 卡片改不动」黄标签，
+且复刻用的 `ph-*` 样式**一律不吃** `--chat-modal-*` —— 吃了就等于宣称能改。
+
+**探查方法备忘**（下次省时间）：宿主页弹窗可以用 `evaluate` 纯文本读出完整 DOM/类名/盒模型，
+不需要截图。iframe 内的控件是**跨源**的：`evaluate` 返回空对象且副作用不落地、Playwright 点击报
+"no click point"、`dom_cua.get_visible_dom()` 只看到 `body`，只能靠 `cua.click({x,y})` 坐标点击。
+页面 reload 后要等**足够久**（实测 ~9s）iframe 才接点击，等不够会误判成"坐标错了"。
+实测可用坐标：快捷条 y≈812（模型设置 x≈48、对话设置 x≈143、选择指令 x≈231、总结剧情 x≈318）、
+输入行 y≈865（电量芯片 x≈74）、顶栏 y≈27（分享 x≈325）。
 
 ### 6.3c 「+」面板 11 项与输入框三态（实测细节）
 
