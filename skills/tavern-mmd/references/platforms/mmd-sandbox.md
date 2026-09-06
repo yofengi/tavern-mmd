@@ -955,6 +955,45 @@ linearGradient radialGradient stop clipPath title
 不需要截图。iframe 内的控件是**跨源**的：`evaluate` 返回空对象且副作用不落地、Playwright 点击报
 "no click point"、`dom_cua.get_visible_dom()` 只看到 `body`，只能靠 `cua.click({x,y})` 坐标点击。
 页面 reload 后要等**足够久**（实测 ~9s）iframe 才接点击，等不够会误判成"坐标错了"。
+
+**🚨 头号陷阱：宿主弹窗一开，iframe 的 `pointer-events` 就被置 `none`。**
+只要宿主页有任一 `.u-popup__content` 可见，宿主就把 `iframe#sbx` 的
+`pointer-events` 设为 `none` —— 此时 iframe 内**所有坐标点击静默失效**（不报错、
+什么都不发生）。本次探查为此绕了很久：同一组坐标先能用、后来忽然全部返回 `NONE`，
+一度误判成"坐标记错了"或"等待不够"，甚至去做纵向坐标扫描。
+
+正确做法：每次点 iframe 内控件前，先确认
+`getComputedStyle(document.querySelector('iframe#sbx')).pointerEvents === 'auto'`；
+若为 `none`，先关掉宿主弹窗（点它自己的关闭钮/遮罩，或 `reload()` 重置）。
+**注意 hash 路由下 `goto()` 同一 URL 不会重载**，要重置必须用 `reload()`。
+
+**加号面板在正常聊天页是「点开才创建」，不是常驻。** 握手完成的聊天页里，未点加号时
+`[data-chat="more-panel"]` 节点数为 **0**，`[data-chat="root"]` 的 innerText 里也
+搜不到「重置聊天」等项名。它**没有** `data-open` 属性，靠节点存在与否切换。
+
+⚠️ 踩过的坑：直开 `c<roleId>.sbx.<域>` 且**卡在「等待宿主握手超时」**的降级页面里，
+这个面板会被**预渲染**出来（`display:flex`、11 个 button 齐全）。我一度据此写成
+「面板常驻、可直接读」——那只在坏状态下成立。要读真实行为，必须在宿主 iframe 内
+（握手完成）先真的点开加号；而点之前记得检查上面那条 `pointer-events`。
+
+已复核：11 项的 `data-action` 与文案、顺序与 §6.3c 所载完全一致
+（取自降级页预渲染出的真实面板节点，逐项比对 `SANDBOX_MORE_ITEMS`）。
+
+**⚠️ 未解：`[data-action="more"]`（右下角加号）在自动化点击下不响应。**
+`probe-needed`。2026-09-06 用尽了手段仍没能在正常聊天页把面板点开，但**已排除**
+几个常见误因（都有对照实验，别再重复走一遍）：
+
+- **不是坐标错**：沙盒域 `evaluate` 直读该按钮 `box=370,851 28x28`，中心正是 `384,865`；
+- **不是 `pointer-events`**：点之前实测 `PE=auto`（上一条那个陷阱已排掉）；
+- **不是 iframe 点击整体失效**：同一时刻点 `(231,812)` 选择指令，`instruction-bar` 的
+  class 从 `"hidden"` 变 `""` —— 证明坐标点击确实进到了 iframe 内并被处理；
+- **不是没等够**：每次点后等 2.1~2.6s，且该面板是「节点存在与否」而非动画；
+- **不是差一两像素**：`384,865` 周围 6 个点位全试过，`more-panel` 始终为 0。
+
+推测这个按钮绑的是原生 `touchstart/touchend` 或需要完整手势序列（与快捷条那批的绑定
+方式不同）—— 与长按菜单同类问题（§10.6 已记：合成 `TouchEvent` 不触发 Vue 长按）。
+要核它的二级弹窗，得用能发真实手势的环境，或让人工点开后再读 DOM。
+
 实测可用坐标：快捷条 y≈812（模型设置 x≈48、对话设置 x≈143、选择指令 x≈231、总结剧情 x≈318）、
 输入行 y≈865（电量芯片 x≈74）、顶栏 y≈27（分享 x≈325）。
 
