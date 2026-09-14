@@ -145,3 +145,6 @@ class TestCli(unittest.TestCase):
                 f.write("{not json")
             r = self._run(jp)
             self.assertEqual(r.returncode, 1)
+
+if __name__ == "__main__":
+    unittest.main()

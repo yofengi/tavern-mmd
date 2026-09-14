@@ -18,7 +18,7 @@ tavern-mmd 预览脚本 build-preview.py
                2026-08-30），预览按 worker m() 转义后照常渲染，只有语法错的 /…/ 整条静默丢弃
                不施加当前MMD 的 onclick 净化；改为提示 svg 内 onclick 与自写 data-* 会被净化删除
                <style>/<script> 装卡即抽出，不论规则有没有匹配到都装上
-               全景模式复刻真实 dark chat flex 外壳、稳定槽位与 14 个 --chat-* 设计令牌，
+               全景模式复刻真实 dark chat flex 外壳、稳定槽位与 29 个 --chat-* 设计令牌，
                注入 --rpx，并以 root 内联 --chat-viewport-height 跟随 iframe resize
 
 退出码: 0=生成成功  1=致命审计失败（不写文件）  2=用法/读取错误
@@ -4247,7 +4247,8 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
     audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(chat_inner, platform)
     if sandbox:
         audit += ('<div class="frag-warn">NOTE 已模拟：[data-chat]/[data-slot] 钩子结构与 14 个 '
-                  '--chat-* 设计令牌默认值（深色一套为实测真值；官方手册只记 10 个），另注入 '
+                  '--chat-* 设计令牌默认值（深色一套为实测真值；共 29 个＝气泡 10＋白名单 18＋别名 1，'
+                  '官方手册正文只列前 10），另注入 '
                   '--rpx 尺寸基准；--chat-viewport-height 由模拟宿主写在 root 内联 style，'
                   '并随 iframe resize/键盘 inset 更新（后者不属那 14 个）。'
                   '</div>'

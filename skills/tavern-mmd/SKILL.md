@@ -27,10 +27,11 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | `findRegex` 形态 | 任意正则 | **强制 `/pattern/flags` slash literal**，固定标记也要包斜杠 | **交付统一 `/pattern/flags` slash 形态**（约定，非硬性）：实机复验裸字面量也生效（卡 64304 A/B，2026-08-30），与 worker 源码一致；统一 slash 为跨平台一致，校验器对裸字面量出 WARN 不出 ERROR |
 | 稳定选择器 | 正常 DOM | ❌ 平台 class 名会变 | ✅ `[data-chat]` / `[data-slot]` 承诺不改名（作者自写 `data-*` 会被净化删掉，自己的元素用 class/id） |
 | 状态栏方案 | 雷达法/KV V4.0均可 | **动态/自创NPC：混合态雷达法**；固定字段：原生`$field`（最轻零JS）或 KV V4.0（带骨架），AI 择一 | `<script>` + SDK：`message:done` 取 `msg.content` 解析后渲染；短小可见块可纯规则替换（`$1`/`$名字`）零 JS；长期面板挂舞台 `sdk.stage`；**雷达法/onerror 引擎不可移植** |
-| 全局美化 | 主题/自定义CSS | 静态换肤，或 day/night/native 三态运行时主题包（含玩家微调、route 生命周期） | 改 **14** 个 `--chat-*` 变量换肤，覆盖写 `[data-chat="root"][data-theme=*]`（特异度 (0,2,0)）才不被平台切回；订 `theme:change` 跟随深浅色；舞台承载长期面板。基座见 `assets/sandbox-kit/` |
+| 全局美化 | 主题/自定义CSS | 静态换肤，或 day/night/native 三态运行时主题包（含玩家微调、route 生命周期） | 改 **29** 个 `--chat-*` 变量换肤（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1；官方手册正文只列前 10，后 18 个另节单列），覆盖写 `[data-chat="root"][data-theme=*]`（特异度 (0,2,0)）才不被平台切回；订 `theme:change` 跟随深浅色；舞台承载长期面板。基座见 `assets/sandbox-kit/` |
 | 事件处理 | 正常 | inline onclick 使用已验证的干净形式 `window.__fn&&__fn()` 或 `eval(getElementById('FUNC').dataset.s)`；禁代码字符串字面量与直接DOM赋值；复杂组件可动态绑定 handler；stopPropagation必加 | 顶层 `function`/`const`/`class` 自动挂 `window`，`onclick="tap()"` 直接可用（**`svg` 内的 onclick 会被删**）；气泡内按钮在 `message:mount` 里绑，回调内同步抓引用，跨异步边界不再查询气泡 DOM |
 | MVU/STScript/酒馆助手 | ✅ | ❌（保守） | ❌（官方 SDK 顶替，见下行） |
 | 官方 SDK / 存档 / 舞台 | ❌（走酒馆自身生态） | ❌ 无 | ✅ **30 能力 / 12 事件**；`sdk.save` 落服务端跨设备（上限由宿主动态下发，**不写死 10 key**）、`sdk.cache` 刷新即失、`sdk.stage` 舞台放长期面板 |
+| 平台状态变量（`sdk.vars`/`vars:change`/`<abc_vars>`） | ❌（走 MVU 等酒馆生态） | ❌ 无 | ⚠️ **业务规则已确认、运行契约未公布**：仅新页可开、最多 6 层 80 键、快照随消息存并按楼层回溯、`{{var}}` 只替换本轮新组装内容、分享页与瘦预览可读不可写。官方 `contract.json` 至今没有这几个名字 → 校验器判 WARN「契约未补齐」，**不许编造签名**，也**不许说平台不支持**。现阶段状态栏仍走「AI 正文吐 `[状态]` 块 + 脚本解析」。详见 mmd-sandbox.md §14 |
 | 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | ✅ **可导 v2 整卡**（png/json）：编辑页导入 v2 卡按**新卡**处理，故「新版聊天页」仍可选 → 沙盒可用整卡路线。也可走 6键正则 json + 独立 persona 文本 |
 | 世界书导入 | json/png | png/json/角色卡连带 | png/json/角色卡连带（创卡页原文：「可导入PNG或json格式世界书」）；**唯一限制**是不能塞进 6键导入正则 json（那份顶层出现 `entries`/`character_book` 等判 ERROR），走整卡时正常放 `character_book` |
 | 世界书条目标题 | 无限制 | **≤20字**（`comment`；中文一字算1、标点计入，超出截断） | **≤20字**（同为 MMD 创卡页限制，本 skill 保留；官方校验脚本不查此项，故降级为 WARN） |
@@ -47,13 +48,15 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 |---|---|
 | 平台技术细节/避坑 | `references/platforms/{mmd,mmd-sandbox,sillytavern}.md` |
 | 沙盒模式（`chatVersion:1` 新聊天页）任何技术问题：SDK/舞台/存档/`message:mount`/6键导入 json/人设格式 | `references/platforms/mmd-sandbox.md`（该平台唯一权威；**不要**套用 mmd.md 的 onerror/雷达法那套） |
+| 平台状态变量 / 好感度 / 背包 / 养成 / 地图持久化「数据放哪」 | `references/platforms/mmd-sandbox.md` §14（三来源分工：平台状态变量 vs `sdk.save` vs `sdk.cache`；`<abc_vars>` 不可碰；契约未补齐的边界）。**动手写界面前先定数据来源**，别让同一个剧情数值有两份真值 |
+| 公开发布门槛（要过审核的卡） | `references/platforms/mmd-sandbox.md` §10.3（固定传输 2000–15000、`beginning` ≥200）。私人自用卡与纯草稿不受此约束 |
 | 角色设定/性格写作 | `references/creation/character.md` |
 | 世界书设计/条目规划 | `references/creation/worldbook.md` |
 | 开场白 | `references/creation/opening.md` |
 | 文风控制 | `references/creation/style.md` |
 | 美化风格选择/风格库/换配色换主题 | **先读** `references/beautify/style-system.md`（token契约+6维度+分装+覆盖）；风格清单见 `references/beautify/style-db/README.md` |
 | 状态栏 | **先分平台**。沙盒模式（`/mmdsandbox`）→ `references/beautify/sandbox-kit.md`（SBK 基座，沙盒唯一适用方案：`status` 气泡内唯一数据面板 + `chrome` 功能栏入口 + 可选 `pinned` 精简条；雷达法/影渲法/onerror 引擎不可移植）。当前MMD/本地酒馆 → 动态/自创NPC **首选** `references/beautify/statusbar-radar.md`（雷达法）或 `references/beautify/statusbar-shadowcast.md`（影渲法/ShadowCast，Shadow DOM 隔离、markdown 免疫、含双轨代谢，11靶验证+生成器）；固定字段走原生 `$field`（最轻）或 `statusbar.md`（KV V4.0），由 AI 择一 + 对应平台文档；换风格见 beautify/style-system.md |
-| 全局美化 | **先分平台**。沙盒模式（`/mmdsandbox`）→ `references/beautify/sandbox-kit.md` 主题层（语义 token → 平台 **14** 个 `--chat-*`，覆盖写 `[data-chat="root"][data-theme=*]` 才不被平台深浅色切回）。当前MMD/本地酒馆 → `references/beautify/global-css.md` + 对应平台文档；先区分**静态换肤 / 当前 MMD 三态运行时主题包**。只要需要 day/night/native、玩家微调、设置或持久偏好候选，默认再读 `references/beautify/theme-runtime.md`；新资产优先见 `assets/global-beautify-examples/mmd-theme-runtime/README.md`，风格映射见 `style-system.md` |
+| 全局美化 | **先分平台**。沙盒模式（`/mmdsandbox`）→ `references/beautify/sandbox-kit.md` 主题层（语义 token → 平台 **29** 个 `--chat-*`，覆盖写 `[data-chat="root"][data-theme=*]` 才不被平台深浅色切回）。当前MMD/本地酒馆 → `references/beautify/global-css.md` + 对应平台文档；先区分**静态换肤 / 当前 MMD 三态运行时主题包**。只要需要 day/night/native、玩家微调、设置或持久偏好候选，默认再读 `references/beautify/theme-runtime.md`；新资产优先见 `assets/global-beautify-examples/mmd-theme-runtime/README.md`，风格映射见 `style-system.md` |
 | 悬浮组件（可拖动悬浮球/侧边栏抽屉/带菜单的悬浮按钮） | `references/beautify/floating-components.md`（light DOM 认证写法：img onerror 注入 + CSS类 + classList，菜单跟随本体+翻转避裁+选项可点击）；沙盒模式改走 `<script>` + `sdk.stage` 舞台，见 `references/platforms/mmd-sandbox.md`；**Shadow DOM 隔离变体**见 `references/beautify/statusbar-shadowcast.md`（host 挂 body + shadow 内 fixed，样式不外泄/不被染色，已验证） |
 | 正则规则 | `references/beautify/regex-rules.md` |
 | 角色卡JSON输出 | `references/output/card-json.md` |

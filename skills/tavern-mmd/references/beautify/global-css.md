@@ -5,7 +5,7 @@
 | 平台 | 方案 |
 |---|---|
 | 当前 MMD `/mmd` | 先在“静态换肤 / 运行时主题包”二档中选型；运行时档必须再读 `theme-runtime.md` |
-| MMD沙盒模式 `/mmdsandbox` | **走平台原生变量换肤**（改 `[data-chat="root"]` 上的 14 个 `--chat-*`），不用本文的激活器骨架、不用运行时主题协议。见下方「沙盒模式换肤」；成套现成基座在 `../../assets/sandbox-kit/`（方法论 `sandbox-kit.md`） |
+| MMD沙盒模式 `/mmdsandbox` | **走平台原生变量换肤**（改 `[data-chat="root"]` 上的 29 个 `--chat-*`），不用本文的激活器骨架、不用运行时主题协议。见下方「沙盒模式换肤」；成套现成基座在 `../../assets/sandbox-kit/`（方法论 `sandbox-kit.md`） |
 | 本地 SillyTavern `/st` | 优先使用原生主题 / 自定义 CSS；卡内注入另按本地平台能力设计 |
 
 ## 两档交付
@@ -57,27 +57,41 @@
 | 事实 | 含义 |
 |---|---|
 | 所有规则里的 `<style>` **合成一张全页样式表，后写的盖先写的** | 不需要激活器开关类；但多条规则的 `<style>` 互相覆盖是**预期行为不是 bug**（症状「预览里对、上线不对」）→ 自有类名加前缀，并留意规则顺序 |
-| 平台提供 **14 个 `--chat-*` 变量** | 换肤 = 在 `[data-chat="root"]` 上改这些变量，一处改完全页跟着变 |
+| 平台提供 **29 个 `--chat-*` 变量**（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1） | 换肤 = 在 `[data-chat="root"]` 上改这些变量，一处改完全页跟着变 |
 | `[data-chat]` / `[data-slot]` **承诺不偷偷改名** | 不必再维护会失效的平台类名速查表（本文下面两节的类名清单**只对当前 MMD 有效**） |
 | 有 `theme:change` 事件 | 用户切深浅色时能收到通知，JS 涂的颜色可以跟着改 |
 
-### 14 个 `--chat-*` 变量
+### 29 个 `--chat-*` 变量
 
-**官方手册只记了 10 个**，实测（逆向沙盒样式表 + 真机）每套主题是 **14 个**，定义在 `[data-theme=dark]` / `[data-theme=light]` 上（**没有 `:root` 定义**）。下表后 5 个是手册漏记的：
+`【实机实测 2026-08-29】`每套主题 **29 个**，定义在 `[data-theme=dark]` / `[data-theme=light]` 上（**没有 `:root` 定义、没有 `prefers-color-scheme`** —— 主题完全由 root 上的 `data-theme` 属性驱动）。
+
+**官方手册分两处记**：正文只列 A 组 10 个，另把 B 组 18 个单独称作「底栏和白名单弹窗另有 18 个变量」—— 两处加起来才是全集，只照第一张表会漏掉整个底栏与弹窗族。本 skill 曾只记 14 个（漏 15 个，含整族 `--chat-modal-*`），已订正。完整取值见 `../platforms/mmd-sandbox.md` §6.1。
+
+**A. 气泡 / 整页组（10 个）** —— 改了会带动整页与气泡：
 
 | 变量 | 说明 | 变量 | 说明 |
 |---|---|---|---|
 | `--chat-bg` | 整页背景 | `--chat-accent` | 强调色（按钮高亮、血条） |
-| `--chat-surface` | 卡片 / 面板底色 | `--chat-bubble-user-bg` | 用户气泡背景 |
-| `--chat-text` | 正文颜色 | `--chat-bubble-ai-bg` | AI 气泡背景 |
-| `--chat-text-muted` | 次要文字 | `--chat-bubble-text` | 气泡里的字 |
-| `--chat-border` | 边框颜色 | **`--chat-input-bg`** | 输入框底色（漏记） |
-| **`--chat-input-text`** | 输入框文字（漏记） | **`--chat-shortcut-text`** | 快捷条文字（漏记） |
-| **`--chat-more-item-bg`** | 「更多」面板条目底色（漏记） | **`--chat-share-pick-bg`** | 分享选择态底色（漏记） |
+| `--chat-surface` | 卡片 / 面板底色 | `--chat-bubble-user-bg` | 用户气泡背景（`var(--chat-bg)` 别名） |
+| `--chat-text` | 正文颜色 | `--chat-bubble-ai-bg` | AI 气泡背景（`var(--chat-bg)` 别名） |
+| `--chat-text-muted` | 次要文字 | `--chat-bubble-text` | 气泡里的字（`var(--chat-text)` 别名） |
+| `--chat-border` | 边框颜色 | `--chat-share-pick-bg` | 分享选择态底色 |
 
-另有 **`--rpx`** = `calc(100vw / 750)` 是平台尺寸基准（不计入 14 个），只读不写，改它整体错位。
+**B. 底栏与白名单弹窗组（18 个）** —— 🚨 **`--chat-bg` / `--chat-text` / `--chat-accent` 带不动它们**，必须单独设：
 
-> 🚨 **`--chat-viewport-height` 不在这 14 个里**：它不是样式表变量，而是 JS 写在 root 上的**内联 style**（`clientHeight − 键盘 inset`，随 `visualViewport` 更新）→ **CSS 覆盖不了它**，只能读。
+- 底栏与快捷条：`--chat-composer-bg`、`--chat-composer-text`、`--chat-shortcut-bg`、`--chat-shortcut-text`
+- 输入框：`--chat-input-bg`、`--chat-input-text`、`--chat-input-placeholder`、`--chat-input-border`
+- 白名单弹窗（`--chat-modal-*` 共 10 项）：`bg`、`surface`、`text`、`muted`、`accent`、`input-bg`、`input-text`、`cancel-bg`、`btn-bg`、`btn-border`
+
+**C. 别名（1 个）**：`--chat-more-item-bg` = `var(--chat-modal-surface)`，即「+」面板里每个条目的图标底。
+
+> 🚨 **共 4 个是别名而非独立取值**：`--chat-bubble-user-bg` / `--chat-bubble-ai-bg` → `var(--chat-bg)`、`--chat-bubble-text` → `var(--chat-text)`、`--chat-more-item-bg` → `var(--chat-modal-surface)`。**改基色会自动传导**；反过来把这几个写死就切断了传导链，之后改基色它们不再跟随。
+>
+> ⚠️ B 组**不能换平台图标**（发送键、顶栏、加号菜单里的图标改不了），也别据此推断「所有系统弹窗都能换肤」—— 模型设置那几个渲染在**宿主页**，卡片 CSS 打不到（见 `../platforms/mmd-sandbox.md` §6.3b）。要跟随深浅色就浅色/深色各给一套值，不要把固定色值说成"会自动适配"。
+
+另有 **`--rpx`** = `calc(100vw / 750)` 是平台尺寸基准（不计入 29 个），只读不写，改它整体错位。
+
+> 🚨 **`--chat-viewport-height` 不在这 29 个里**：它不是样式表变量，而是 JS 写在 root 上的**内联 style**（`clientHeight − 键盘 inset`，随 `visualViewport` 更新）→ **CSS 覆盖不了它**（内联优先级压过样式表），只能读。
 
 气泡那三个默认等于页面背景与文字，只改其中一个也不会和整页脱节。
 

@@ -85,7 +85,7 @@
 
 ## 样式层（MMD美化）
 
-> 下面「静态换肤 / 运行时主题 / 风格库」各项按当前 MMD 写。沙盒模式换肤只改 `[data-chat="root"]` 上的 14 个 `--chat-*` 变量（实测确证，官方手册只记 10 个），另见沙盒专节。
+> 下面「静态换肤 / 运行时主题 / 风格库」各项按当前 MMD 写。沙盒模式换肤只改 `[data-chat="root"]` 上的 **29 个** `--chat-*` 变量（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1；实测逐个注入确证），另见沙盒专节。
 
 - [ ] 装饰性伪元素 pointer-events:none
 - [ ] 交互元素 position:relative + z-index
@@ -144,6 +144,10 @@
 - [ ] 长期面板（地图/背包/小游戏）挂**舞台 `sdk.stage`**，不挂气泡（气泡滚出屏幕即销毁）
 - [ ] `sdk.message.*` / `sdk.save.*` 等返回 Promise 的调用都有 `.catch`（失败时页面上没有任何提示）
 - [ ] 不靠"必须攒进度"做唯一玩法——游客存档退出即失、登录不迁移，且**作者自己是登录态永远测不出这个差别**
+- [ ] `sdk.message.send` 有**并发防护**：发送/生成未结束时再调会**立刻拿 `BUSY`（不排队、不占限频）** → 保留草稿、提示用户稍后自己发，**不自动重试**；且**没有在 `message:done` 里无条件 `send`**（自问自答死循环）
+- [ ] 用到 `sdk.vars.*` / `vars:change`（平台状态变量，mmd-sandbox.md §14）时：**官方 contract.json 未收录其签名** → 校验器出 WARN 不出 ERROR，但必须确认**签名不是编造的**（要有用户提供的新版 SDK/导出样本），交付说明写明「状态读写待接入」。没有样本时优先走「AI 正文吐 `[状态]` 块 + 脚本解析」这条已确证的路
+- [ ] **没有自造状态标签去跟平台内部 `<abc_vars>` 抢，也没有写正则藏它**（平台接口已把它从正文拆出，正文本来就是干净剧情）；`varSchema` / `varInit` 这类推测字段**没有**被塞进 6 键正则包
+- [ ] 同一个剧情数值**没有**同时由平台状态表和 `sdk.save` 各存一份（两份真值必然漂移，回溯时只有一份跟着回）
 
 ### DOM 与 CSS
 - [ ] **无作者自写 `data-*`**——会被净化删掉，随后所有依赖它的 `querySelector` 全查不到。自己的按钮/容器用 `class` 或 `id`
@@ -151,7 +155,10 @@
 - [ ] **无全局 CSS 选择器** `*{}` / `html{}` / `body{}` / `:root{}` → 一律改 `[data-chat="root"]`
 - [ ] HTML 顶格、无反引号包裹待渲染 HTML。平台实况会在 Markdown 前删除 4+ 空格，故“4 空格必变代码块”不是实测故障；仍顶格写以通过官方 WARN，并防其他 Markdown 路径差异
 - [ ] 作者 z-index 落在 **3500–7999**（实测安全带）。依据：实测平台 `header`/`statusbar`/`messages`/`composer`/`author-stage` 全是 `z-index:auto` + `position:static`，手册所谓「平台 chrome 占 8000–8999」**不成立**；样式表穷举的真实占用是 `10090` snackbar / `9000` alert / `8200` message-menu / `8100` composer-snack / `8000` share-loading / `3000` stage-full / `2000` stage-content / `40` sdk-debug。3500 起是为避开舞台的 2000/3000，7999 止是为避开平台 8000+ 那几层（越界不会被拦，只会挡住平台长按菜单/提示/弹窗）
-- [ ] 换肤只改 `[data-chat="root"]` 上的 14 个 `--chat-*` 变量（实测确证；官方手册只记 10 个，漏记 `--chat-input-bg`/`--chat-input-text`/`--chat-shortcut-text`/`--chat-more-item-bg`/`--chat-share-pick-bg`），**不写死 `#fff`**（深浅色切换才跟得上）；JS 涂色的订 `theme:change`
+- [ ] 换肤只改 `[data-chat="root"]` 上的 **29 个** `--chat-*` 变量（`【实机实测 2026-08-29】`逐个注入确证，定义在 `[data-theme=dark]` / `[data-theme=light]` 两个选择器上，**无 `:root`、无 `prefers-color-scheme`**）：**气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1**。官方手册正文只列前 10，另把后 18 个单独称作「底栏和白名单弹窗另有 18 个变量」—— 两处加起来才是全集，别只照第一张表。**不写死 `#fff`**（深浅色切换才跟得上）；JS 涂色的订 `theme:change`
+- [ ] 改底栏/输入框/白名单弹窗**不要指望 `--chat-bg`/`--chat-text`/`--chat-accent` 带动** —— 那三个只管消息区语义配色，底栏与宿主弹窗走 `--chat-composer-*`/`--chat-shortcut-*`/`--chat-input-*`/`--chat-modal-*` 这 18 个独立变量；且它们**不能换平台图标**（发送键、顶栏、加号菜单图标改不了）。要随深浅色切换就浅/深各给一套值，别把固定色值说成"会自动适配"
+- [ ] **4 个别名不要写死**：`--chat-bubble-user-bg`/`--chat-bubble-ai-bg` → `var(--chat-bg)`、`--chat-bubble-text` → `var(--chat-text)`、`--chat-more-item-bg` → `var(--chat-modal-surface)`。写死会切断传导链（之后改基色它们不再跟随）
+- [ ] `--chat-viewport-height` **不算样式表变量、不要用 CSS 覆盖**：它是 JS 写在 root 上的内联 style（`clientHeight − 键盘 inset`，随 `visualViewport` 实时更新），内联优先级压过样式表；要读就 `getComputedStyle` 或直接 `var(--chat-viewport-height)`
 - [ ] 功能栏自己补 `flex-shrink:0` 与所需背景/高度；它的**正则输入静态且不随消息重跑**，动态值靠 JS 改 DOM。JS 插入的宿主节点实机可保留，但必须在 mount/done 回调内挂载并做幂等/宿主归一
 
 ### 审核与验证
@@ -162,6 +169,8 @@
 - [ ] 预览能力矩阵已看过：`exact` 可作日常回归，`conservative` 只作保守门禁，`probe-needed` 不当成平台事实
 - [ ] **真实 MMD 不是日常默认回归环境**：AI 不自行登录账号、不把正式卡/公开卡当夹具。只有出现 `probe-needed` 平台边界，或用户授权最终人工验收时才回真实站；任何「保存编辑」/公开提交先确认对外影响
 - [ ] 若做最终实站验收，已区分瘦预览真实行为：`save.get/save.keys` 会同步抛 `SdkError`，`cache.get` 返回 `undefined`，`composer.visible()` 与 stage 读能力仍可用；不能概括成“一律 NOT_SUPPORTED”
+- [ ] **（仅公开发布的卡才卡这条；私人自用卡与纯草稿跳过）** 固定传输字符 = 人设 + 「已启用 且 常驻 且 概率 100%」的世界书正文，落在 **2000–15000 含边界**；`beginning` **≥200 字**（与 4000 上限夹成 200–4000）。关键词条目、停用条目、概率不足 100% 的常驻条目不计入；**没有用空白换行凑数**。详见 mmd-sandbox.md §10.3
+- [ ] 单条世界书 `content` **≤3000 字**（字段级硬限；与「单条 ≤800」的成本软建议是两件事）
 
 ## 整卡输出形态（做整张角色卡时，三平台通用）
 

@@ -99,6 +99,17 @@ SANDBOX_USER_FIELDS = frozenset(("nickname", "avatarUrl"))
 # 🚨 补发规则与手册相反：有 late replay 的是 message:mount / message:done，**ready 没有**
 # （事实卡 §4.1）。订阅不可撤销，唯一退订是内部 Ac()，它会清掉所有脚本的全部订阅。
 SANDBOX_SDK_MISSING_CAPABILITIES = ("once", "off")
+# 平台状态变量子系统（mmd-sandbox.md §11）：项目业务规则已确认，但官方 contract.json
+# 至今**未收录**这几个名字，官网与下载包也没公布调用契约。官方 validate.mjs:124-135 把它们
+# 单独分流成「契约未补齐」，不按拼写错误处理 —— 这里对齐，判 WARN 不判 ERROR。
+# 判 ERROR 会把想接状态变量的作者直接劝退（这些名字不是平台永不支持，只是契约没公布）。
+SANDBOX_SDK_PENDING_CONTRACT_CAPABILITIES = frozenset(("vars", "vars.get", "vars.set"))
+SANDBOX_SDK_PENDING_CONTRACT_EVENTS = frozenset(("vars:change",))
+_PENDING_CONTRACT_HINT = (
+    "已见于项目状态变量规则（最多 6 层 / 80 键，仅新聊天页可开），但**官方 contract.json "
+    "未收录**其参数与返回值 —— 属「契约未补齐」，不是平台永不支持，也不能据此编造签名。"
+    "要交付可运行的状态界面，先拿用户提供的新版 SDK/导出样本；资料未补齐时只交付已确定部分"
+    "并写明缺口。别把 varSchema / varInit 这类推测字段塞进正则包。")
 # 规则输出预算（事实卡 §5.2，手册与三份包分析都未提，对状态栏致命）：
 #   let a=Math.max(262144, e.length*4)
 # 按条规则累计所有匹配的输出，超预算 → **整条规则回滚**，页面上完全不生效只留告警。
@@ -371,6 +382,12 @@ def check_sandbox_sdk_names(s, where):
         dotted = "%s.%s" % (first, second) if second else first
         if dotted in SANDBOX_SDK_CAPABILITIES:
             continue
+        if dotted in SANDBOX_SDK_PENDING_CONTRACT_CAPABILITIES:
+            if dotted in seen:
+                continue
+            seen.add(dotted)
+            warn("%s 用了 sdk.%s——%s" % (where, dotted, _PENDING_CONTRACT_HINT))
+            continue
         # 只写首段（如 `sdk.input` 整体传递）时放行
         if not second and first in SANDBOX_SDK_NAMESPACES:
             continue
@@ -384,6 +401,9 @@ def check_sandbox_sdk_names(s, where):
         if event in SANDBOX_SDK_EVENTS or event in seen:
             continue
         seen.add(event)
+        if event in SANDBOX_SDK_PENDING_CONTRACT_EVENTS:
+            warn("%s sdk.on('%s')——%s" % (where, event, _PENDING_CONTRACT_HINT))
+            continue
         err("%s sdk.on('%s')——不在 12 个合法事件名内，打错不报错、只是**永不触发**。"
             "合法事件：%s。" % (where, event, "、".join(sorted(SANDBOX_SDK_EVENTS))))
     for regex, allowed, call in ((_SANDBOX_ROLE_FIELD, SANDBOX_ROLE_FIELDS, "role"),

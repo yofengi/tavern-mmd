@@ -151,7 +151,8 @@ div#app[data-v-app]
 **关键点**：
 - 气泡三色是 `var(--chat-bg)` / `var(--chat-text)` 的**别名**，不是独立取值 → 两套主题下气泡都与页面背景同色，改 `--chat-bg` 气泡跟着变。
 - `--chat-more-item-bg` 是 `var(--chat-modal-surface)` 的别名。
-- **`--chat-modal-*` 共 9 个**（bg/surface/text/muted/accent/input-bg/input-text/cancel-bg/btn-bg/btn-border）—— 弹窗全靠这一族，代码里 14 个令牌**一个都没包含它们**。
+- **`--chat-modal-*` 共 9 个**（bg/surface/text/muted/accent/input-bg/input-text/cancel-bg/btn-bg/btn-border）—— 弹窗全靠这一族，**当时**本 skill 代码里那 14 个令牌**一个都没包含它们**。
+  > 📌 后续订正（写于本快照之后）：这句描述的是**采集本快照时 skill 自身代码的状态**，不是平台事实。`build-preview.py` 与各处文档已按本节实测结果补齐到 **29 个**（气泡 10 + 白名单 18 + 别名 1），`--chat-modal-*` 族现已全部注入。本快照其余内容作为存档保持原样。
 
 ## 4. `--rpx` 尺寸基准（实测两点 + 断点原文）
 

@@ -380,7 +380,7 @@ python <skill>/scripts/build-preview.py output/文件-regex.json --platform mmds
 - 世界书条目标题 20 字在沙盒模式是 **WARN**（当前 MMD 仍是 ERROR），理由见 `worldbook-json.md` 与 `../platforms/mmd-sandbox.md` §10.1。
 - 拿 chara_card_v2 卡审沙盒是**合法**的（沙盒能导 v2 整卡）：用 `--type card --platform mmdsandbox`，会执行与 `/mmd` 相同的 v2 检查。旧版本在这种情况下 WARN 提示「沙盒真正的交付物是导入 JSON」，那条已删除。
 
-`build-preview.py --platform mmdsandbox` 使用共享契约 v1.1.0 复刻真实新聊天页：dark root flex 外壳、header/statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、author-stage、静态 composer/toolbar/input/send，以及 **14 个 `--chat-*` 设计令牌**。另注入 `--rpx`；`--chat-viewport-height` 由模拟宿主以内联 style 写入并随 iframe resize/键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍装卡即抽出执行，但 script 审计角标只在诊断页展示，不挤占全景 iframe。预览自带 `chat`/`thin-preview` SDK profile、能力精度表、默认折叠的仿真控制与证据说明；真实宿主握手、AI 分块节奏、完整 Markdown/净化、跨设备 save、CSP 与最终人工验收仍需真实站。
+`build-preview.py --platform mmdsandbox` 使用共享契约 v1.1.0 复刻真实新聊天页：dark root flex 外壳、header/statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、author-stage、静态 composer/toolbar/input/send，以及 **29 个 `--chat-*` 设计令牌**。另注入 `--rpx`；`--chat-viewport-height` 由模拟宿主以内联 style 写入并随 iframe resize/键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍装卡即抽出执行，但 script 审计角标只在诊断页展示，不挤占全景 iframe。预览自带 `chat`/`thin-preview` SDK profile、能力精度表、默认折叠的仿真控制与证据说明；真实宿主握手、AI 分块节奏、完整 Markdown/净化、跨设备 save、CSP 与最终人工验收仍需真实站。
 
 ## 第四节：MMD 手填清单（Markdown 交付物，备选）
 

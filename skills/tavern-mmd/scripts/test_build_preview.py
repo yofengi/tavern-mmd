@@ -1565,7 +1565,7 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
                 self.assertIn("%s:" % var, chrome)
 
     def test_panorama_injects_non_token_sandbox_vars(self):
-        """--chat-viewport-height 与 --rpx 都不属那 14 个令牌，但预览要模拟注入。
+        """--chat-viewport-height 与 --rpx 都不属那 29 个令牌，但预览要模拟注入。
 
         --chat-viewport-height 真机是 JS 内联 style；--rpx 是平台尺寸基准，
         不注入则作者的 calc(24 * var(--rpx)) 会算空 → 预览尺寸全塌。
@@ -1577,7 +1577,7 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertNotIn("--rpx", bp.SANDBOX_DESIGN_TOKENS)
 
     def test_dark_tokens_equal_measured_truth(self):
-        """防回退：深色 14 个令牌必须等于实测真值，不许改成"好看但失真"的值。
+        """防回退：深色 29 个令牌必须等于实测真值，不许改成"好看但失真"的值。
 
         曾经这里是 --chat-bg:#16181d + 气泡 #1a7f5a/#22262c，预览因此显示出
         "气泡有独立底色"这个平台不存在的配色 —— 作者照它定配色，上真机才发现
@@ -2428,3 +2428,6 @@ class TestMainModes(unittest.TestCase):
                 work = os.path.join(d, "工作")
                 self.assertFalse(os.path.exists(work))
                 self.assertFalse(any(name.endswith(".html") for name in os.listdir(output_dir)))
+
+if __name__ == "__main__":
+    unittest.main()

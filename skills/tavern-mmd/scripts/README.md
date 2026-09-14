@@ -110,7 +110,7 @@ python build-preview.py <文件> --platform mmd|mmdsandbox|st [--mode panels|pan
 平台渲染差异：
 - `st`：原样渲染，script/ES6 全执行
 - `mmd`：script/ES6 全执行（已确认支持）；script 加"✓script"角标标明正常执行；inline onclick 按已实测的净化规则处理
-- `mmdsandbox`：复刻 2026-08-27 只读实测的新聊天页外壳与稳定 DOM 契约：dark root flex 列、45px desktop header、statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、静态 composer/toolbar/input/send、author-stage，以及 **14 个 `--chat-*` 设计令牌**（官方手册只记 10 个）。另注入 `--rpx=calc(100vw / 750)`；`--chat-viewport-height` 不属于 14 个令牌，由模拟宿主写在 root 内联 style，并随 iframe resize 与键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍按平台装卡即抽出执行，但 script 审计角标只留在三面板诊断，不挤进实际全景 iframe。仿真控制、证据说明和气泡边界辅助线默认关闭/折叠。
+- `mmdsandbox`：复刻 2026-08-27 只读实测的新聊天页外壳与稳定 DOM 契约：dark root flex 列、45px desktop header、statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、静态 composer/toolbar/input/send、author-stage，以及 **29 个 `--chat-*` 设计令牌**（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1；官方手册正文只列前 10）。另注入 `--rpx=calc(100vw / 750)`；`--chat-viewport-height` 不属于那 29 个令牌，由模拟宿主写在 root 内联 style，并随 iframe resize 与键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍按平台装卡即抽出执行，但 script 审计角标只留在三面板诊断，不挤进实际全景 iframe。仿真控制、证据说明和气泡边界辅助线默认关闭/折叠。
 
 > **沙盒预览带能力精度诊断**：已装零依赖本地 SDK 模拟器，提供 `chat` / `thin-preview` profile、30 能力、12 事件、message scope、stage/theme/switch 与已确证净化/预算子集。每项标 `exact` / `conservative` / `probe-needed`；宿主握手、真实 AI 流式、完整 Markdown/净化、跨设备 save、CSP、触控/软键盘仍由真实站承担。
 
