@@ -1,0 +1,60 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>原生模型测试夹具</title>
+<style>body{font:16px sans-serif;margin:20px}[hidden]{display:none!important}button{padding:9px}.model-switch-scope,.model-setting-scope{padding:20px;background:#eee}.model-item{border:1px solid #aaa;padding:14px;margin:8px;min-height:70px}.model-item img{width:20px;height:20px}.model-filter-tab.active,.mp-token-btn.selected{background:#acd}.u-switch{padding:10px}.u-switch__node--on{display:inline-block;width:12px;height:12px;background:green}</style>
+<body><h1>原生模型测试夹具</h1><div id="msglistview"><div class="item Ai"><div class="content left">你好，船长。</div></div></div>
+<div id="chat-input-scope"><textarea class="uni-textarea-textarea"></textarea><button class="chat-send-proxy">发送</button></div>
+<button class="mind-type"><span class="current-label">星海·甲</span><span class="icon-change"> ▾ </span></button>
+<div class="u-popup__content" id="model-popup" hidden><button class="u-popup__content__close">关闭列表</button><div class="model-switch-scope"><h2 class="title">模型</h2><div class="model-filters"></div><div class="model-list"></div></div></div>
+<div class="model-setting-scope" hidden><h2 class="mp-title">模型设置</h2><button class="mp-close">关闭设置</button><div class="mp-model-name"></div><div class="mp-energy-pill">原生显示的消耗信息</div>
+<div class="mp-card"><h3 class="mp-card-title">输出长度</h3><div class="mp-card-hint">选择模型提供的长度</div><button class="mp-token-btn" data-value="short">简短</button><button class="mp-token-btn" data-value="long">详细</button></div>
+<div class="mp-switch-row"><span class="mp-sw-title">记忆辅助</span><span class="mp-sw-desc">开关示例</span><button class="u-switch"></button></div>
+<div class="mp-preset-card"><h3 class="mp-card-title">预设</h3><div class="mp-card-hint">模型预设</div><button class="mp-preset-item" data-value="balanced">均衡</button><button class="mp-preset-item" data-value="creative">创作</button></div>
+<div class="bottom"><button class="btn">确认</button></div></div>
+<script>
+(function () {
+ const q = value => document.querySelector(value);
+ const names = { a:'星海·甲', b:'星海·乙' };
+ const fixture = window.fixture = { selected:'a', category:'all', settingsFor:'a', openCount:0, selects:[], changes:0, saves:0,
+   delay:120, fault:'none', scope:{ accountKey:'fixture-account',roleId:'fixture-role',conversationKey:'main' },
+   values:{a:{tokens:'short',memory:true,preset:'balanced'},b:{tokens:'long',memory:false,preset:'creative'}} };
+ window.__MMD_SAME_LAYER_SCOPE__ = () => fixture.scope;
+ function paintSettings() {
+   const values = fixture.values[fixture.settingsFor];
+   q('.mp-model-name').textContent = names[fixture.settingsFor];
+   document.querySelectorAll('.mp-token-btn').forEach(el => el.classList.toggle('selected', el.dataset.value === values.tokens));
+   document.querySelectorAll('.mp-preset-item').forEach(el => el.classList.toggle('selected', el.dataset.value === values.preset));
+   q('.u-switch').replaceChildren();
+   if (values.memory) { const dot = document.createElement('span'); dot.className='u-switch__node--on'; q('.u-switch').append(dot); }
+ }
+ function configure(id) { fixture.settingsFor=id; paintSettings(); q('.model-setting-scope').hidden=false; }
+ function choose(id) {
+   fixture.selects.push(id);
+   if (fixture.fault === 'ignore-select') return;
+   q('#model-popup').hidden=true;
+   if (fixture.fault === 'close-without-select') return;
+   fixture.selected=id;
+   if (fixture.fault !== 'no-entry-label') q('.current-label').textContent=names[id];
+ }
+ fixture.render = function () {
+   q('.model-filters').replaceChildren();
+   for (const [id,label] of [['all','全部'],['a','叙事'],['b','推理']]) {
+     const button=document.createElement('button'); button.className='model-filter-tab'; button.classList.toggle('active',fixture.category===id); button.textContent=label;
+     button.onclick=()=>{fixture.category=id; fixture.render();}; q('.model-filters').append(button);
+   }
+   q('.model-list').replaceChildren();
+   for (const id of ['a','b'].filter(id=>fixture.category==='all'||fixture.category===id)) {
+     const row=document.createElement('div');row.className='model-item';row.classList.toggle('model-item-active',fixture.selected===id);
+     row.innerHTML='<h3 class="model-title"></h3><p class="model-intro"></p><span class="model-battery"></span><span class="model-perm">测试可用</span><span class="model-success-rate"><span class="success-badge">测试记录</span></span>';
+     row.querySelector('.model-title').textContent=names[id];row.querySelector('.model-intro').textContent=id==='a'?'叙事夹具':'推理夹具';row.querySelector('.model-battery').textContent=id==='a'?'消耗 1':'消耗 2';
+     const image=document.createElement('img');image.src='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="20" height="20"%3E%3Crect width="20" height="20" fill="green"/%3E%3C/svg%3E#ico_setting2_dark.png';image.alt='设置';
+     image.onclick=e=>{e.stopPropagation();configure(id);}; row.append(image);row.onclick=()=>choose(id);q('.model-list').append(row);
+   }
+ };
+ q('.mind-type').onclick=()=>{fixture.openCount++;if(fixture.fault==='no-open')return;q('.model-list').replaceChildren();q('#model-popup').hidden=false;setTimeout(()=>fixture.render(),fixture.delay);};
+ q('.u-popup__content__close').onclick=()=>q('#model-popup').hidden=true;
+ q('.mp-close').onclick=()=>q('.model-setting-scope').hidden=true;
+ q('.bottom > .btn').onclick=()=>{fixture.saves++;q('.model-setting-scope').hidden=true;};
+ document.querySelectorAll('.mp-token-btn').forEach(el=>el.onclick=()=>{fixture.changes++;fixture.values[fixture.settingsFor].tokens=el.dataset.value;paintSettings();});
+ document.querySelectorAll('.mp-preset-item').forEach(el=>el.onclick=()=>{fixture.changes++;fixture.values[fixture.settingsFor].preset=el.dataset.value;paintSettings();});
+ q('.u-switch').onclick=()=>{fixture.changes++;fixture.values[fixture.settingsFor].memory=!fixture.values[fixture.settingsFor].memory;paintSettings();};
+})();
+</script><!--RUNTIME--></body></html>

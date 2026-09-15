@@ -1,0 +1,68 @@
+<!doctype html><meta charset="utf-8"><title>Original old-MMD action fixture</title>
+<style>body{font:16px sans-serif}img{width:20px;height:20px}button,uni-view,.item,.modify-btn,.option-item,.shortcut-btn,.gender-item,.radio-item{display:block;min-height:24px;margin:4px}.u-popup__content,.msg-modify-scope{border:1px solid #ccc;padding:10px}.uni-picker-view-content{height:130px;position:relative}.u-picker__view__column__item{height:30px;position:absolute;left:0;width:100px}.item{padding:8px}.content{min-height:35px}</style>
+<div class="header-box"><button class="icon-back" onclick="fixture.record('exit')">返回</button></div>
+<div class="topTabbar"><div class="header-icon-meun"></div></div>
+<div id="chat-input-scope"><textarea class="uni-textarea-textarea"></textarea><button class="chat-send-proxy">发送</button></div>
+<div class="shortcut-bar-wrapper"><div class="shortcut-bar"></div></div>
+<div class="more-options-scope"><button class="btn-icon">更多</button></div><div id="msglistview"></div><div id="panels"></div>
+<script>
+(function(){
+const F=window.fixture={events:[],fault:'',delay:0,record(action){this.events.push(action);},values:{},mode:'custom'};
+const root=document.getElementById('panels');
+const button=(label,cls,fn)=>{const e=document.createElement('button');e.textContent=label;e.className=cls;e.onclick=event=>{event.stopPropagation();fn(e);};return e;};
+const node=(cls,html='')=>{const e=document.createElement('div');e.className=cls;e.innerHTML=html;return e;};
+const icon=name=>'<img src="/icons/'+name+'">';
+function popup(cls,html=''){const box=node('u-popup u-popup__content'),body=node(cls,html);box.append(body,button('关闭','u-popup__content__close',()=>box.remove()));root.append(box);return body;}
+function confirm(kind,fn){const body=popup('confirm-scope','<div class="confirm-title">'+(kind==='conversation'?'删除聊天记录':'操作确认')+'</div><div class="confirm-content">'+(kind==='rollback'?'回溯将会删除此消息下方的所有消息':'删除后将无法恢复')+'</div><div class="confirm-bottom"></div>');
+body.querySelector('.confirm-bottom').append(button('取消','cancel-btn',()=>body.parentElement.remove()),button('确认','ok-btn',()=>{F.record('confirm-'+kind);if(F.fault==='confirm-noop')return;fn();body.parentElement.remove();}));return body;}
+for(const [kind,file]of Object.entries({comments:'ico_comment_dark.png',share:'ico_share2_dark.png',favorite:'ico_collect_dark.png',refresh:'ico_refresh2_dark.png'})){
+const e=button('', 'header-meun',()=>{F.record({comments:'openComments',share:'openSharePanel',favorite:'toggleFavorite',refresh:'refreshConversation'}[kind]);
+if(kind==='favorite')e.querySelector('img').src=e.querySelector('img').src.includes('_sel_')?'/icons/ico_collect_dark.png':'/icons/ico_collect_sel_dark.png';
+if(kind==='share'){const p=popup('share-popup','<div class="share-title">分享</div><div class="share-sub-title">https://example.invalid/share/demo</div>');p.append(button('复制','gen-link-btn',()=>F.record('copyShareLink')));}});e.innerHTML=icon(file);document.querySelector('.header-icon-meun').append(e);}
+function instructions(){F.record('openPromptSelector');const p=node('instruction-bar','<div class="instruction-scroll"></div>');p.append(button('返回','back-btn',()=>{F.record('closePromptSelector');p.remove();}));
+for(const label of ['观察','休息'])p.querySelector('.instruction-scroll').append(button(label,'instruction-chip',()=>{F.record('applyInstruction');document.querySelector('textarea').value='执行：'+label;}));document.querySelector('.shortcut-bar-wrapper').append(p);}
+function chatSettings(){F.record('openChatSettings');const p=popup('conv-style-modal','<div class="cs-modal-header"><div class="cs-header-title">对话设置</div><div class="cs-header-right"></div></div><div class="outer-scroll-view"><div class="cs-group-card"><div class="cs-section-title">风格</div><div class="cs-style-grid"><div class="cs-style-item active">自然</div></div></div></div>');
+p.querySelector('.cs-modal-header').append(button('返回','cs-header-left',()=>{F.record('closeChatSettings');p.parentElement.remove();}));p.querySelector('.cs-header-right').append(button('保存','confirm-btn',()=>{F.record('submitChatSettings');p.parentElement.remove();}));}
+for(const [label,file,fn]of [['选择指令','ico_instruction_dark.svg',instructions],['对话设置','ico_chat_set_dark.svg',chatSettings],['其他一','x1',()=>{}],['其他二','x2',()=>{}],['其他三','x3',()=>{}]]){
+const e=button('','shortcut-btn',fn);e.innerHTML='<span class="sb-text">'+label+'</span><span class="sb-icon">'+icon(file)+'</span>';document.querySelector('.shortcut-bar').append(e);}
+let messageSerial=0;
+F.messages=(rows=[['user','第一句'],['assistant','第一答'],['user','第二句'],['assistant','第二答']])=>{
+const list=document.getElementById('msglistview');list.replaceChildren();
+rows.forEach(([role,value],index)=>{const e=node('item '+(role==='assistant'?'Ai':'self')),content=node('content '+(role==='assistant'?'left':'right'));content.id='native-'+(++messageSerial);content.textContent=value;e.append(content);
+if(role==='assistant'){const group=node('modify-btn-scope');
+if(index===rows.length-1)group.append(button('重新生成','modify-btn',()=>{F.record('regenerateMessage');content.textContent+='（重写）';}));
+group.append(button('编辑','modify-btn',()=>edit(e,content)),button('复制','modify-btn',()=>{}));e.append(group);}
+let timer;content.addEventListener('mousedown',()=>{timer=setTimeout(()=>menu(e,role),40);});content.addEventListener('mouseup',()=>clearTimeout(timer));list.append(e);});};
+function edit(item,content){F.record('openEditMessage');const p=node('msg-modify-scope','<div class="modify-input-box"><div id="vditor"><div class="vditor-ir" style="display: block"><pre class="vditor-reset" contenteditable="true"></pre></div></div></div><div class="option-box"></div><div class="modify-btn-box"></div>');root.append(p);p.querySelector('pre').innerText=content.innerText;
+p.onclick=e=>{if(e.target===p){F.record('cancelEditMessage');p.remove();}};
+p.querySelector('pre').addEventListener('input',()=>F.record('setEditText'));
+p.querySelector('.option-box').append(button('简化','option-item',()=>{F.record('applyEditTransform');p.querySelector('pre').innerText='简化后的内容';}));
+p.querySelector('.modify-btn-box').append(button('保存','modify-btn',()=>{F.record('submitEditMessage');content.innerText=p.querySelector('pre').innerText;p.remove();}));}
+function menu(item,role){if(F.fault==='no-menu')return;const p=node('msg-option-scope','<div class="msg-options-box"></div>');root.append(p);
+for(const label of ['复制','删除','回溯',...(role==='assistant'?['开启新的故事']:[])])p.firstChild.append(button(label,'option-item',()=>{
+p.remove();if(label==='删除')confirm('message',()=>item.remove());if(label==='回溯')confirm('rollback',()=>{while(item.nextSibling)item.nextSibling.remove();});
+if(label==='开启新的故事'){F.record('startNewStoryFromMessage');const rows=[...document.querySelectorAll('#msglistview .item')],index=rows.indexOf(item);F.messages(rows.slice(0,index+1).map(el=>[el.classList.contains('Ai')?'assistant':'user',el.querySelector('.content').textContent]));}}));}
+function conversations(){F.record('openConversationPanel');const p=popup('conversation-list-scope','<div class="title">会话</div><div class="conversation-list"></div><div class="bottom"></div>');
+for(let index=0;index<3;index++){const e=node('conversation-item','<div class="left-scope"><div class="avatar">'+icon('avatar.png')+'</div></div><div class="center-scope"><div class="title-scope"><uni-view>故事 '+index+'</uni-view></div><div class="content-scope">摘要 '+index+'</div></div>');
+if(index===0)e.append(node('cur-conversation','当前'));e.onclick=()=>{F.record('selectConversation');F.messages([['assistant','选择了故事 '+index]]);p.parentElement.remove();};
+e.append(button('备注','edit-icon',()=>{const d=popup('confirm-edit-scope','<div class="confirm-edit-title">聊天记录备注</div><input class="uni-input-input">');d.append(button('取消','cancel-btn',()=>d.parentElement.remove()),button('确认','ok-btn',()=>{F.record('renameConversation');e.querySelector('uni-view').textContent=d.querySelector('input').value;d.parentElement.remove();}));}),button('删除','delete-icon',()=>{F.record('requestDeleteConversation');confirm('conversation',()=>{F.record('deleteConversation');e.remove();});}));p.querySelector('.conversation-list').append(e);}
+p.querySelector('.bottom').append(button('新建','btn',()=>{F.record('createConversation');F.messages([['assistant','新故事']]);p.parentElement.remove();}));}
+function persona(){F.record('openPersona');const p=popup('role-profile-modal','<div class="header-box"><div class="page-title">用户人设</div></div><div class="radio-group"></div><div class="card"><input type="text" maxlength="30"></div><div class="gender-box"></div><div class="card textarea-wrapper"><textarea maxlength="1000"></textarea></div>');
+for(const label of ['默认','自定义']){const e=button('','radio-item',()=>{F.record('setPersonaMode');p.querySelectorAll('uni-radio').forEach(r=>r.replaceChildren());e.querySelector('uni-radio').innerHTML='<svg width="10" height="10"></svg>';});e.innerHTML='<uni-text>'+label+'</uni-text><uni-radio>'+(label==='默认'?'<svg width="10" height="10"></svg>':'')+'</uni-radio>';p.querySelector('.radio-group').append(e);}
+for(const label of ['女','男']){const e=button(label,'gender-item'+(label==='女'?' active':''),()=>{F.record('setPersonaGender');p.querySelectorAll('.gender-item').forEach(x=>x.classList.remove('active'));e.classList.add('active');});p.querySelector('.gender-box').append(e);}
+p.querySelector('input').addEventListener('input',()=>F.record('setPersonaName'));p.querySelector('textarea').addEventListener('input',()=>F.record('setPersonaIdentity'));
+p.querySelector('.header-box').append(button('返回','icon-back',()=>{F.record('closePersona');p.parentElement.remove();}),button('完成','complete-btn',()=>{F.record('submitPersona');F.values.persona=[p.querySelector('input').value,p.querySelector('textarea').value];p.parentElement.remove();}));}
+function supplement(){F.record('openSupplement');const p=popup('role-extra-setting','<div class="header-scope"><div class="page-title">补充设定</div></div><div class="textarea-wrapper"><textarea class="uni-textarea-textarea" maxlength="1000"></textarea></div><div class="setting-item"><div class="picker-value">开头</div></div>');
+p.querySelector('textarea').addEventListener('input',()=>F.record('setSupplementText'));
+p.querySelector('.setting-item').append(button('位置','picker-field',()=>{F.record('openSupplementPositionPicker');const pick=node('u-transition','<div class="uni-picker-view-content"></div>');root.append(pick);let selected=0;
+const render=()=>pick.querySelectorAll('.u-picker__view__column__item').forEach((e,i)=>{e.classList.toggle('u-picker__view__column__item--selected',i===selected);e.style.top=(50+(i-selected)*30)+'px';});
+for(const [i,label]of ['开头','中间','末尾'].entries())pick.firstChild.append(button(label,'u-picker__view__column__item',()=>{F.record('setSupplementPosition');selected=i;render();}));render();
+pick.append(button('取消','',()=>{F.record('cancelSupplementPosition');pick.remove();}),button('确定','',()=>{F.record('confirmSupplementPosition');p.querySelector('.picker-value').textContent=['开头','中间','末尾'][selected];pick.remove();}));}));
+p.querySelector('.header-scope').append(button('返回','icon-back',()=>{F.record('closeSupplement');p.parentElement.remove();}),button('完成','complete-btn',()=>{F.record('submitSupplement');F.values.supplement=p.querySelector('textarea').value;p.parentElement.remove();}));}
+const definitions=[['新的聊天','ico_rechat2_dark.png',conversations],['更换背景','ico_edit_background_dark.png',()=>{F.record('openBackgroundPanel');popup('modify-scope','<div class="modify-title">背景</div>');}],['自定义指令','ico_instruction_dark.png',()=>{F.record('openCustomInstructions');popup('custom-instruction-scope','<div class="header-scope"><div class="title">自定义指令</div></div>');}],['用户人设','ico_user_setting_dark.svg',persona],['设定补充','ico_extra_profile_dark.svg',supplement],['对话设置','ico_chat_set_dark.svg',chatSettings],['游玩教程','ico_chat_help_dark.png',()=>{F.record('openTutorial');history.replaceState(null,'','/pages/help/help');}],['重置聊天','ico_reset2_dark.png',()=>F.record('UNEXPECTED_RESET')]];
+document.querySelector('.more-options-scope .btn-icon').onclick=()=>{const existing=document.querySelector('.more-scope');if(existing){F.record('closeMoreMenu');existing.remove();return;}F.record('openMoreMenu');if(F.fault==='no-more')return;setTimeout(()=>{const p=node('more-scope');for(const [label,file,fn]of definitions){const e=button('','item',fn);e.innerHTML='<div class="item-title">'+label+'</div><div class="item-icon">'+icon(file)+'</div>';p.append(e);}root.append(p);},F.delay);};
+F.messages();document.querySelector('#chat-input-scope textarea').addEventListener('input',()=>F.record('setInputText'));
+F.reset=()=>{root.replaceChildren();document.querySelectorAll('.instruction-bar').forEach(e=>e.remove());F.messages();};
+})();
+</script>
+<!--RUNTIME-->

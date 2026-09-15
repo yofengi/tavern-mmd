@@ -277,7 +277,9 @@ python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/�
 
 内嵌正则放进 `data.extensions.regex_scripts`（见第 4 节）：`/mmd` 与 `/st` 用 4 字段格式（id/scriptName/findRegex/replaceString）；**沙盒模式的规则内容按沙盒纪律写**（`<script>` 一等公民、禁 `img onerror` 点火器、`id` 负数、slash 形态），字段结构同为那 4 个。分离式的独立正则 json 的 `beginning`/`regex_scripts` 应与卡内 `first_mes`/`regex_scripts` 保持一致，避免分开导入时互相覆盖；沙盒的分离式正则 json 走 6 键格式（`regex-output.md` 第三节）。
 
-### 8.2 状态栏生成规则必须进世界书（默认蓝灯）
+### 8.2 AI 提供状态时，生成规则必须进世界书（默认蓝灯）
+
+本节针对从 AI 消息解析状态的面板。同层卡若由程序引擎维护游戏数值，世界书改为声明规则权威与 AI 叙述边界，不要求模型重复生成同一组权威数值；纯网页聊天 UI 无需额外状态协议。见 [同层卡制作](../creation/same-layer-card.md)。
 
 **渲染正则 ≠ 生成规则。** 内嵌的 `regex_scripts` 只负责把 `<status>` 数据块渲染成面板；它不会让模型去**生成**数据块。若只内嵌渲染正则，模型只在 `first_mes` 那一个数据块时显示状态栏，后续轮次不再输出 → 状态栏不更新。
 

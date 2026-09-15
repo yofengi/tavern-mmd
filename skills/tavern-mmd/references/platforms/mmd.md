@@ -95,7 +95,7 @@ ES6 在卡片里的典型用法（纯写法糖，逻辑能力与 ES5 等价）�
 
 ## 4. `<script>` 的能力边界（per-message 不可用，document-level 可用）
 
-`<script>` 已解禁可执行，但**做不了 per-message 自渲染/定位**，状态栏引擎仍只能用 `img onerror`。两个原因：
+`<script>` 已解禁可执行，但**做不了 per-message 自渲染/定位**，逐消息状态栏引擎仍用 `img onerror`。两个原因：
 
 1. **拿不到自身位置**：自渲染引擎依赖 `document.currentScript` 定位，在 MMD 执行模型里不可用；官方所有 script 示例都靠 `window.__fn` + `onclick` 调用，从不自定位。
 2. **同段 `<script>` 只加载一次**（官方原文）：状态栏每条消息都带同一份引擎 → 会被去重，不逐条执行 → 整块空白。
@@ -127,6 +127,18 @@ per-message 点火器若要唤醒主题，只能调用已存在的全局 API，�
 运行时主题可以把 localStorage 作为失败可降级的偏好候选，但在完成矩阵前必须标“待验证”：同页刷新、离开后返回、同角色不同聊天、不同角色卡、App 重启、账号切换、存储禁用 / 清空 / 配额异常。存储失败时，当前页面的 day/night/native 切换仍须工作；owner 租约和 DOM 恢复不得依赖 localStorage。schema、校验、迁移和矩阵见 `../beautify/theme-runtime.md`。
 
 ---
+
+### 4d. 同层卡：独立页面 + 原生桥接 + 可选游戏引擎
+
+同层卡是旧页上的另一种呈现形态。用文档级单例建立隔离 iframe，网页自行渲染交互；Host 从原生 MMD 读取消息并触发原生操作。MMD 后端与原生聊天仍在运行，顶部保留返回入口。它不需要把整页每条消息都改造成雷达状态栏，也不等于新页 SDK。
+
+- 制作流程：[same-layer-card.md](../creation/same-layer-card.md)；适配合同：[mmd-native-bridge.md](../runtime/mmd-native-bridge.md)；原创最小资产：[same-layer-kit](../../assets/same-layer-kit/README.md)。
+- 基座内置固定上游已实现的 61 项原生动作；默认演示 UI 为核心文字消息与模型组，其他界面由作者按 capability 和快照设计。动作接入与真实平台验证分别记录，不能据此声称已镜像全部 UI。参见 [原生动作模块](../runtime/mmd-action-modules.md)。
+- 游戏规则与存档可选。示例在 Host 先结算再保存，AI 只叙述。存档按作品/账号隔离标识/角色/会话分区；作用域未知时不猜固定键。Host localStorage 的真站持久性、Web Locks 与移动 WebView 仍待复验，不承诺跨设备同步。
+- `<script>` 在这里负责文档级启动；§4 的 onerror 限制针对逐消息定位。Frame 内可用普通 HTML/CSS/JS 与局部 ID，父文档挂载元素用唯一时间戳 ID，规则 JSON 的 `id` 仍为 `-1`。
+- 分片包装仍遵守旧页四键 JSON、≤130/1000/20000、slash 匹配式。链路与哈希使用专用构建/校验工具；不能把新页六键或 sdk.* 混进来。
+
+本 skill 的基座已提供本地自动化验证入口，真实 MMD、真实桥接版本及手机实机要分别记录。来源：贪心鬼 mmd-hud-iframe 的架构思路与用户提供的黑洞猫开发指南；基座为独立实现，详见制作文档的来源节。
 
 ## 5. 原生 KV `$field` 状态栏（固定字段的轻量首选）
 
@@ -286,11 +298,11 @@ replaceString: 你选择了 $1 啊，这真是个 (random(不错的|绝妙的|�
 
 ## 9. 写作策略
 
-1. **状态栏/交互模块**：动态走雷达法（见 ../beautify/statusbar-radar.md，引擎载体 img onerror），固定字段走原生 `$field` / KV V4.0。引擎代码推荐 ES6。
+1. **逐消息状态栏/交互模块**：动态走雷达法（见 ../beautify/statusbar-radar.md，引擎载体 img onerror），固定字段走原生 `$field` / KV V4.0。引擎代码推荐 ES6。
 2. **交互（点击/折叠/切图）**：走 §3 两条合法路径（`window.__fn` 或轻主板 eval）。
 3. **全局美化**：先在 ../beautify/global-css.md 选择静态换肤或运行时主题包；需要 day/night/native、玩家微调或路由重入时再读 ../beautify/theme-runtime.md。全局运行时是文档级单例，不属于 per-message 渲染。
 4. **正则交付**：json 导入（4 字段）或手填、130 条限额，见 ../output/regex-output.md。
-5. **任何交互模块动手前先过 §10**：结构红线（img 位置、stopPropagation、时间戳 ID、换行空白条）与四种核心架构模式（onerror 点火器、轻主板+胖遥控器、纯CSS radio 切换、appendChild 置顶）都在那一节。
+5. **逐消息交互模块动手前先过 §10**：结构红线（img 位置、stopPropagation、时间戳 ID、换行空白条）与四种核心架构模式（onerror 点火器、轻主板+胖遥控器、纯CSS radio 切换、appendChild 置顶）都在那一节。
 
 ---
 
@@ -413,6 +425,8 @@ z-index: 9999;                     /* appendChild 已保证顺序，z-index 作�
 
 ### 10.6 时间戳唯一ID
 
+这里说的是共享父文档中的 HTML 元素 ID。正则 JSON 的规则 `id` 固定 `-1`；独立 iframe 内的局部 ID 不与父文档或别的 iframe 冲突。
+
 **根本原因**：平台把所有聊天记录渲染在同一页面文档，重复 ID 导致 `getElementById` 失灵（这是"第二次使用就失效"的根本原因）。
 
 生成方式：`Date.now()` 取当前毫秒时间戳。命名格式 `元素类型_功能描述_时间戳`，例如 `BUTTON_SAVE_1729584719271`、`INPUT_NAME_1729584719271`、`FUNC_TOGGLE_1729584719271`。
@@ -442,6 +456,8 @@ z-index: 9999;                     /* appendChild 已保证顺序，z-index 作�
 ## 11. 正则触发标记交叉污染（2026-06-17 实机踩出，validate 查不出）
 
 **症状**：多正则项目里，某个组件（如悬浮球）静默不显示，但每条正则单独看都合法、validate/JSON 校验全过。
+
+同层卡构建器有意采用「本条生成下一条触发标记」的单向链，这是经过校验的例外；只允许明确声明的下一跳。载荷源码经 Base64 包装，不含其他规则的裸标记。不可把此例外用于随意交叉匹配。
 
 **根因**：MMD 按顺序跑所有正则，每条正则的 findRegex 会扫**整条消息的当前 HTML——包括前面正则已经替换出来的内容**。如果 A 正则的触发标记（如状态栏的 `<ztl>`）以**字面形式**出现在 B 正则（如悬浮球）的 replaceString 里（常见于 onerror 引擎内"给模型的指令文本"，如 `fillTA('...输出 <ztl> 锚点...')`），那么 A 正则会把 B 引擎源码字符串里的 `<ztl>` 也替换成 A 的 HTML（`<img src="...">`）。这段 HTML 的双引号/标签**破坏 B 的 onerror 属性 JS 语法 → SyntaxError → B 引擎整段不执行 → 不显示**。
 

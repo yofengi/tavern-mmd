@@ -1,0 +1,16 @@
+[
+  {
+    "name": "vditor",
+    "version": "3.11.1",
+    "source": "https://registry.npmjs.org/vditor/-/vditor-3.11.1.tgz",
+    "archiveSha256": "9338846bfacb8f9f12d7276301b34009840d15a6ce426e493ec167b3d2704600",
+    "license": "MIT"
+  },
+  {
+    "name": "opencc-js",
+    "version": "1.0.5",
+    "source": "https://registry.npmjs.org/opencc-js/-/opencc-js-1.0.5.tgz",
+    "archiveSha256": "40fc09c707fac99d6df9112850872ee38281220f480809962086e101c697f552",
+    "license": "MIT"
+  }
+]

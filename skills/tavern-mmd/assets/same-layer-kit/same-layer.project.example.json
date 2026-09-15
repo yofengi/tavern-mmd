@@ -1,0 +1,17 @@
+{
+  "platform": "mmd",
+  "chatVersion": 0,
+  "source": ".",
+  "appId": "fog-harbor",
+  "buildId": "fog-harbor-001",
+  "title": "雾港寻物",
+  "engine": true,
+  "models": true,
+  "preview": {
+    "messages": [
+      { "role": "assistant", "text": "雾灯亮起，渡船刚刚靠岸。守灯人将地图推到你面前。\n\n“今晚想先去码头看看，还是留下来听一段旧事？”" },
+      { "role": "user", "text": "先告诉我，这座港口藏着什么？" },
+      { "role": "assistant", "text": "“潮水退下时，旧码头会露出一条小路。”\n\n他指向地图边缘的铜色记号，轻声补充：“带好灯。也记得给自己留一点返程的力气。”" }
+    ]
+  }
+}

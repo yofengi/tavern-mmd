@@ -1,6 +1,27 @@
 # tavern-mmd 脚本
 
-纯 Python 标准库脚本（无 pip 依赖），任何能跑 `python` 的 agent 通用。
+主要构建工具使用 Python 标准库（无 pip 依赖）。同层卡另有 Node 引擎/语法测试与可选 Playwright 浏览器验证，依赖见下节。
+
+## 同层卡构建与验证
+
+- **作品默认入口**：`review_same_layer.py --project 作品配置.json --out 新审核目录 --browser required`，固定源码后依次构建、通用校验、专项校验、旧 MMD 联动预览与浏览器检查，输出 `review-report.html/.md/.json`。使用现有 Node、Playwright 与本地浏览器；未执行的检查不会算通过。配置样例随 `assets/same-layer-kit/` 提供；详见 [统一预览与审核](../references/creation/same-layer-review.md)。
+- `same_layer_preview.py` 复用本脚本目录 `build-preview.py` 的旧 MMD 外壳，结合 `fixtures/mmd-legacy/` 的原创状态模拟器，嵌入原样发布载荷。两页共享本地模拟状态，隔离 Frame 和来源校验保留。
+- `review_same_layer_browser.mjs` 检查本次作品的联动与窄屏，并调用 `review_same_layer_native.mjs` 对照旧预览清单检查原生入口与面板操作，`test_review_same_layer.py` 检查入口的失败路径及版本一致性。原有基座单元/浏览器回归继续维护。
+
+
+- `build_same_layer.py --source 项目源码 --out 新候选目录 --build-id 发布标识 --preview`：输出旧页四键正则包、独立 Frame、发布清单、可选 Mock 预览；`--no-engine` 关闭游戏，`--no-models` 关闭模型模块。新候选不覆盖已有文件。
+- `validate.py 候选目录/same-layer-mmd.json --platform mmd`：先做平台结构检查。
+- `verify_same_layer.py 候选目录 [--node Node路径]`：校验文件哈希、单向触发链、Base64 重组、UTF-16 长度、版本一致性和原生模式，使用 Node `--check` 检查 Host/Frame 语法。只适用于本构建器格式，不执行卡片代码。
+- `python -m unittest test_build_same_layer -v`（在本目录运行）：打包回读、替换符/Unicode、预算、Mock 隔离、拒绝覆盖和损坏检出。
+- `audit_native_capabilities.py --upstream 已下载仓库 --out 输出目录`：只读盘点固定上游动作定义和处理器，生成 Markdown/JSON 能力清单；不执行第三方代码。
+- `node --test test_same_layer_models.mjs`：外部模型桥接投影、选择核对、目标开关、取消和 Mock。
+- `node --test test_same_layer_models_browser.mjs`：独立模型 UI 和原生 DOM 夹具的完整流程，使用下述相同 Playwright 环境配置。
+- `node --test test_same_layer.mjs`：确定规则、重复动作、保存失败、隔离、迁移、并发与迟到回复。
+- `node --test test_same_layer_browser.mjs`：独立 headless 浏览器验证；环境变量 `PLAYWRIGHT_MODULE` 指向 Playwright 入口、`BROWSER_CHANNEL` 默认 msedge、`PYTHON` 可指定解释器、`MMD_SL_EVIDENCE_DIR` 指定截图目录。未配置 Playwright 明确 SKIP，不算通过。
+
+通过 HTTP localhost 查看 `preview.html`（例如 `python -m http.server 8765 --directory 候选目录`）；不以 file:// 检验 Web Crypto、Web Locks 或存储来源。测试不调用真实 MMD，真站/物理手机证据须另记。
+
+制作入口见 `references/creation/same-layer-card.md` 与 `assets/same-layer-kit/README.md`。普通 `build-preview.py` 的逐气泡三面板不直接承载同层卡；统一入口复用其中旧 MMD 全景外壳。
 
 ## worldbook_tool.py — 世界书源文件工具
 
@@ -144,3 +165,11 @@ node --test test_mmdsandbox_sim.mjs
 ```
 
 当前沙盒模拟器回归为 **49 项**；契约版本以 `fixtures/mmdsandbox/contract.json` 为准，不在代码外另抄行为真值。
+
+### 全部已实现原生动作
+
+`test_same_layer_actions.mjs` 检查外部桥接 52 项扩展的参数/结果与确认阶段；`test_same_layer_actions_browser.mjs` 构建临时测试 Frame，通过真实打包链逐项执行新增动作，另测过期目标、并发与取消。测试需 `PLAYWRIGHT_MODULE` 和本地浏览器。普通 Mock 预览并未新增这些面板 UI。
+
+### 同层对话页模块
+
+旧的独立诊断工具 `preview_same_layer_dialogue.py --out <新目录> [--source <作品源码>]` 生成原创 DOM 夹具的完整交互预览 `dialogue-preview.html`，仅供本地模拟，不能导入 MMD。普通构建器的 `--preview` 保持聊天/模型/游戏 Mock。新增 UI 浏览器回归为 `test_same_layer_dialogue_browser.mjs`；制作说明见 [对话页模块](../references/creation/same-layer-dialogue.md)。

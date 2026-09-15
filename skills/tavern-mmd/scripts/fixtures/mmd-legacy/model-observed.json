@@ -1,0 +1,25 @@
+{
+  "observedAt": "2026-09-16",
+  "source": "User-authorized unstyled old-MMD live page; model settings opened through the shortcut",
+  "scope": "One GLM-5.3-flash configuration; sample values are not a current model catalog or price table",
+  "title": "输出Token上限",
+  "hint": "回复不全时可提高",
+  "choices": ["5000", "10000"],
+  "selected": "5000",
+  "switchTitle": "流式输出",
+  "switchDescription": "内容过长时开启，避免超时",
+  "energyUnit": "/次",
+  "styles": {
+    ".model-setting-scope": {"height":"550px","padding":"0px 16px 16px","backgroundColor":"rgb(23, 24, 26)","display":"flex"},
+    ".mp-card": {"padding":"10px 11px 7px","marginBottom":"8px","borderRadius":"8px","backgroundColor":"rgb(13, 14, 15)"},
+    ".mp-card-head": {"display":"flex","justifyContent":"space-between","marginBottom":"8px"},
+    ".mp-card-title": {"fontSize":"13px","fontWeight":"500"},
+    ".mp-card-hint": {"fontSize":"11px","color":"rgb(197, 197, 197)"},
+    ".mp-token-btn": {"height":"30px","padding":"0px","fontSize":"13px","borderRadius":"5px"},
+    ".mp-sw-left": {"display":"flex","flexDirection":"column","gap":"3px"},
+    ".u-switch": {"width":"42px","height":"22px","borderRadius":"100px","justifyContent":"flex-end"},
+    ".u-switch__node": {"width":"20px","height":"20px","backgroundColor":"rgb(255, 255, 255)"},
+    ".bottom": {"padding":"12px 0px 0px"},
+    ".bottom .btn": {"fontSize":"15px","fontWeight":"500","height":"42px","lineHeight":"42px","borderRadius":"21px"}
+  }
+}

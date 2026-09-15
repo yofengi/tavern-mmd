@@ -135,6 +135,19 @@ python -m json.tool output/正则文件名.json > /dev/null && echo OK
 - `../../assets/radar-examples/完整美化-日夜主题与雷达.json` 是 **legacy 日夜集成包**，只作兼容研究，不再推荐作为新全局主题基底；需要 day/night/native 或生命周期管理时，优先使用 `../../assets/global-beautify-examples/mmd-theme-runtime/` 的新 runtime
 - 校验命令同第一节
 
+### 2.2b 同层卡的打包与交付
+
+同层卡先写可读的 HTML/JS，再调用 `scripts/build_same_layer.py` 生成同样的四键 JSON；不得往导入顶层塞 Host 配置、manifest 或自定义状态。配置与 Frame 随源码包装，发布清单独立成文件。操作指南见 [same-layer-card.md](../creation/same-layer-card.md)。
+
+- 使用 `--source` 指向项目内复制编辑后的资产；`appId` 跨版本稳定，`buildId` 每次发布明确变更。
+- 包装将 UTF-8 源码转为 Base64，分片写入规则，校验序号、每片 SHA-256 与完整载荷 SHA-256 后启动。防止 `$&`、`$$`、HTML 结束标签与规则标记进入源代码替换路径。
+- 每条规则 `id=-1`、slash `findRegex`；父文档元素 ID 才用时间戳。按 UTF-16 计长，工程安全线 18000，平台 replaceString 上限仍是 20000。
+- 入口只放第一片标记；有意生成的下一片标记是正则交叉污染禁令的受控例外，必须验证顺序、数量、哈希和无残留。更换包装格式须同时更新专用验证器。
+- 先跑通用 `validate.py --platform mmd`，再跑 `verify_same_layer.py 候选目录`；后者检查发布文件、载荷、链路和 Host/Frame 脚本语法，不替代真站验收。
+- `--preview` 额外生成本地 Mock 预览，导入 JSON 仍是 native 模式。普通逐气泡三面板预览不覆盖这条路线；使用专用浏览器测试与独立页面预览。
+- Frame 文档不经过消息 markdown 排版，可保留源码换行；外层 Host 仍显式设 `white-space:normal`。JSON 正常序列化，避免把脚本结束标签的转义规则误套到整个独立页面。
+- 整张卡的最终包装仍用 v2 PNG 流程；构建器输出只是正则运行包，不是完整角色卡。
+
 ### 2.3 JSON 字符串转义（最易踩的坑，必读）
 
 `replaceString` 里放大段 HTML/CSS/JS 时，**整个值必须是合法的 JSON 字符串字面量**，否则 MMD 导入会报"json 数据异常"。两条铁律：

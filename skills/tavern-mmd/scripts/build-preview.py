@@ -1316,8 +1316,20 @@ uni-view,uni-scroll-view,uni-image,uni-text{display:block}
 .model-setting-scope .mp-switch-row{display:flex;align-items:center;justify-content:space-between;padding:0.6875rem}
 .model-setting-scope .mp-sw-title{font-size:0.8125rem;font-weight:500;color:var(--primary-font-color,#FFFFFF)}
 .model-setting-scope .mp-sw-desc{font-size:0.6875rem;color:var(--model-setting-remark-color,#C5C5C5)}
-.model-setting-scope .bottom .btn{color:#fff;font-size:1rem;width:100%%;height:2.65625rem;
-  line-height:2.65625rem;text-align:center;background:var(--primary-color,#FF6D97);border-radius:1.5625rem}
+.model-setting-scope .mp-card-hint{font-size:0.6875rem;color:var(--model-setting-remark-color,#C5C5C5)}
+.model-setting-scope .mp-sw-left{display:flex;flex-direction:column;gap:0.1875rem}
+.model-setting-scope .mp-info-bar .mp-energy-pill .mp-el{transform:translateY(-1px)}
+.model-setting-scope .bottom{display:flex;justify-content:space-between;flex-shrink:0;padding:0.75rem 0 0}
+.model-setting-scope .bottom .btn{color:#fff;font-size:0.9375rem;font-weight:500;width:100%%;height:2.625rem;
+  line-height:2.625rem;text-align:center;background:var(--primary-color,#FF6D97);border-radius:1.3125rem}
+/* Native switch dimensions measured on the old-page panel, independent of the same-layer simulator. */
+.model-setting-scope .u-switch{display:flex;align-items:center;justify-content:flex-end;position:relative;box-sizing:border-box;flex-shrink:0;width:42px;height:22px;padding:0;border:1px solid rgba(0,0,0,.12);border-radius:100px;background:#fff;cursor:pointer}
+.model-setting-scope .u-switch[aria-checked=true]{background:var(--primary-color,#FF6D97)}
+.model-setting-scope .u-switch__bg{position:absolute;width:30px;height:20px;background:#fff;transform:scale(1);border-radius:100px}
+.model-setting-scope .u-switch[aria-checked=true] .u-switch__bg{transform:scale(0)}
+.model-setting-scope .u-switch__node{display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0;width:20px;height:20px;background:#fff;border-radius:100px;box-shadow:0 1px 3px #0003;transform:translateX(-20px);transition:transform .15s}
+.model-setting-scope .u-switch__node--on{transform:translateX(0)}
+.model-setting-scope .u-switch:focus-visible,.model-setting-scope .mp-token-btn:focus-visible{outline:2px solid var(--primary-color,#FF6D97);outline-offset:3px}
 
 /* 对话设置：scope 透明，底色靠 content 内联；无圆角 */
 .conv-style-modal{display:flex;flex-direction:column;background-color:transparent;width:100%%;
@@ -2030,7 +2042,7 @@ def _mmd_panorama_css():
 #   3. 用户人设那套用 `--lo*` 变量族，实测 18 个全部「引用但从未定义」，恒走 fallback。
 #      预览**故意不定义**它们 —— 好让作者在预览阶段就发现"改 --lo* 没反应"。
 MMD_POPUP_SIM = (
-    # ── 模型设置：slide-up 半屏，scope 自带底色 ──
+    # ── 模型设置：2026-09-16 用户授权旧页实机核对；GLM 参数为采样值 ──
     '<uni-view class="u-popup pano-sheet" data-sheet="model" data-open="off">'
     '<uni-view class="u-transition pano-sheet-mask" data-pano-sheet-close="model"></uni-view>'
     '<uni-view class="u-transition" style="position:fixed;left:0;bottom:0;width:100%">'
@@ -2039,21 +2051,22 @@ MMD_POPUP_SIM = (
     '<uni-view class="model-setting-scope theme-dark">'
     '<uni-view class="mp-top"><uni-view class="mp-title">模型设置</uni-view>'
     '<uni-view class="mp-close" data-pano-sheet-close="model">&#215;</uni-view></uni-view>'
-    '<uni-view class="mp-info-bar"><uni-view class="mp-model-name">gemini-3.1-pro</uni-view>'
-    '<uni-view class="mp-energy-pill"><uni-text class="mp-ev">45</uni-text>'
-    '<uni-text class="mp-el">电量</uni-text></uni-view></uni-view>'
+    '<uni-view class="mp-info-bar"><uni-view class="mp-model-name">GLM-5.3-flash</uni-view>'
+    '<uni-view class="mp-energy-pill"><uni-text class="mp-ev">20</uni-text>'
+    '<uni-text class="mp-el">/次</uni-text></uni-view></uni-view>'
     '<uni-scroll-view class="mp-setting-body">'
     '<uni-view class="mp-card"><uni-view class="mp-card-head">'
-    '<uni-view class="mp-card-title">上下文长度</uni-view></uni-view>'
+    '<uni-text class="mp-card-title"><span>输出Token上限</span></uni-text><uni-text class="mp-card-hint"><span>回复不全时可提高</span></uni-text></uni-view>'
     '<uni-view class="mp-tokens">'
-    '<uni-view class="mp-token-btn">4K</uni-view>'
-    '<uni-view class="mp-token-btn selected">8K</uni-view>'
-    '<uni-view class="mp-token-btn">16K</uni-view>'
-    '<uni-view class="mp-token-btn">32K</uni-view>'
+    '<uni-view class="mp-token-btn selected">5000</uni-view>'
+    '<uni-view class="mp-token-btn">10000</uni-view>'
     '</uni-view></uni-view>'
     '<uni-view class="mp-switch-row"><uni-view class="mp-sw-left">'
-    '<uni-view class="mp-sw-title">流式输出</uni-view>'
-    '<uni-view class="mp-sw-desc">逐字返回，体验更流畅</uni-view></uni-view></uni-view>'
+    '<uni-text class="mp-sw-title"><span>流式输出</span></uni-text>'
+    '<uni-text class="mp-sw-desc"><span>内容过长时开启，避免超时</span></uni-text></uni-view>'
+    '<uni-view class="u-switch cursor-pointer" role="switch" aria-label="流式输出" aria-checked="true" tabindex="0">'
+    '<uni-view class="u-switch__bg"></uni-view>'
+    '<uni-view class="u-switch__node u-switch__node--on"></uni-view></uni-view></uni-view>'
     '</uni-scroll-view>'
     '<uni-view class="bottom"><uni-view class="btn">确定</uni-view></uni-view>'
     '</uni-view><uni-view class="u-safe-bottom u-safe-area-inset-bottom"></uni-view>'
