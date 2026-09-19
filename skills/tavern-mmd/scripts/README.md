@@ -2,7 +2,9 @@
 
 主要构建工具使用 Python 标准库（无 pip 依赖）。同层卡另有 Node 引擎/语法测试与可选 Playwright 浏览器验证，依赖见下节。
 
-## 同层卡构建与验证
+## 旧版同层卡构建与验证
+
+本节 `build_same_layer.py` / `verify_same_layer.py` / `review_same_layer.py` 与 same-layer 基座测试均为 `/mmd` 旧页专用。沙盒同层卡改走 [新页制作指南](../references/creation/sandbox-same-layer-card.md) 的项目网页构建、`validate.py --platform mmdsandbox` 和 `build-preview.py --platform mmdsandbox --mode panorama`（chat/thin-preview 两套），另补作品测试；当前无沙盒同层专用构建器。
 
 - **作品默认入口**：`review_same_layer.py --project 作品配置.json --out 新审核目录 --browser required`，固定源码后依次构建、通用校验、专项校验、旧 MMD 联动预览与浏览器检查，输出 `review-report.html/.md/.json`。使用现有 Node、Playwright 与本地浏览器；未执行的检查不会算通过。配置样例随 `assets/same-layer-kit/` 提供；详见 [统一预览与审核](../references/creation/same-layer-review.md)。
 - `same_layer_preview.py` 复用本脚本目录 `build-preview.py` 的旧 MMD 外壳，结合 `fixtures/mmd-legacy/` 的原创状态模拟器，嵌入原样发布载荷。两页共享本地模拟状态，隔离 Frame 和来源校验保留。
@@ -134,6 +136,12 @@ python build-preview.py <文件> --platform mmd|mmdsandbox|st [--mode panels|pan
 - `mmdsandbox`：复刻 2026-08-27 只读实测的新聊天页外壳与稳定 DOM 契约：dark root flex 列、45px desktop header、statusbar/messages/left/right、message-frame/message/message-body/message-extra/message-actions、静态 composer/toolbar/input/send、author-stage，以及 **29 个 `--chat-*` 设计令牌**（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1；官方手册正文只列前 10）。另注入 `--rpx=calc(100vw / 750)`；`--chat-viewport-height` 不属于那 29 个令牌，由模拟宿主写在 root 内联 style，并随 iframe resize 与键盘 inset 更新。未命中规则里的 `<style>/<script>` 仍按平台装卡即抽出执行，但 script 审计角标只留在三面板诊断，不挤进实际全景 iframe。仿真控制、证据说明和气泡边界辅助线默认关闭/折叠。
 
 > **沙盒预览带能力精度诊断**：已装零依赖本地 SDK 模拟器，提供 `chat` / `thin-preview` profile、30 能力、12 事件、message scope、stage/theme/switch 与已确证净化/预算子集。每项标 `exact` / `conservative` / `probe-needed`；宿主握手、真实 AI 流式、完整 Markdown/净化、跨设备 save、CSP、触控/软键盘仍由真实站承担。
+
+2026-09-19 升级：沙盒同层网页可在 `chat` 全景中检查 `content/full/closed` 舞台、关闭重开保留节点、会话切换关闭，以及 `BUSY` 时保留草稿；外层工具栏提供模拟忙态/解除忙态。流式内容按“当前已揭示的累计文本”模拟。旧页同层卡仍使用前述 `review_same_layer.py`，两套入口不互换。
+
+静态宿主皮肤使用另一条 CSS 通道：`sandbox_host_css.py` 按 `fixtures/mmdsandbox/host-contract.json` 的 21 个开放根抽取保守子集，`sandbox_host_preview.py` 把接受的样式与宿主夹具放到 iframe 外。普通 CSS 与作者脚本留在 iframe 内；静态 `<style>` 的 `media` 条件保留。总结页提供正文编辑、锚点编辑、选中/禁用状态及树外 `summary-confirm`；缺少结构证据的根只展示注明限制的占位。`thin-preview` 不提供宿主弹窗。
+
+预览沿用本地 `srcdoc` 与工具控制，验证的是文档归属和布局，不等价于真实跨源安全环境。动态插入的样式、SBK 运行时变量向宿主传递和完整过滤器仍需平台复测。写作边界见 [宿主皮肤指南](../references/beautify/sandbox-host-styles.md)，可选配方见 [总结页皮肤](../assets/sandbox-host-styles/README.md)。新增回归：`python -m unittest test_sandbox_host_css test_sandbox_host_preview`。
 
 输出是自包含 HTML 文件。默认路径规则：输入文件直属项目 `output/` 时输出到 sibling `工作/`；其他位置输出到输入文件同目录。结构、findRegex、最终 inline onclick 和悬空标记的致命审计全部在写文件前完成，失败不遗留 preview/panorama 文件。不能调 Preview 工具的 agent：提示用户用浏览器打开。
 

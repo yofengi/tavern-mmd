@@ -2,22 +2,22 @@
 
 > 本文档描述 MMD（魅魔岛/sexyai.top）的**新聊天页**。「沙盒模式」是本 skill 与用户侧的叫法，**官方口径只有「新页 / 新聊天页」**，开关是角色卡的 `chatVersion: 1`。官方全部资料里 grep「沙盒」零命中，所以跟平台客服/官方文档沟通时请说「新页」。
 >
-> **证据等级（本文四级标注，读者必须能一眼看出可信度）**：
+> **证据规则（2026-09-19 离线整理）**：先核对版本、日期和运行环境，再比较同一范围内的证据。旧源码/探针不自动覆盖后来新增的公开文档；本地预览通过不升级为真实平台结论。
 >
-> | 标注 | 含义 | 权重 |
+> | 标注 | 含义 | 适用范围 |
 > |---|---|---|
-> | `【实机实测 2026-08-26】` | 真机浏览器注入探针采集（卡 64257 创卡页预览 `c64257.sbx.aitchat.org`，瘦环境）。**与官方文档冲突时以此为准** | 最高 |
-> | `【源码确证】` | 逆向沙盒应用真实源码：`sandbox-app.js`(577KB) / `render.worker-*.js`(202KB) / `sandbox-app.css`(27KB) | 高 |
-> | `【官方文档】` | 官方 PDF《MMD新版对话框角色卡制作手册》34 页 + 官方 skill `generating-role-card`（`contract.json`、`validate.mjs`） | 中（**已发现多处与实况不符**，逐条标注） |
+> | `【实机实测 2026-08-26】` | 真机浏览器注入探针采集（卡 64257 创卡页预览 `c64257.sbx.aitchat.org`，瘦环境） | 只证明该日、该环境的结果；后续条目另按日期 |
+> | `【源码确证】` | 历史沙盒源码：`sandbox-app.js`(577KB) / `render.worker-*.js`(202KB) / `sandbox-app.css`(27KB) | 默认对应 2026-08 记录，不等于最新部署版本 |
+> | `【官方文档】` | 历史 34 页手册；另合入 2026-09-05 新版网页核对记录和本轮 37 页手册的宿主 CSS 通道 | 文档约定与执行验证分开；资料包是本地作者整理，下载日不等于发布版本 |
 > | `【待验证】` / `【原文未说明】` | 三方都没确证的空白，**不作推断补齐** | — |
 >
-> 优先级：**源码 > 实机 > 官方手册 > 官方 skill 校验脚本**。未标注的段落沿用原始官方文档级别。
+> 同版同环境发生冲突时优先用可复现的源码和实测解释；跨版本冲突保留双方来源并定向复验。未标注段落沿用原始文档层级，不能视为本轮新实测。机器记录见 [SDK 仿真契约](../../scripts/fixtures/mmdsandbox/contract.json) 与 [宿主样式契约](../../scripts/fixtures/mmdsandbox/host-contract.json)。
 >
-> 🚨 **官方资料已被证伪的条目清单**（细节见对应章节）：`ready` 会补发且可做首屏（§2.6）· `stage.el()` 关闭时返回 `null`（§4.6）· 平台 chrome 占 8000–8999（§6.3）· `beginning` 上限 10240（§8）· 4 空格缩进变代码块（§6.5）· 外链脚本需域名白名单（§13）· 只有 `onclick` 可用（§5.2）。
+> **历史文档与当时实现的冲突清单**（细节见对应章节）：`ready` 补发/首屏（§2.6）· `stage.el()` 关闭空值（§4.6）· chrome 层级（§6.3）· `beginning` 上限（§8）· 缩进处理（§6.5）· 外链白名单/顺序（§13）· `on*` 属性（§5.2）。保留当时结论用于兼容回归，当前版本待复验，不把旧冲突写成新文档永久无效。
 >
 > 🔧 **本 skill 自己曾记错、现已实机订正**：「裸字面量 `findRegex` 不生效」——`【实机实测 2026-08-30】`（卡 64304 A/B）确认裸字面量**生效**，与官方「字面量是首选」一致；交付仍统一写 `/…/` 是约定而非硬红线（§7.1）。
 >
-> ✅ **官方资料被实测证实的条目**：手册「底栏和白名单弹窗另有 18 个变量」为真（逐个注入验证 18/18 生效，§6.1）。但手册那句「会话列表 / 模型 / 角色资料这类白名单弹窗」易被误读 —— 模型设置那五个渲染在**宿主页**、卡片 CSS 打不到，见 §6.3b。
+> **两条样式通路**：29 个 `--chat-*` 的历史探针属于沙盒文档（§6.1）；宿主的 21 个开放 `[data-host]` 根走静态 `<style>` 抽取过滤通道（§6.3b），并非 iframe CSS 直接穿透。详见 [宿主弹窗换肤](../beautify/sandbox-host-styles.md)。
 >
 > 🚨 **本 skill 自己曾记错的条目**：只记 14 个 `--chat-*`（实为 29，§6.1）· `--rpx` 桌面档写成 `@media(min-width:750px){--rpx:1px}`（实为 961px / `375px/750`，§6.1）。
 >
@@ -25,7 +25,7 @@
 >
 > **适用前提**：`chatVersion: 0` 或缺省 = 旧聊天页，**没有 `sdk.*`、没有 `[data-chat]` / `[data-slot]`、没有舞台**。本文所有能力只在新页存在。
 >
-> 🚨 **进门先记三条（新增，全是头号坑，详见 §2.6）**：① **作者脚本早于 DOM 执行** → 顶层任何 DOM 写入必失败，只能写在事件回调里。② **事件顺序是 `message:new → message:mount → message:done → ready`，`ready` 最后到** → 首屏只能挂 `message:mount`/`message:done`。③ **沙盒是跨源 iframe，不是 Shadow DOM** → 隔离已由 iframe 完成，`attachShadow` 是纯负债。
+> **兼容启动的三条约束**：① 历史探针中作者脚本早于 DOM，顶层不依赖页面节点。② 2026-08-26 观测为 `message:new → message:mount → message:done → ready` 且 ready 不补发，因此首屏用幂等 mount/done，不只依赖 ready。③ 沙盒是跨源 iframe；宿主 CSS 转发不开放作者 DOM 跨源访问。
 
 > **域名会变，按结构记，别按字面记。**
 > 2026-08 的实测记录写的是 `h5.aitchat.org`（宿主）/ `c<卡片ID>.sbx.aitchat.org`（沙盒 iframe）；
@@ -76,7 +76,7 @@
 
 ## 2. 唯一注入口与执行模型
 
-作者在创卡页跟界面有关的**只有一处**：正则替换规则的「**替换内容**」。HTML、`<style>`、`<script>` 全写在那里（手册开篇）。不写整页 HTML 文件，不上传 JS 文件 —— 所有代码都是某条规则的 `replaceString` 字符串。
+作者在创卡页跟界面有关的**注入口**是正则替换规则的「**替换内容**」。HTML、`<style>`、`<script>` 从那里装入（手册开篇）。**本地可以用完整网页工程开发同层卡**；交付时将生产代码经规则装入，挂在 SDK 舞台内，不用整份 HTML 文档替换平台页面。外链脚本的能力和限制另见 §13；制作流程见 [沙盒同层卡](../creation/sandbox-same-layer-card.md)。
 
 功能栏（聊天页顶部下面那一条）来自角色卡 `statusbar` 字段，**同样会过一遍你的规则**。因为 `statusbar` 只有 200 字，标准写法是 `statusbar` 里只放 `{{hud}}`，真界面写在规则里。
 
@@ -152,7 +152,7 @@ sdk.on('message:mount', function () {
 
 > 🚨 **真红线：Shadow DOM 隔离（影渲法 / ShadowCast）在沙盒是纯负债，零收益。**
 >
-> **iframe 本身就是隔离边界** —— 作者代码不可能污染宿主，宿主样式也漏不进来。再套一层 `attachShadow` 只会额外付出：样式要重复注入、`querySelector` 收窄机制与 shadow 边界互相打架、平台的 `--chat-*` 变量继承链变复杂。原文档 §11.2 曾以「`currentScript` 未说明」为由劝阻移植，理由不够硬；**现在的根本理由是隔离已经由平台完成，再隔离没有任何东西可隔**。
+> **iframe 是 DOM 与直接样式继承的隔离边界**。作者脚本不能因此读取宿主 DOM，iframe 的变量也不会自然继承到宿主；平台另行提供的静态宿主 CSS 抽取过滤见 §6.3b。再套 `attachShadow` 需要自行处理样式注入与查询边界，SBK 默认使用带前缀的 light DOM。
 
 **`localStorage`** `【实机实测】`：可用，且**按卡天然隔离**（每张卡一个独立源）→ 可以放单卡本地偏好（面板折叠状态、主题选择）。但**不能跨卡共享**，也**不跨设备** —— 跨设备进度仍然只能走 `sdk.save`（§4.5）。
 
@@ -165,7 +165,7 @@ sdk.on('message:mount', function () {
 
 → **脚本无法自定位**。per-message 定位一律走 `message:mount`；需要找自己的节点就靠**固定 id / class 约定**。
 
-> 例外：**外链 `<script src>` 走的是真 script 节点**，所以在外链脚本里 `document.currentScript` 是可用的。但沙盒 CSP 允许任意 https 外链却封死 `fetch`（§13），外链脚本的价值有限，且有「未被 await」的坑（§2.4）。
+> 例外：历史实现的外链 `<script src>` 是真实 script 节点，外链中可读取 `document.currentScript`。2026-08 的 CSP 与未 await 记录只描述当时环境；外链域名/顺序与后续文档的差异按 §2.4、§13 定向复验。
 
 作者代码里可以直接写 `document.querySelector`、`document.createElement`、`el.closest(...)`、`document.body` —— 这一点手册、官方 fixture 与实机探针三方一致。
 
@@ -175,8 +175,8 @@ sdk.on('message:mount', function () {
 
 **两处已被源码修正**：
 
-- 🚨 **不存在应用层域名白名单** `【源码确证】`：应用只校验 `^https://`，域名放行由 CSP `script-src … https:` 决定 → **任意 https 域名都能加载**。手册「需平台白名单」与实况不符（细节见 §13）。
-- 🚨 **外链脚本没有被 await** `【源码确证】`：`d_(c.authorScripts)` 在 `g_` 中无 `await` → 手册「前一个加载完才跑后面的代码」不可靠。实际后果是 **第一个外链之后的内联脚本注册的 `ready` 回调永久收不到**（`ready` 本身也没有补发，见 §2.6）。→ **要用外链就把关键订阅写在外链之前的内联脚本里**，或干脆不用外链。
+- **2026-08 历史源码未见应用层域名白名单**：当时只校验 `^https://`，CSP `script-src … https:` 放行 HTTPS。这与文档“需白名单”有差异，当前部署需复验，不能据旧代码保证任意域名可用（§13）。
+- **2026-08 历史调用未 await 外链加载**：`d_(c.authorScripts)` 在 `g_` 中无 `await`，与文档按顺序加载有差异；结合当时 ready 不补发，迟注册可能错过事件。默认自包含；使用外链时固定资源版本、自行管理依赖顺序与失败，关键初始化不要只等 ready。目标版本另验，不宣称平台永远不等待外链。
 
 ```html
 <script src="https://cdn.example.com/tiny-engine.min.js"></script>
@@ -225,7 +225,7 @@ function loadSave(key) {
 
 ### 2.6 🚨🚨 执行时机、事件顺序与载荷形状（本节全部为新增实测事实，是沙盒的头号坑）
 
-> 官方手册完全没写执行时机，并且把 `ready` 描述成「页面就绪、可做首屏、晚订阅会补发」—— **三点全错**。本节结论全部来自 `【实机实测 2026-08-26】` + `【源码确证】`。
+> 本节保存 `【实机实测 2026-08-26】` 与当时源码的启动记录，与手册的 ready/补发表述有差异。当前版本尚未复验；兼容实现不以 ready 作为唯一首屏入口，也不删除历史记录来假装从未发生过差异。
 
 #### 2.6.1 作者脚本在 DOM 渲染之前就执行完毕
 
@@ -255,7 +255,7 @@ sdk.on('message:done', renderHud);
 </script>
 ```
 
-#### 2.6.2 冷启动事件顺序：`ready` 是最后到的
+#### 2.6.2 2026-08-26 冷启动观察：ready 最后到
 
 `【实机实测】`同一探针按到达顺序累计（探针 `ORDER` 行逐字）：
 
@@ -265,11 +265,11 @@ message:new  →  message:mount  →  message:done  →  ready
 
 **`ready` 在首条消息 mount 且 done 之后才到**，与「ready 表示页面就绪、可以做首屏」的直觉完全相反。
 
-并且 `【源码确证】`：**`ready` 没有 late replay（不补发）**；有补发的是 **`message:mount` 与 `message:done`**。官方手册说「`ready` 这类只发一次的事件会补发给后来的订阅者」，**是错的**。
+并且 `【2026-08 源码与探针】`：当时 **ready 没有 late replay**，mount/done 有补发。保留此行为作为本地回归；后续文档若承诺 ready 补发，应记录目标版本再复验，不能自动否定其中一方。
 
-> 🚨 **真红线：首屏渲染只能挂 `message:mount` / `message:done`，挂 `ready` 会晚一整轮。**
+> **兼容做法：首屏采用幂等 `message:mount` / `message:done`，不只依赖 ready。**
 >
-> 双重原因：① 顺序上 `ready` 最后到；② 它不补发，配合 §2.4 的「外链脚本未被 await」，第一个外链之后注册的 `ready` 回调**永久收不到**。→ **`ready` 只当「时序信号」用**（比如打一行调试日志），不承载首屏。
+> 原因是历史环境中 ready 最后到且不补发，迟加载可能错过。ready 可作就绪信号或读档重试机会，但不能承担唯一初始化路径；幂等处理也适用于平台将来调整补发行为的情况。
 
 #### 2.6.3 事件载荷形状：恰好 4 键，正文字段名就是 `content`
 
@@ -304,7 +304,7 @@ message:new  →  message:mount  →  message:done  →  ready
 - `[data-chat="message-body"]` 里是平台占位「消息生成中」
 - 接口的 stream 可能**已经在吐字**，占位还在
 
-正确取值路径：**跟字**（打字机伴随动画）用 `message:stream` 的 `msg.content`（已攒起来的原文，累积量）；**收尾**（读完整回复、切剧情、推进选项）用 `message:done` 的 `msg.content`；`message:mount` **只**用来给这条气泡里的按钮绑点击 —— 在它里面读正文这种用法**不存在**。
+正确取值路径：**跟字**用 `message:stream` 的 `msg.content`，它是**与气泡显示同步的当前已揭示累计文字**，不是本次差量，也不是提前获得的完整原始回复（2026-09-05 文档核对记录）；自绘正文每次替换，不重复追加。**收尾**用 `message:done` 的 `msg.content`；`message:mount` 用于挂载和按钮绑定，不把其中的 DOM 占位当完整回复。
 
 「消息生成中」「消息生成超时…」「……」**都不是正文**。`content` 空时也**不要退回去读 DOM** —— 读到占位就清了等待态，后面的 `stream` / `done` 全丢掉，表现是「界面永远停在加载中」或「剧情跳过一轮」。
 
@@ -346,7 +346,7 @@ sdk.on('message:done', function (msg) {
 >
 > **面向作者的取消订阅 API 仍 `【原文未说明】`**。`【源码确证】`内部唯一的退订是 `Ac()`，它**清掉所有脚本的全部订阅**（跨脚本互相干扰），不是给作者用的。→ **脚本必须单例 + 幂等，自带「已初始化」哨兵，绝不重复订阅。**
 >
-> 🚨 **原文这里写过「`ready` 会补发给后来的订阅者，所以不需要 `once`」—— 这是官方手册的错误说法，已推翻。** `【源码确证】``ready` **没有补发**；有补发的是 `message:mount` 与 `message:done`。详见 §2.6.2。
+> ready 补发存在文档与 2026-08 历史观察的差异（§2.6.2）。无论目标版本是否补发，应用仍需自己的幂等初始化；不要据此虚构 `once` 或 `off`。
 >
 > `【实机实测】``sdk` 顶层键恰为 11 个：`cache, composer, debug, input, message, on, role, save, stage, user, version`。`sdk` **未冻结、非 Proxy**（`Object.isFrozen(sdk) === false`）→ 建议启动时把要用的方法快照到局部变量。
 
@@ -378,7 +378,7 @@ sdk.on('message:done', function (msg) {
 | `save.get` | `key: string` | `unknown` | sync | 🚨 **实测同步抛 `SdkError`（不是返回错误码）→ 必须 `try/catch`** |
 | `save.set` | `key: string`, `value: unknown` | `Promise<void>` | **async** | `NOT_SUPPORTED` |
 | `save.remove` | `key: string` | `Promise<void>` | **async** | `NOT_SUPPORTED` |
-| ↳ `save.remove` 真机 | 🚨 **坏死**：就绪态也稳定抛 `NETWORK`、重试无效（`【实机 2026-08-30】`）→ 用 `save.set(key,null)` 代替，见 §4.5 | | | |
+| ↳ `save.remove` 历史故障 | `【实机 2026-08-30】` 当时就绪态仍报 `NETWORK`；当前目标版本待复验，条件性规避见 §4.5 | | | |
 | `save.keys` | — | `string[]` | sync | 🚨 **实测同步抛 `SdkError` → 必须 `try/catch`** |
 | `stage.open` | `mode?: 'content' \| 'full'` | `void` | sync | 可用 |
 | `stage.close` | — | `void` | sync | 可用 |
@@ -471,20 +471,20 @@ sdk.on('message:mount', function () {
 
 | 项 | 值 |
 |---|---|
-| `SAVE_MAX_KEYS` | 官方写 **10 个**。⚠️ `【源码确证】`**该常量不存在于沙盒**：上限由宿主动态下发且被沙盒丢弃，沙盒侧**零条数校验** → 别把 10 写死进代码，但纪律不变：**把整套状态打成一包（一个对象）再存** |
+| `SAVE_MAX_KEYS` | 文档约定 **10 个**；2026-08 历史沙盒源码未见本地条数校验，不证明宿主/服务端无限额，也不否定后续限制。设计时把整套状态打成一包，不承诺超出文档配额；目标环境的实际限额与错误行为待验 |
 | 存档名长度 | ≤ **64 字符** |
 | 存档名字符 | **不能含冒号**（`hp:cur` 会被拒，用 `hp_cur`） |
 | 值 | 必须可 `JSON.stringify`（函数、`Map`、循环引用存不进去） |
-| 写入限频 | `save.set` 1 分钟 **20** 次。`【源码确证】``save.remove` **无限频**（但见下方红线：remove 本身是坏的） |
+| 写入限频 | 文档 `save.set` 1 分钟 **20** 次。历史沙盒未发现 remove 本地限频，不等于当前宿主/服务端无限频；删除错误另见下方历史记录 |
 
-> 🚨 **真红线：`save.remove` 在真机上是坏的，稳定报 `NETWORK`、重试无效。用 `save.set(key, null)` 规避。** `【实机实测 2026-08-30】`（卡 64304，save 就绪态 `serverId=8014`）
+> **历史故障：2026-08-30 的 save.remove 在就绪态报 NETWORK。** 当次卡 64304、`serverId=8014`；当前平台是否已修复尚未复验，不能写成永久坏死。
 >
-> 探针实测：`set(pbk)=ok`、**`remove(pbk)=NETWORK`、重试仍 `NETWORK`**、`set(pbk2,null)=ok`、事后 `keys=[pbk,pbk2]`。即 set 正常、**remove 通道坏死**、null-set 可用。
+> 当次探针：`set(pbk)=ok`、`remove(pbk)=NETWORK`、重试仍 `NETWORK`、`set(pbk2,null)=ok`、事后 `keys=[pbk,pbk2]`。这只证实该环境的删除故障与 null-set 可用。
 >
-> - **这个 `NETWORK` 不代表网络问题。** `【源码确证】`remove 的 `catch` 把 `persistRemove` 抛出的非 `SdkError` 一律映射成 `NETWORK` + 通用文案 `'存档删除失败'`，**真实原因被吞掉**。别对着 `NETWORK` 去查网络。
-> - **规避写法**：删存档用 `sdk.save.set(key, null)` 代替 `sdk.save.remove(key)`，读取时把 `null` 当作"不存在"。
-> - **代价**：`set(null)` 只是把值写成 `null`，**key 不释放**（实测事后 `keys` 里仍在）。而且因为 remove 坏死，占着的 key **删不掉**。虽然 `SAVE_MAX_KEYS` 在沙盒侧不校验（§4.5 首行），但仍按"整套状态打成一包（一个对象）再存"的纪律做，才不会被这个坑拖累。
-> - 交付若依赖"清档/重开"，一律用 `set(key,null)` 语义，不要指望 `remove` 成功。
+> - 历史源码会把非 `SdkError` 的删除异常映射为 `NETWORK`，故该码不足以定位根因；当前故障应收集日志后判断，不能反过来断言所有 NETWORK 都不是网络问题。
+> - 若目标环境复现相同故障，可用 `sdk.save.set(key, null)` 做**逻辑清档**，读取时将 null 视为无有效进度；明确这不等于真实删除。
+> - `set(null)` 不释放 key（当次 keys 已证实），也不能绕过文档配额。复用一个版本化对象、控制写入频率，避免累积空 key。
+> - 清档/重开界面必须反馈失败。发布前分别验实际 remove 与逻辑清档，不把本地模拟成功当成服务器已删除。
 
 `save.get` 是**同步**的，读的是进页时预载进来的那份内存副本。`set` / `remove` 必须 `.catch`（写法同上面 `message.send`），失败时页面上不会有任何提示。
 
@@ -517,7 +517,7 @@ sdk.on('message:mount', function () {
 > if (!el) return;                  // 仍然保留判空，属防御，但它不代表「舞台关着」
 > ```
 
-> 🚨 **长期面板必须挂舞台，不能挂气泡。** 气泡滚出屏幕就被销毁，挂在气泡里的画布/面板等于随时会没（症状：「画的东西滚一会儿就没了」）。同时舞台**在虚拟化列表之外，不随消息滚动**，别把它当消息容器用。
+> 🚨 **长期面板必须挂舞台，不能挂气泡。** 气泡滚出屏幕就被销毁，挂在气泡里的画布/面板等于随时会没（症状：「画的东西滚一会儿就没了」）。舞台**在平台虚拟化列表之外，不随原生消息滚动**。**允许作者在舞台里自行实现完整聊天列表/同层网页**，其滚动与消息投影由作者负责；不能期待舞台自动成为平台原生消息容器。见 [沙盒同层卡](../creation/sandbox-same-layer-card.md)。
 
 ```html
 <script>
@@ -559,14 +559,14 @@ ready  message:new  message:done  message:stream  message:mount  message:unmount
 input:change  conversation:switch  theme:change  back  stage:close  dispose
 ```
 
-🚨 **本表的「载荷」列已按 `【实机实测 2026-08-26】` 重写。** 官方手册对多个事件写「无载荷」，实测三个 message 事件都带**恰好 4 键**的同形载荷 `{content, id, role, serverId}`（§2.6.3）；而 `ready` 官方说「会补发」，实测**不补发且最后到**（§2.6.2）。
+本表的 message:new/mount/done 四键载荷来自 `【实机实测 2026-08-26】`；stream 的已揭示累计语义来自 2026-09-05 文档核对。ready 补发的历史冲突见 §2.6.2，未重新执行的项不标为当前平台实测。
 
 | 你想做的事 | 用这个 | 载荷 |
 |---|---|---|
-| ~~页面刚开好：第一次画界面~~ → **只当时序信号** | `ready` | `undefined`。🚨 **实测最后到（在首条 mount+done 之后）且不补发** → **不能用它做首屏**，见 §2.6.2 |
+| 页面就绪信号/重试机会 | `ready` | `undefined`；2026-08-26 实测最后到且不补发，当前版本待验；不要只靠它初始化，见 §2.6.2 |
 | **首屏渲染** + 给这条气泡里的按钮绑点击 | `message:mount` | **`{content, id, role, serverId}`**（滚回来会再发、**会补发**；`content` 可能是空串或占位，别当正文用） |
 | AI 说完了，读完整回复、按结局切剧情 | `message:done` | **`{content, id, role, serverId}`**（**会补发**） |
-| 跟着一个字一个字往外蹦做动画 | `message:stream` | `msg.content`（**已攒原文，累积量**；触发极密，**回调里别查 DOM、别算布局**） |
+| 跟随逐字显示做动画 | `message:stream` | `msg.content` 为**与气泡同步的当前已揭示累计文字**，替换显示而非重复追加；不抢先读取完整原始回复；回调内避免查 DOM/算布局 |
 | 气泡滚走了，停掉定时器 / observer | `message:unmount` | 无 |
 | 用户换了一个会话，清掉上一场的计数 | `conversation:switch` | 无 |
 | 用户切了深浅色 | `theme:change` | 无 |
@@ -576,11 +576,11 @@ input:change  conversation:switch  theme:change  back  stage:close  dispose
 | 聊天页要关掉了，最后收尾 | `dispose` | 无 |
 | 新消息刚出现，正文还是空的 | `message:new`（**几乎用不到**） | **`{content, id, role, serverId}`**（与 mount/done 同形状） |
 
-**日常做卡，`message:mount` + `message:done` 两个就够** —— 原文这里写的是「`ready` + `message:mount` + `message:done`」，已按实测修正：`ready` 既不补发也最后到，**首屏不要依赖它**（§2.6.2）。需要「只跑一次」的初始化，就在 `message:mount` 回调里用幂等哨兵自己拦（因为没有 `once`）。
+普通面板用幂等 `message:mount`/`message:done` 初始化与更新；ready 可以辅助，但不能作为唯一首屏入口（历史原因见 §2.6.2）。逐字界面再订 stream；需要只运行一次的逻辑用自己的幂等哨兵，不虚构 once。
 
-### 4.10 错误码（官方 contract.json 收录 7 个，源码实为 9 个）与限额限频
+### 4.10 7 个公开错误码、历史内部记录与限额限频
 
-> 口径更新：官方 `contract.json` 的 `errors` 数组实为 **7 个**（含 `BUSY`），旧版本文写「官方记 6 个」是照早期手册正文，已订正。源码另有 `MODEL_UNAVAILABLE` / `UNKNOWN_CAPABILITY` 两个未进契约 → 实机 9 个。
+> 2026-09-05 官方网页核对记录与资料包本地作者契约列 **7 个公开错误码**（含 BUSY），本轮离线收录到 [仿真契约](../../scripts/fixtures/mmdsandbox/contract.json)。历史源码里的其他字符串另列，不据此推导当前平台错误码总数。
 
 | code | 常见原因 |
 |---|---|
@@ -588,15 +588,15 @@ input:change  conversation:switch  theme:change  back  stage:close  dispose
 | `RATE_LIMITED` | 写太勤或发太勤 |
 | `INVALID_ARGS` | 空消息、存档名违规、正在拼音输入时改草稿、编辑一条不存在的消息 |
 | `HOST_DENIED` | 存档还没准备好、发送通道没接上、切会话把这次作废了 |
-| `NETWORK` | 请求发出去了但没成。🚨 **注意 `save.remove` 稳定返回这个码但它是坏的、不是网络问题**——真实原因被 catch 吞掉（§4.5），用 `save.set(key,null)` 规避 |
+| `NETWORK` | 请求未完成；2026-08-30 的 remove 故障也被映射成此码（§4.5），当前环境需依据日志判断 |
 | `NOT_SUPPORTED` | 当前环境没有这个能力，**多半是创卡页瘦预览** |
-| `BUSY` | 🚨 **两种来源，别只认一种**。①`【官方文档】`**发送/生成未结束时再调 `message.send`，立刻返回 `BUSY`：本次不排队、也不占用那 3 次/分钟的发送限频**（官方 contract.json 已收录 `BUSY`，共 7 码）。处理方式是**保留草稿、等用户下一次操作，不自动重试**。②`【源码确证】`源码里另有字符串 **`UI_BUSY`**（「已有一个交互界面开着，能力「…」不发」）—— 舞台/交互界面开着时部分能力会被拒，这个互斥关系官方没提。两者都要在 `.catch` 里认得 |
-| `MODEL_UNAVAILABLE` | `【源码确证】`官方 6 码漏记：模型侧不可用 |
-| `UNKNOWN_CAPABILITY` | `【源码确证】`官方 6 码漏记：调了不存在的能力名（能力名拼错时可能撞上） |
+| `BUSY` | 发送或回复生成未结束时再次 send 立即拒绝，不排队、不消耗本次发送限频；保留草稿、等待用户下一次操作，不自动重试 |
+
+历史源码还记录过 `MODEL_UNAVAILABLE`、`UNKNOWN_CAPABILITY` 和交互互斥字符串 `UI_BUSY`。它们不在上述公开七码中，当前版本未重新探查；错误处理应能显示未知 code，不凭它们增加 SDK 方法，也不宣称当前实机必有“9 个”或其他总数。
 
 ⚠️ `【实机实测】`瘦预览下 `save.get` / `save.keys` 是**抛 `SdkError`**，不是「返回 `NOT_SUPPORTED`」——所以别只写 `.catch`，同步调用要 `try/catch`（§2.5.1）。
 
-**限额**：`CACHE_QUOTA_BYTES` = 1048576（超限行为 `【待验证】`）。`SAVE_MAX_KEYS` = 10 是官方口径，`【源码确证】`该常量**不存在于沙盒**、沙盒零条数校验（§4.5）→ 不写死，但仍按「打成一包」的纪律做。
+**限额**：文档 `CACHE_QUOTA_BYTES` = 1048576，超限行为待验；`SAVE_MAX_KEYS` = 10。历史沙盒未见条数校验不代表服务端无限额，按 §4.5 合并为版本化对象并处理失败，不承诺超额可用。
 
 **限频**（窗口一律 60 秒，**超限拿到 `RATE_LIMITED`，不是静默失败**）：`save.set` 20 次 · `message.send.gesture`（用户点出来的）3 次 · `message.send.auto.minute`（定时器等自动发的）3 次 · `message.edit` 10 次。
 
@@ -802,7 +802,7 @@ linearGradient radialGradient stop clipPath title
 1. **不需要 `!important`** 去覆盖这 29 个令牌，平写就行（换**页面背景图**是另一回事，那个是内联 `background-image` 属性，仍需 `!important`，见 §6.6）。
 2. 你要是自己写成 `[data-chat="root"][data-theme="dark"]{...}`（0,2,0），会压过平台默认 —— 这没问题，但**换主题时你的值不会跟着换**，除非两套都写。想跟随主题就用单属性写法。
 
-🚨 **哪些"弹窗"能改、哪些改不动 —— 见 §6.4**。简言之：iframe 内的（「+」面板、长按菜单、alert、snack、分享条、总结气泡）能改；模型设置/对话设置/总结剧情/用户人设/分享这 5 个渲染在**宿主页**，卡片 CSS 打不到。
+**弹窗先分文档，再选通路**：iframe 内的「+」面板、长按菜单、alert、snack、分享条、总结气泡直接使用沙盒 CSS；宿主开放的 21 个根使用静态 `<style>` 抽取过滤。不能靠 iframe 上的变量自然穿透宿主，也不能继续概括为“宿主全部改不了”。见 §6.3b 与 [宿主指南](../beautify/sandbox-host-styles.md)。
 
 **另有一个尺寸基准**：**`--rpx`** `【实机实测 2026-08-29，两档】`
 
@@ -825,16 +825,13 @@ linearGradient radialGradient stop clipPath title
 
 🚨 **唯一需要 `!important` 的地方：换页面背景。** `【实机实测】`root 上带 **内联 `background-image`**（实测 `background-image: url("https://r2.aitchat.org/…jpg")`，来自卡片配置的聊天背景图）→ 想换掉整页背景**必须** `background-image: none !important` 或用 `!important` 覆盖，否则那张图一直在。
 
-### 6.2 全局 CSS：是文档约定，运行时不拦
+### 6.2 沙盒文档 CSS 与宿主转发的范围
 
 > 🚨 **`*{}` / `html{}` / `body{}` / `:root{}` 应改写成 `[data-chat="root"]`。** 官方校验检测式 `/(^|[\s,};])(\*|html|body|:root)\s*\{/` → WARN（`:root{}` 也在名单里，脚本比官方文案更全）。
 
-**实况修正** `【源码确证】`：**CSS 选择器零过滤** —— `:root{` / `html{` / `body{` 在主包与 worker 中**均 0 命中**，运行时**没有任何拦截逻辑**。所以：
+2026-08 历史源码没有发现对上述全局选择器的专项过滤，这一观察只描述 **iframe 内的样式**，不足以宣称所有 CSS、所有版本“零过滤”。仍应作用域化，避免作者规则意外改到同文档中的顶栏、输入框和浮层。
 
-- 这条是**文档约定 + 官方校验 WARN**，**不是运行时硬限制**。写了不会被删，会照常生效。
-- **但仍然建议作用域化**，理由变了：不是「会被拦」，而是**沙盒 iframe 里除了你的内容还有平台自己的 chrome**（顶栏、输入框、长按菜单、alert）。写 `*{box-sizing:border-box}` 或 `body{font-size:18px}` 会连平台组件一起改，症状是「顶栏字变大了」「输入框内边距怪了」。
-- 跨源 iframe 意味着**污染不出沙盒**（宿主 `h5.aitchat.org` 绝对安全，见 §2.3），所以这条的风险等级比当前 MMD 低得多 —— **是礼貌与自保，不是硬红线**。
-- 官方校验仍会报 WARN → 交付前照样改掉，免得用户看见告警。
+**宿主转发有独立过滤**：最左必须是开放的精确 `[data-host="…"]` 根，文档要求平铺 CSS、丢弃原生嵌套与含 `url(` 的声明。`:has()` 过滤来自 2026-09-15 测试站观察；本地解析器还保守拒绝复杂伪类、转义与未知语法。解析器边界不是对真实平台语法的额外断言。普通 `[data-chat]`/作者 CSS 保留在沙盒文档，不能混入宿主。详见 [两条 CSS 通路](../beautify/sandbox-host-styles.md#3-两条-css-通路)。
 
 ### 6.3 z-index：手册的分段表不成立，作者安全带是 3500–7999
 
@@ -870,9 +867,9 @@ linearGradient radialGradient stop clipPath title
 
 越界不会被拦，**只会盖错东西**。
 
-### 6.3b 🚨 弹窗分两类：iframe 内的能改，宿主页的改不动（2026-08-29 实测）
+### 6.3b 弹窗分两类：沙盒直接样式与宿主受控转发
 
-沙盒卡片跑在 **`c<roleId>.sbx.<站点域>` 的跨源 iframe** 里，宿主是站点主域。这条边界决定了作者的 CSS 能碰到什么。（2026-09-06 实机：iframe `c316991.sbx.meimoai15.com`，宿主 `www.meimoai15.com`；2026-08 的记录里是 `*.aitchat.org`，见文首「域名」备注。）
+沙盒卡片跑在 **`c<roleId>.sbx.<站点域>` 的跨源 iframe**，宿主是站点主域。2026-08/09 的直接变量注入失败只证明不能跨文档自然继承；后续手册公开 **19 + summary + summary-confirm，共 21 根** 的静态 `<style>` 抽取过滤通道。完整根表、排除区和证据见 [宿主弹窗换肤](../beautify/sandbox-host-styles.md)，机器清单见 [host-contract.json](../../scripts/fixtures/mmdsandbox/host-contract.json)。这不新增 SDK，也不开放跨源 DOM 访问。
 
 **A. iframe 内浮层 —— 卡片 CSS 能打到，全局美化必须照顾它们**
 
@@ -891,9 +888,9 @@ linearGradient radialGradient stop clipPath title
 | 指令栏 | `[data-chat="instruction-bar"]` + `instruction-back`/`instruction-chip` | chip `--chat-shortcut-bg/-text`、返回钮 `--chat-modal-accent` | 无（与 `[data-chat="shortcut"]` 加 `.hidden` 互斥切换） |
 | 历史加载骨架 | `[data-probe="history-loading"]` | `--chat-text-muted` | 2（出现时把 `[data-chat=messages]` 整块 `visibility:hidden`） |
 
-**B. 宿主页弹窗 —— 卡片 CSS 打不到，别白写选择器**
+**B. 宿主页弹窗 —— 用开放 data-host 根，不用 iframe 变量直接穿透**
 
-实机复测 2026-09-06（卡 316991，414x896，宿主页 `evaluate` 直读；已由 5 个补到 **10 个**）：
+以下保留 2026-09-06 历史结构记录（卡 316991，414x896，宿主页直读；由 5 个补到 **10 个**）。内部 class/尺寸不是新的稳定契约，不据此宣称所有开放根均已测过：
 
 | 入口 | 真机 scope | 实测尺寸 | z-index |
 |---|---|---|---|
@@ -915,7 +912,7 @@ linearGradient radialGradient stop clipPath title
 
 **探针证据**：在卡片 iframe 内注入 `[data-chat=root]{--chat-modal-bg:#00ff00}` 后打开模型设置 —— 弹窗仍 `#17181a`、卡片面仍 `#2c2e32`，且 `--chat-modal-bg` 在其上解析为**未定义**。同一次注入下，iframe 内的「+」面板**立刻变绿**。
 
-> 官方手册把 `--chat-modal-bg` 描述为「更多面板壳、**宿主**列表弹窗底」。前半句实测成立，后半句容易被读成"能改模型设置那类弹窗"——**不成立**。手册用了"宿主"这个词但没区分"iframe 内重绘的"与"宿主页原生组件"，按上表办。
+> 上述探针没有测试后来公开的 `[data-host]` 抽取通道。不要由“iframe 上设 `--chat-modal-bg` 未生效”推导宿主不能换肤；宿主变量是否透传与定向样式是否开放也要分别验证。
 
 **🚨 消息编辑面（`.msg-edit-scope`）是宿主页的，不是 iframe 内的。**
 本仓库 2026-09-06 一度反过来判过：量到它 `0x0` 就推断"宿主那份是死模板、真正可见的编辑面在 iframe 内"，
@@ -929,7 +926,7 @@ linearGradient radialGradient stop clipPath title
 
 内部结构：`.edit-input-box > .edit-surface`（可编辑正文）+ `.option-box > 4 个 .option-item`
 （简转繁 / 繁转简 / 去除异常符号 / 去除异常文字）+ `.save-btn-box > .save-btn`「保存」。
-作者想改编辑面外观 —— **改不了**，别写选择器。
+作者改编辑面外观时使用 `[data-host="message-edit"]` 静态宿主样式；上面的内部 class 只按历史日期参考，原生编辑与保存行为仍由平台负责。
 
 **二层弹窗的关闭语义**：二层压在父面板之上，关掉二层只回到父面板、**不会**把父面板一起关掉
 （真机点「知道了」/「我知道了」就是回到对话设置 / 记忆面板）。做仿真时若把二层也走
@@ -951,9 +948,9 @@ linearGradient radialGradient stop clipPath title
 - **分享角色**：内容极简 —— 标题 + 整条链接 + **单个**`.gen-link-btn`「复制链接」。
   **没有**微信/QQ/九宫格那些，别照别的 App 想象补。另有框架自带 `.u-popup__content__close--top-right`。
 
-**全景预览的对应处理**：iframe 内那批做成可开关的完整仿真；宿主页这批按实机复刻内容与高度
-（让作者能判断状态栏/悬浮组件会不会被埋掉），但仍保留斜纹底 + 「平台侧 · 卡片改不动」黄标签，
-且复刻用的 `ph-*` 样式**一律不吃** `--chat-modal-*` —— 吃了就等于宣称能改。
+**总结面板的范围**：`data-host="summary"` 在 `.summary-sheet` 本体上，改本体直接写 `[data-host="summary"]`；根内 `.summary-ov-edit`/`.summary-ov-anchor` 来自资料包 2026-09-15/16 观察。`summary-confirm` 位于树外，单独以根定位，内部 class 尚无可依赖契约。配方见 [summary.css](../../assets/sandbox-host-styles/summary.css)，不要写错误的后代 `.summary-sheet` 或虚构确认层结构。
+
+**全景预览的对应处理**：chat profile 在 iframe 外提供 21 根索引与宿主夹具，静态抽取的 CSS 只注入外层；已观察结构可验外观，未知根/分支明确标占位。summary 根内编辑/锚点层与树外 summary-confirm 分开检查；thin-preview 不模拟宿主。过滤器是文档子集的保守近似，不代表真实权限、保存、动态转发与全分支验收。`ph-*` 内部夹具不升格为平台 class 契约。
 
 **探查方法备忘**（下次省时间）：宿主页弹窗可以用 `evaluate` 纯文本读出完整 DOM/类名/盒模型，
 不需要截图。iframe 内的控件是**跨源**的：`evaluate` 返回空对象且副作用不落地、Playwright 点击报
@@ -1083,7 +1080,7 @@ linearGradient radialGradient stop clipPath title
 
 多余字段 → WARN；缺任一字段 → ERROR。
 
-### 7.1 匹配式形态：源码说两种都行，实机上只有 `/…/` 生效
+### 7.1 匹配式形态：slash 与裸字面量均生效，交付统一 slash
 
 ```js
 function classifyPattern(raw) {
@@ -1270,7 +1267,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 
 ## 9. 交付形态与人设格式
 
-> ✅ **更正（`【用户实测】`，本节已按此重写）：沙盒模式可以走 chara_card_v2 整卡（PNG 或 JSON）。** 依据是**编辑页导入 v2 角色卡时按「新卡」处理**，因此那张「新版聊天页」单选仍然可改 —— 整卡路线能到达新页。世界书同理：创卡页原文写明「可导入PNG或json格式世界书」，所以世界书**可以**和正则一起并进同一份 v2 卡（`character_book` + `data.extensions.regex_scripts`），与当前 MMD 的做法一致。
+> ✅ **更正（`【用户实测记录】`）：沙盒可走 chara_card_v2 整卡路线，默认用 PNG 导入，JSON 作源码/备份。** 编辑页导入 v2 角色卡按「新卡」处理，「新版聊天页」单选仍可改。**整卡 JSON 直接导入的历史记录互相矛盾，待复验**，见 `../output/card-json.md` 文首，不把它与六键正则 JSON 混同。世界书可以进 v2 卡的 `character_book`；内嵌正则按输出规范另给可补导副本。
 >
 > 旧版本文档写的「官方禁 PNG 整卡、交付固定三件套、世界书必须单独交付」是**错的**，已删除。唯一仍然成立的限制是 §8.1 那份**独立正则 JSON** 的 6 键白名单 —— 那是那一份文件的格式约束，不是平台不支持整卡。
 
@@ -1394,8 +1391,8 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 | 点了发送，画布上出现「消息生成中」，stream 已经在吐字 | 在 `message:mount` 里读 `[data-chat="message-body"]` 当回复 | 跟字用 `message:stream` 的 `msg.content`，收尾用 `message:done`（§3） |
 | 按钮点了没反应 | 绑事件写到脚本顶层了；气泡滚出屏幕会被拆掉 | 绑定写进 `sdk.on('message:mount')`（§2.2） |
 | **顶层 `getElementById` / `querySelector` 全拿到 `null`，页面上什么都没画出来** | **作者脚本早于 DOM 执行** | **任何 DOM 写入都搬进事件回调（§2.6.1）** |
-| **首屏永远不出现，或迟到一整轮** | **首屏挂在 `ready` 上；`ready` 最后到且不补发** | **改挂 `message:mount` / `message:done`（§2.6.2）** |
-| **用了外链 `<script src>` 后，`ready` 回调再也不触发** | 外链未被 await + `ready` 不补发 | 关键订阅写在外链之前，或不用外链（§2.4） |
+| **首屏未出现或迟到** | 2026-08-26 环境的 ready 最后到且不补发；只靠它初始化可能遗漏 | 保留幂等 mount/done 和用户打开入口；当前版本另验（§2.6.2） |
+| **外链后注册的 ready 没触发** | 历史外链未 await 与 ready 不补发组合曾造成遗漏 | 管理加载依赖与失败、不要只等 ready；按版本复验（§2.4） |
 | **创卡页预览里整卡完全不工作，聊天页却正常** | `save.get` / `save.keys` 在瘦预览**同步抛 `SdkError`**，没 catch 就废掉整段脚本 | 包 `try/catch`（§2.5.1、§4.5） |
 | **预览里效果叠加了好几份** | 预览会反复重装整卡（「只跑一次」只在聊天页成立） | 加「已初始化」幂等哨兵（§2.1） |
 | **`stage.el()` 判空恒真，以为舞台开着** | `stage.el()` 关闭时仍返回 DIV | 判开关只用 `stage.visible()`（§4.6） |
@@ -1427,11 +1424,11 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 | 想临时停用一条规则 | — | 名称加 `__` 前缀，整条被丢弃（§7.1） |
 | 界面上那块 UI 永远不出现 | 触发串没接到 `statusbar` / `beginning` / 别的 `replaceString` | 接上触发串（§7.3） |
 | ~~源码被原样印在页面上：HTML 缩进 4 空格~~ | **该说法在沙盒不成立**（平台在 markdown 前先删行首 4+ 空格）。真病因是**反引号** | 去掉包住 HTML 的反引号（§6.5） |
-| 外链库 `window.XXX` 是 undefined | 用了 `http://`（直接跳过）。**不是域名白名单问题** —— 应用层无白名单，任意 https 都放行 | 换 `https://`；查调试面板（§2.4、§13） |
+| 外链库 `window.XXX` 是 undefined | 检查 HTTPS、目标版本 CSP/白名单、加载顺序和失败日志；2026-08 的无应用层白名单记录不保证现版仍然如此 | 固定版本、自行等待依赖并提供失败反馈；必要时自包含（§2.4、§13） |
 | `message.edit` 报错 / 拼出 `null` | 刚插入未落库的消息没有 `data-msg-id` | 调用前判空（§4.3） |
 | 发消息报 `UNAUTHORIZED` | 不是用户手势当帧（先 `await` 了，或定时器里发） | 点击当帧直接 `send`（§4.3） |
 | 存档/发送报 `RATE_LIMITED` | 超限频 | 攒批再写；照 §4.10 的次数控制 |
-| **`save.remove` 稳定报 `NETWORK`，重试也没用** | remove 通道坏死，真实原因被 catch 吞成 `NETWORK`（实机 2026-08-30，就绪态复现） | 用 `sdk.save.set(key, null)` 代替删除，读时把 `null` 当不存在；注意 key 不释放（§4.5） |
+| **`save.remove` 报 `NETWORK`** | 2026-08-30 就绪态曾复现删除故障，当前原因先看日志并复验 | 同故障可用 set(key,null) 逻辑清档，但 key 不释放；不视为真实删除或无限配额（§4.5） |
 | 存档在别人手机上全丢 | 游客存档退出即失、登录不迁移，**作者自己测不出** | 别把攒进度做成唯一玩法（§4.5） |
 | 面板挡住了平台长按菜单/提示 | z-index ≥ 8000，撞上平台临时浮层段 | 压回 **3500–7999**（**不是手册说的 1000–1999**，那个段位会盖住顶栏和输入框，§6.3） |
 | 面板被顶栏/输入框盖住，或反过来盖住了它们 | 照手册用 1000–1999，而 header/composer 实测是 `z-index:auto` | 用 3500–7999；常驻装饰用 1–999（§6.3） |
@@ -1440,7 +1437,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 
 ### 11.1 官方「别这么写」清单（逐条对照 §4 已展开）
 
-`input.get` 别轮询 · `input.set` 别在 IME 组合期调 · `input.add` 别逐字追加 · `input.insert` 别假设光标不动 · `input.clear` 发送后不用自己清 · `input.focus` 别在页面刚加载时调 · `input.setCursor` 别拿它模拟选区 · `composer.hide` 藏了要给发送路径 · `message.send` 别在 `message:done` 里无条件调 · `message.edit` 别拿 `null` 当 id · `cache.*` 别存进度 · `save.set` 别每帧写 · `stage.open` 别每次重建内部 DOM · `stage.el` 别当消息容器 · `user.get` 别当登录态判断 · `on` 事件名别打错 · `version` 别做能力探测。
+`input.get` 别轮询 · `input.set` 别在 IME 组合期调 · `input.add` 别逐字追加 · `input.insert` 别假设光标不动 · `input.clear` 发送后不用自己清 · `input.focus` 别在页面刚加载时调 · `input.setCursor` 别拿它模拟选区 · `composer.hide` 藏了要给发送路径 · `message.send` 别在 `message:done` 里无条件调 · `message.edit` 别拿 `null` 当 id · `cache.*` 别存进度 · `save.set` 别每帧写 · `stage.open` 别每次重建内部 DOM · 舞台不自动承载原生消息列表，自绘列表自行管理投影和滚动 · `user.get` 别当登录态判断 · `on` 事件名别打错 · `version` 别做能力探测。
 
 ### 11.2 从当前 MMD 迁过来时必须扔掉的东西
 
@@ -1450,7 +1447,7 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 - **`[sta` + `tus]` 拆词绕检测** → `/\[status\]([\s\S]*?)\[\/status\]/` 一条真正则吃整块。
 - 🚨 **Shadow DOM 状态栏（`attachShadow` / 影渲法 / ShadowCast）** → **扔掉，理由已升级为硬理由**：`【实机实测 2026-08-26】`沙盒本身就是**跨源 iframe**（作者节点 `getRootNode() === document`，不是 shadow root）→ **iframe 已经完成了全部隔离，再套一层 Shadow DOM 是纯负债、零收益**：样式要重复注入、和平台的 `querySelector` 收窄机制打架、`--chat-*` 变量继承链变复杂。原文这里写的理由是「沙盒形态未说明所以别移植」，那是证据不足时的保守判断；**现在的理由是「没有任何东西需要再隔离」**（§2.3）。
 - **`document.currentScript` 自定位** → 扔掉，**它恒为 `null`**（`【源码确证】`内联脚本走 `(0,eval)`，根本没有 script 节点；`【实机实测】`顶层与回调内均为 `null`）。定位改用固定 id/class 约定 + `message:mount`（§2.3）。
-- ~~**chara_card_v2 / PNG 打包**~~ → **这条已删除**：v2 整卡（PNG/JSON）在沙盒**可用**，见 §9。从当前 MMD 迁过来时 v2 打包流程**可以照搬**，只需额外确认「新建卡 + 首次保存前选新版聊天页」。
+- ~~**chara_card_v2 / PNG 打包**~~ → **这条已删除**：v2 PNG 整卡在沙盒可用，JSON 作源码/备份，直接导入待复验，见 §9。从当前 MMD 迁移可复用 v2 打包流程，另确认「新建卡 + 首次保存前选新版聊天页」。
 
 对抗检定 `〖⚔=①…〗` 这类，用户没点名就不要做；骰子标记用 ASCII 分隔 `〖骰=检定名|属性|目标|出目|成功或失败〗`。
 
@@ -1464,16 +1461,16 @@ function Ws(e,t){ return typeof e===`string` ? (e.length>t ? e.slice(0,t) : e) :
 4. **状态持久化**：当场状态 `sdk.cache`，单卡本地偏好 `localStorage`，跨设备进度 `sdk.save`（打成一包、攒批写，`save.get` **必须 `try/catch`**）。**游客会丢，别做成唯一玩法。**
 5. **配色**：改 `[data-chat="root"][data-theme="dark|light"]` 上的 **29 个** `--chat-*` 变量（§6.1），不写死颜色；尺寸可用 `--rpx` 跟平台节奏；JS 涂色的订 `theme:change`。**换页面背景要 `!important`**。
 6. **必做的三项重置**：`opacity:1`、`white-space:normal`（压掉 `message-body` 的默认值）、功能栏 `flex-shrink:0`（§6.6）。浮层 z-index 取 **3500–7999**，挂 `[data-slot="left"]`/`"right"`（§6.3）。
-7. **零外部依赖**：CSP 封死 `fetch`、外部字体、外部样式表（§13）→ 用系统字体栈、内联 `<style>`、`data:` 图片；状态只能来自 AI 正文 / `save` / `cache` / `localStorage`。
+7. **默认自包含**：跨源 fetch、外部字体、外部样式表受 CSP 限制（§13）；优先系统字体、内联 CSS。HTTPS script / 图片是不同的已允许通道，若使用须验证加载顺序、失败和版本；不能把“默认自包含”写成平台禁止所有外部资源。
 8. **模型侧协议用方括号** `[状态]…[/状态]`，**绝不用中文尖括号**（会被剥壳删掉，§9.3）；匹配式**不能匹配空串**、别写太松（输出预算，§7.6）。
 9. **验证顺序**：`validate.py` → 本地沙盒仿真 `chat` + `thin-preview` → 桌面/窄屏/横屏 GUI 与截图；能力矩阵标为 `probe-needed` 时才回真实站做隔离探针。AI 不默认登录账号、不对正式卡或公开卡执行保存编辑；最终实站验收由用户授权并负责账号侧操作。
-10. **交付**：做整卡时用弹窗问形态 —— 路线 A（v2 整卡 PNG/JSON，含世界书与正则，无手工粘贴）或路线 B（6 键正则 JSON + persona 文本 + 可选世界书 JSON）。两条都要在交付说明里写明「**必须新建卡；首次保存前在创卡页选「使用新版」，此选择首次保存后永久不可改**」。`beginning` **按 4000 字卡**（§8.2）。
+10. **交付**：做整卡时用弹窗问形态 —— 路线 A（v2 PNG 整卡，JSON 源码/备份，含世界书与正则）或路线 B（6 键正则 JSON + persona 文本 + 可选世界书 JSON）。JSON 整卡直接导入待复验，不以备份文件单独承诺可导。两条都要在交付说明里写明「**必须新建卡；首次保存前在创卡页选「使用新版」，此选择首次保存后永久不可改**」。`beginning` **按 4000 字卡**（§8.2）。
 
 ---
 
-## 13. 🚨 CSP 硬边界（新增，`【源码确证】` 响应头 + meta 取交集）
+## 13. CSP：历史响应头与 meta 边界，目标部署待复验
 
-沙盒 iframe 的实际 CSP（响应头与页内 `<meta>` **取交集后**的有效约束）：
+以下是 2026-08 记录的沙盒 CSP（响应头与页内 meta 取交集）；host 域名和部署策略会变化，本轮未重测现版。它用于兼容设计，不是对所有站点当前配置的保证：
 
 ```
 default-src 'self';
@@ -1489,7 +1486,7 @@ worker-src 'self';
 | 作者想做的事 | 判定 |
 |---|---|
 | 内联 `<script>` / `eval` / `new Function` | ✅ 可用（`'unsafe-inline'` + `'unsafe-eval'`） |
-| 外部 `<script src="https://…">` | ✅ **任意 https 都放行**。🚨 **应用层没有域名白名单**，只校验 `^https://` —— 手册「需平台白名单」与实况不符 |
+| 外部 `<script src="https://…">` | 2026-08 记录的 CSP 允许 HTTPS、源码未见应用层域名白名单；与文档要求有差异，当前部署的域名、版本和顺序需复验 |
 | 内联 `<style>` / 元素 `style=""` | ✅ 可用 |
 | 🚨 **外部样式表** `<link rel=stylesheet>` | ❌ **封死**（`style-src` 无 `https:`） |
 | 🚨 **外部字体**（Google Fonts、CDN 字体） | ❌ **封死**（`font-src` 交集后仅 `'self'`） |
@@ -1500,9 +1497,9 @@ worker-src 'self';
 
 **三条可执行结论**：
 
-1. 🚨 **卡片必须完全自包含**：零 CDN 样式、零外部字体、零外部请求。想要特殊字体只能用**系统字体栈**（`font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`）或把图形做成 SVG（白名单里 SVG 一整套都在，含 `defs`/`use`/`clipPath`/渐变，§5.2）。
-2. 🚨 **状态只有四个来源**：AI 正文（经正则/脚本解析）、`sdk.save`（跨设备）、`sdk.cache`（当场）、`localStorage`（单卡本地）。**没有「从服务器拉数据」这条路** —— 想做联网排行榜、在线词典、远程配置一律不可能。
-3. **外链 `<script>` 虽然 CSP 放行，但实用价值有限**：它没被 await（§2.4），会让之后注册的 `ready` 回调收不到；而且库拿不到网络（`connect-src 'self'`），大部分 SDK 类库在这里是废的。**能内联就内联。**
+1. **默认采用自包含代码与内联 CSS**：不能依赖 CDN 样式、外部字体或跨源 fetch/XHR。字体优先系统栈（`font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`），装饰可用允许的 SVG。这里不是禁止上表已确认可用的 HTTPS script / 图片通道。
+2. **已确认可用的数据路径**：AI 正文（经正则/脚本解析）、`sdk.save`（跨设备）、`sdk.cache`（当场）、`localStorage`（单卡本地）；平台状态变量另见 §14，运行契约仍待补齐。不能按普通网页假定外部 API 的 fetch 可用，也不能把作者静态脚本资源当成新的平台业务 API。
+3. **外链经典 `<script>` 是需定向验证的可选交付方式**：历史源码未 await（§2.4），新版文档的顺序/白名单要求须按目标部署验证。固定资源版本，自行处理依赖加载、失败与幂等初始化。上游“脚本注册静态模型数据 + 图片贴图”方案不证明字体、worker、WASM 等通道可用；小卡优先内联，完整同层网页按 [沙盒同层指南](../creation/sandbox-same-layer-card.md) 打包。
 
 `frame-ancestors` 只允许 `h5.aitchat.org` 与 `admin.aitchat.org` —— 这解释了为什么直接打开 `c<卡片ID>.sbx.aitchat.org` 会停在 `waiting for host handshake`（§2.3）：它只能被这两个宿主嵌入，且必须靠宿主 postMessage 投喂卡片配置。
 
@@ -1510,7 +1507,7 @@ worker-src 'self';
 
 ## 14. 平台状态变量子系统（`sdk.vars` / `vars:change` / `<abc_vars>`）
 
-> **证据等级特殊，先读这段再往下看。** 本节的**业务规则**是 `【官方文档】`（官方 skill `references/state-variables.md`，依据其项目手册第 6 节）；但**运行契约（方法签名、返回值、导入字段）官方至今未公布** —— `contract.json` 里没有 `sdk.vars`，也没有 `vars:change`，官网 ChatVersionGuide 与写卡下载包（官方核对日 2026-09-05）都没给。
+> **业务资料与运行契约分开**：本节业务规则来自资料包 `references/state-variables.md` 及其引用的项目手册；2026-09-05 官方网页核对记录、下载包与本轮资料仍没有 sdk.vars/vars:change 的完整方法签名、返回值和导入字段。不能把业务存在推导成可直接调用的 API，也不据契约缺失否定平台支持。
 >
 > 所以本节所有 API 形态一律 `【待验证】`：**能讲清它的行为边界，不能照着写出保证能跑的代码**。官方自己的校验器把这几个名字判成「契约未补齐」而非拼写错误，本 skill 的 `validate.py` 已对齐（WARN，不 ERROR）。
 >
@@ -1565,17 +1562,19 @@ worker-src 'self';
 
 地图确有持久进度、且由作者存档管理时：把数据合成**版本化对象**，只存需要恢复的字段，不强行塞 NPC / 背包 / 小游戏。
 
-`ready` 里读取并校验已知字段；移动或结算后合并保存、控制频率，**避免逐帧写入**（`save.set` 限频 20 次/分钟，§4.10）。🚨 **会话切换时先取消上一会话待执行的保存定时器再读新存档** —— 否则延迟写入会串到下一个会话（订阅 `conversation:switch`，§4.9）。失败给反馈但不让页面卡死；需要 AI 知道的结果必须走已确认的消息或状态通道同步。
+在初始化流程尝试读档并校验已知字段，`ready` 可作就绪重试信号，**不能作为唯一入口**（迟加载时不补发，§2.6）；未就绪/异常不当成空档覆盖，保留用户主动重试。移动或结算后合并保存、控制频率，**避免逐帧写入**（`save.set` 限频 20 次/分钟，§4.10）。🚨 **会话切换时先取消上一会话待执行的保存定时器，再待宿主存档就绪读取** —— 否则延迟写入会串到下一个会话（订阅 `conversation:switch`，§4.9）。失败给反馈但不让页面卡死；需要 AI 知道的结果必须走已确认的消息或状态通道同步。
 
 ---
 
 ## 相关文档
 
+- `../creation/sandbox-same-layer-card.md` —— 新页同层卡：完整网页、SDK 映射、舞台生命周期、打包与验收。
+- `../runtime/new-mmd-hud-audit.md` —— 贪心鬼新版仓库的架构借鉴与固定提交兼容审查。
 - `mmd.md` —— 当前 MMD（`/mmd`）平台规范，`img onerror` 载体那一套。**两边写法不通用**，注意别串。
 - `sillytavern.md` —— 本地酒馆平台规范。
 - `../output/regex-output.md` —— 正则 JSON 交付与转义（沙盒模式是 6 字段，注意与当前 MMD 的 4 字段区分）。
 - `../output/worldbook-json.md` —— 世界书条目字段与导出。
-- `../output/card-json.md` —— chara_card_v2 打包，**沙盒模式不用**，仅当前 MMD / 本地酒馆用。
+- `../output/card-json.md` —— 角色卡打包：当前 MMD 与沙盒均用 v2，本地酒馆用 v3；沙盒另读第 9 节的新建卡条件。
 - `../quality/checklist.md` —— 交付前自检。
 - `../beautify/statusbar.md` / `../beautify/statusbar-radar.md` —— 当前 MMD 的状态栏方案，**沙盒模式不可直接移植**（载体是被禁的 `img onerror`），只可参考数据协议与信息架构。
 - `../beautify/global-css.md` / `../beautify/style-system.md` —— 视觉设计思路可复用，选择器与变量须换成 `[data-chat]` / `--chat-*`（注意是 **29 个**，见 §6.1）。

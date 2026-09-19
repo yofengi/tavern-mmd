@@ -1,18 +1,28 @@
 {
-  "contractVersion": "1.1.0",
+  "contractVersion": "1.2.0",
   "title": "MMD 沙盒模式（chatVersion:1）本地仿真契约",
   "purpose": "build-preview 沙盒全景与 mmdsandbox-sim.js 共用的事实清单。仿真页是回归工具，不是事实来源。",
   "sourceOfTruth": {
-    "priority": "沙盒应用源码 > 实机观察 > 官方手册 > 官方 skill",
+    "priority": "先匹配版本、日期和运行环境，再比较同一范围内的源码、实机与文档证据；历史结果不否定后续明确新增的能力",
     "primary": "sandbox-foundation/资料/基座事实卡.md",
     "probe": "sandbox-foundation/资料/探针实测原始数据.md",
     "probeDate": "2026-08-26",
     "latestReadOnlyObservationDate": "2026-08-27",
     "probeEnvironment": "https://c64257.sbx.aitchat.org 创卡页预览 iframe（瘦环境）",
-    "conflictRule": "冲突以基座事实卡为准；references/platforms/mmd-sandbox.md 为叙述性文档"
+    "localReviewDate": "2026-09-19",
+    "documentedSdk": {
+      "source": "generating-role-card/authoring/contract.json、authoring/04-sdk.md、references/development-sources.md",
+      "sourceKind": "用户提供资料包中的本地作者契约与官方网页核对记录",
+      "checkedDate": "2026-09-05",
+      "documentedVersion": "SDK '1'，官方开发页新版标签",
+      "url": "https://sexyai.ai/#/pages/docs/ChatVersionGuide",
+      "scope": "30 基础能力、12 事件、7 公开错误码、BUSY 与已揭示累计流式文本；本次没有新增真机执行验收"
+    },
+    "historicalScope": "未附新来源的实测项保留原记录日期/环境；SDK 形状、thin-preview、ready/late replay 默认对应 2026-08-26 探针，CSS 另按条目日期。日期不是平台发布版本号。",
+    "conflictRule": "references/platforms/mmd-sandbox.md 汇总分层依据。旧 ready 不补发、stage.el 关闭仍为 DIV 等冲突保留历史观察并等待当前版本复测；不把文档更新或本地测试冒充新实测。宿主 CSS 转发另见 host-contract.json。"
   },
   "accuracyLevels": {
-    "exact": "实机探针或源码逐字确证，模拟器按确证行为复现",
+    "exact": "在所列日期、版本和环境内由实机探针或源码逐字确证；不表示最新平台已复测",
     "conservative": "行为方向已知但取值/时序未逐一实测，模拟器给保守确定性实现",
     "probe-needed": "尚未确证，模拟器不声称精确；界面必须标注需真实站验证"
   },
@@ -20,6 +30,7 @@
     "global": "globalThis.sdk",
     "version": "1",
     "versionIsString": true,
+    "observedDate": "2026-08-26",
     "versionNote": "🚨 sdk.version 是字符串 '1'，不是数字 1。作者写 sdk.version === 1 永远为假。",
     "frozen": false,
     "isProxy": false,
@@ -51,13 +62,24 @@
     "errorCodes": {
       "count": 7,
       "known": [
-        "NOT_SUPPORTED",
+        "UNAUTHORIZED",
+        "RATE_LIMITED",
         "INVALID_ARGS",
-        "BUSY",
-        "NETWORK"
+        "HOST_DENIED",
+        "NETWORK",
+        "NOT_SUPPORTED",
+        "BUSY"
       ],
       "accuracy": "conservative",
-      "note": "实机共 7 个（手册漏 BUSY/NETWORK）；完整名单未探全，模拟器只用 NOT_SUPPORTED 与 INVALID_ARGS"
+      "basis": "2026-09-05 官方网页核对记录及本地作者契约，2026-09-19 离线对照",
+      "simulated": ["NOT_SUPPORTED", "INVALID_ARGS", "BUSY"],
+      "historicalInternalObservations": {
+        "codes": ["MODEL_UNAVAILABLE", "UNKNOWN_CAPABILITY", "UI_BUSY"],
+        "source": "references/platforms/mmd-sandbox.md §4.10 的历史源码记录",
+        "accuracy": "probe-needed",
+        "note": "未进公开七码名单，当前版本未重探；不据此宣称当前平台错误码总数或新增公开 SDK 能力"
+      },
+      "note": "公开名单完整为七码。本地只模拟 NOT_SUPPORTED、INVALID_ARGS、BUSY；真实授权、限频、网络、交互互斥等需目标版本验证。"
     },
     "asyncCapabilities": [
       "message.send",
@@ -116,7 +138,7 @@
     },
     "message.send": {
       "accuracy": "conservative",
-      "note": "本地追加用户气泡；无真实模型回复"
+      "note": "Promise<void>；省略文本读取当前草稿，成功后清原草稿；空消息 INVALID_ARGS。发送 pending、手动忙态或流式未结束时立即 BUSY，保留草稿、不排队、不自动重试。本地只追加用户气泡，不调用真实 AI；pending 以本地 Promise 完成边界近似，不模拟服务端时序、手势授权或限频。"
     },
     "message.edit": {
       "accuracy": "conservative",
@@ -150,11 +172,12 @@
       "note": "实机无限频"
     },
     "stage.open": {
-      "accuracy": "conservative"
+      "accuracy": "conservative",
+      "note": "同步 void，默认 content；支持 content/full。统一 hidden/data-stage/visible；content 测量消息区并随窗口/视口变化更新，缺少布局接口时保留 CSS 回退；full 清除局部几何后使用平台 CSS。"
     },
     "stage.close": {
       "accuracy": "exact",
-      "note": "不派发 stage:close"
+      "note": "不派发 stage:close；关闭保留作者子树。此事件差异保留 2026-08-26 历史记录，亦见 2026-09-05 文档。"
     },
     "stage.el": {
       "accuracy": "exact",
@@ -200,7 +223,11 @@
     },
     "message:stream": {
       "shape": "4 键（按 new/mount/done 同构推断）",
-      "accuracy": "conservative"
+      "accuracy": "conservative",
+      "contentSemantics": "revealed-cumulative",
+      "contentBasis": "documented",
+      "documentedDate": "2026-09-05",
+      "note": "content 是与气泡显示同步的当前已揭示累计文字，不是本次差量，也不是能抢先读取的完整原始回复；最终正文用 message:done。其余载荷形状与真实流式节奏仍需当前平台复测。"
     },
     "message:unmount": {
       "shape": "undefined",
@@ -220,8 +247,10 @@
       "accuracy": "probe-needed"
     },
     "conversation:switch": {
-      "shape": "会话 id",
-      "accuracy": "probe-needed"
+      "shape": "undefined",
+      "accuracy": "conservative",
+      "source": "references/platforms/mmd-sandbox.md §4.9 无载荷事件表；2026-09-05 SDK 文档示例，2026-09-19 离线对照",
+      "note": "不再伪造会话 id。关闭舞台并保留作者子树、清流式和忙态、不清订阅；stage:close 与 switch 的先后顺序为本地保守选择，目标平台需复测。"
     },
     "back": {
       "shape": "undefined",
@@ -260,6 +289,7 @@
       "ready"
     ],
     "coldStartOrderAccuracy": "exact",
+    "coldStartOrderObservedDate": "2026-08-26",
     "coldStartOrderEvidence": "探针 ORDER 字段按到达顺序累计；ready 最后到",
     "readyIsLast": true,
     "lateReplay": {
@@ -271,7 +301,8 @@
         "ready"
       ],
       "accuracy": "exact",
-      "note": "与官方手册相反：ready 没有 late replay，mount/done 有"
+      "observedDate": "2026-08-26",
+      "note": "2026-08-26 瘦预览与当时手册相反：ready 没有 late replay，mount/done 有。保留历史回归行为；当前平台待定向复测。"
     },
     "payload": {
       "shape": {
@@ -321,6 +352,7 @@
     "thin-preview": {
       "label": "创卡页瘦预览",
       "accuracy": "exact",
+      "observedDate": "2026-08-26",
       "evidence": "探针实测原始数据 §3.2 / 事实卡 §4.4a",
       "saveGetThrows": true,
       "saveKeysThrows": true,
@@ -741,7 +773,11 @@
       "accuracy": "exact",
       "observedDate": "2026-08-29",
       "renderedIn": "host page (h5.aitchat.org uni-app), outside the cross-origin card iframe",
-      "cardCssCanStyle": false,
+      "directIframeCssCanStyle": false,
+      "documentedCssRelayCanStyle": true,
+      "documentedCssRelayAccuracy": "conservative",
+      "hostContract": "host-contract.json",
+      "scopeNote": "下列五个结构与直接穿透失败仅为 2026-08-29 历史观察。后续文档开放受筛选的宿主 CSS 转发，不能继续概括成卡片 CSS 全部改不了；新版根名单、资料日期与边界统一在 host-contract.json，不在这里复制。动态 style/变量转发与清理仍待目标平台验证。",
       "probeEvidence": "在卡片 iframe 内注入 [data-chat=root]{--chat-modal-bg:#00ff00} 后打开模型设置：弹窗仍为 #17181a、卡片面仍 #2c2e32，且 --chat-modal-bg 在其上解析为未定义。宿主页 body 挂 51 个 --background-color/--lo* 系变量，无任何 --chat-* 。",
       "popups": [
         {
@@ -848,6 +884,7 @@
     },
     "stageStates": {
       "accuracy": "exact",
+      "observationScope": "2026-08 历史源码/样式记录；原条目未单列观测日期，本轮仅离线核对，未复测最新平台",
       "closed": {
         "display": "none"
       },
@@ -860,7 +897,13 @@
         "inset": 0,
         "zIndex": 3000
       },
-      "attribute": "data-stage"
+      "attribute": "data-stage",
+      "localSimulation": "control.stageMode(closed|content|full) 同步调试模式、保留作者 DOM；SDK open/close 同步 void。模式切换本身不发 stage:close；control.stageClose 作为平台关闭注入会派发。",
+      "backClosesStage": {
+        "accuracy": "conservative",
+        "source": "references/platforms/mmd-sandbox.md §4.9；2026-09-05 文档：舞台开着时平台先关舞台，back 不一定交给作者",
+        "note": "本地选择先关闭并消耗这次 back；舞台已关闭时才派 back。这不是对最新平台所有返回分支的实测断言。"
+      }
     },
     "tokenSpecificity": {
       "accuracy": "exact",

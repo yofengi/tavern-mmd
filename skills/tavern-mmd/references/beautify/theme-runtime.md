@@ -9,9 +9,9 @@
 > - **本地 SillyTavern（`/st`）**：走其原生主题或自定义 CSS，不用本协议。
 > - **MMD沙盒模式（`/mmdsandbox`）：本协议不适用。** 那里平台自带主题接口 —— `[data-chat="root"]` 上有 `data-theme="light|dark"`、**29 个** `--chat-*` 变量（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1；官方手册正文只列前 10，后 18 个另节单列）、以及 `theme:change` 事件；换肤只是在 `[data-chat="root"]` 上改变量，不需要租约与哨兵。而且本协议依赖的两样东西在沙盒模式**不能用**：`body{}` / `html{}` / `:root{}` 全局选择器（官方校验 WARN，须改写成 `[data-chat="root"]`），以及 `img onerror` 点火器（官方明令禁止）。
 >
->   ⚠️ 两者性质不同：`img onerror` 是**真·禁令**；全局选择器则是**文档约定 + 校验器 WARN** —— 实测 **CSS 选择器零过滤已确证**，`:root{}` / `html{}` / `body{}` 运行时**不会被拦**。真正让 `:root` 无效的是平台令牌**根本没有 `:root` 定义**（只写在 `[data-theme]` 上），覆盖不存在的定义自然没效果。别把它记成「写了就被拦」，会误判排查方向。
+>   `img onerror` 点火属于新页文档禁用写法；全局选择器则有文档约定与校验 WARN。2026-08 历史源码未见上述选择器专项过滤，只适用于 iframe 内样式，不代表宿主通道或最新版本“零过滤”。`:root` 选中 html，不能可靠覆盖后代平台 root 自己定义的同名变量；应在正确的 `[data-chat="root"][data-theme]` 节点赋值。
 >
->   沙盒模式的换肤做法见 `global-css.md`「沙盒模式换肤」与 `../platforms/mmd-sandbox.md` §6。要成套的状态栏/美化地基，直接用现成基座 `../../assets/sandbox-kit/`（改 config 跑 `build_sbk.py`）—— 它的主题层已经把 29 个令牌、三态 dark/light/native、`theme:change` 跟随、页面背景 `!important` 这些都封好了，方法论见 `sandbox-kit.md`。
+>   沙盒阅读主题见 [SBK](sandbox-kit.md)：29 变量共享注册、跟随平台 light/dark、preset 与阅读主题启用/停用；不继承旧页三态切换协议。宿主弹窗另读 [21 根换肤指南](sandbox-host-styles.md)：静态 style 抽取过滤，不是跨源 DOM 接口。制作期 `hostStyles` 与阅读主题开关分开，停用阅读覆盖不会撤销静态宿主皮肤，动态转发仍待验证。
 >
 > 除非测试记录明确写明日期、版本和路径，本文件不宣称运行时资产已经通过 MMD 实机验证。
 

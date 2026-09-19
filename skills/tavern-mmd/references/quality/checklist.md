@@ -5,6 +5,7 @@
 > - **当前 MMD `/mmd`**：内容层 + 格式层 + 结构层 + 代码层 + 正则层 + 样式层（雷达法/运行时主题按采用情况附加）
 > - **当前 MMD 同层卡**：内容层 + 格式层 + 正则层 + **「同层卡」专节**；不套逐消息 onerror 结构/代码/雷达法，也不要求普通状态栏三面板预览。
 > - **MMD沙盒模式 `/mmdsandbox`**：内容层 + 格式层 + 正则层 + **「沙盒模式」专节**（该节替代结构层／代码层／雷达法三节——那三节以 `img onerror` 为载体，沙盒禁用）
+> - **沙盒同层卡 `/mmdsandbox`**：上述沙盒检查 + **「沙盒同层卡」专节**；不走旧页 Frame/Host 审核器，也不把 SBK 状态栏预览当完整同层页验收。
 > - **本地酒馆 `/st`**：内容层 + 格式层
 >
 > 逐条前缀 `（/mmd）`／`（/mmdsandbox）`／`（/st）` 表示该条只对该平台成立；无前缀的是共用项。
@@ -89,6 +90,26 @@
 - [ ] 本地预览、真实 MMD、物理手机分别记录证据。未实测标 `NOT RUN`，不能将浏览器模拟视口称为手机实测；真实站测试按用户已有授权范围执行。
 - [ ] 同层运行包与整卡 v2 PNG 区分；带游戏的世界书只规定规则权威与 AI 叙述边界；未向玩家承诺自动跨设备同步。
 
+## 沙盒同层卡专节（新页 `/mmdsandbox` 自绘网页时）
+
+制作方法见 [沙盒同层卡](../creation/sandbox-same-layer-card.md)。
+
+- [ ] 已记录 `chatVersion:1`、舞台 content/full、SDK 连接、数据权威与存档位置；没有复用旧页 bridge/61 项能力表或嵌套作者 iframe。
+- [ ] 原样交付包恰好六键或按 v2 整卡规范封装；导入说明包含新建卡 + 首次保存前使用新版，不把正则包称为完整角色卡。
+- [ ] 首屏不依赖 ready/顶层 DOM，初始化幂等；重复脚本不叠 SDK 订阅，不调用 on 返回值、off 或 once。
+- [ ] `{id,serverId,role,content}` 能进入消息投影，不依赖 state；stream 是与气泡同步的已揭示累计正文，替换而不重复追加，不假定提前拿到完整回复；done 补发不重复结算，unmount 不当删除。
+- [ ] 编辑使用非空 serverId；历史投影不宣称完整服务端历史；AI 正文经转义或净化，不作为可信可执行 HTML。
+- [ ] 自有输入框与原生输入框归属明确；点击当帧发送，BUSY/失败保留草稿，超时不自动重发，不以 send 返回冒充生成或保存完成。
+- [ ] 无载荷 conversation:switch 会清投影并使旧异步结果/待写档失效；无载荷 theme:change 可正确更新。未编造会话 ID。
+- [ ] visible 判断开关；作者关闭路径不等待 stage:close；关闭后新消息不抢开舞台；原生返回/同层重开均可用，播放器隐藏后暂停并在 dispose 释放。
+- [ ] save 同步异常和异步失败均有反馈；不硬编码 10 key；逻辑清档不声称释放 key；存档不自动进入 AI 上下文，也不承诺自动随剧情回溯。
+- [ ] 分片回读/完整性/混版/重注入与全部规则预算已验；生产包无开发 Host、Mock、开发地址或 ESM 残留；外部资源按各自 CSP 通道验收。
+- [ ] chat/thin-preview 两套新页全景中测试原样载荷，桌面/窄屏页面操作与失败路径通过；模型/会话管理等无公开 SDK 契约的功能提供原生入口。
+- [ ] content/full/closed 的 DOM 属性与 SDK visible 一致；关闭/重开/切会话保留作者标记节点，content 视口变化后仍对齐消息区。作品自行清会话状态，不靠平台清作者 DOM。
+- [ ] 本地 BUSY 注入与 stream/done 已测：pending/生成中拒绝并保留草稿，解除后不自动发送；空消息 INVALID_ARGS，省略文本发送原生草稿且成功后清理；无真实 AI 调用不冒充生成验收。
+- [ ] 若做宿主换肤，按 [宿主指南](../beautify/sandbox-host-styles.md) 验 iframe 外样式、原生入口与未知分支标注；thin 不模拟宿主，运行时停用阅读主题不承诺撤销静态皮肤。
+- [ ] 真实 MMD 冷启动/切会话迟到事件、真实历史同步、跨设备保存、实体手机各自记录证据，未执行标 NOT RUN。本地 Mock PASS 不提升为实站结论。
+
 ## 雷达法状态栏（当前MMD `/mmd` 采用时附加）
 
 > 雷达法载体是 `img onerror`，**沙盒模式不可移植**（onerror点火器被官方明令禁止）。沙盒模式要同类功能改用「一条只放 `<script>` 的规则 + `sdk.on('message:mount')`」，只可参考本节的数据协议与信息架构。
@@ -103,7 +124,7 @@
 
 ## 样式层（MMD美化）
 
-> 下面「静态换肤 / 运行时主题 / 风格库」各项按当前 MMD 写。沙盒模式换肤只改 `[data-chat="root"]` 上的 **29 个** `--chat-*` 变量（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1；实测逐个注入确证），另见沙盒专节。
+> 下面「静态换肤 / 运行时主题 / 风格库」各项按当前 MMD 写。沙盒阅读主题覆盖 29 个 `--chat-*` 颜色变量，宿主皮肤另走 21 个开放 `[data-host]` 根的静态 CSS 抽取过滤；两条通路见沙盒专节，不套旧页运行时桥接。
 
 - [ ] 装饰性伪元素 pointer-events:none
 - [ ] 交互元素 position:relative + z-index
@@ -155,9 +176,9 @@
 
 ### 脚本与 SDK
 - [ ] **`sdk.on` 写在脚本体里，不写进 `message:mount` 回调**——写进去则每挂一条气泡多订一份，同一件事触发很多次
-- [ ] SDK **能力名与事件名逐字正确**（30 能力 / 12 合法事件）——**拼错既不报错也永不触发**，只能靠 `validate.py` 静态拦
-- [ ] 无 `sdk.once` / `sdk.off`（**两者都不存在**）；需要一次性逻辑自己加幂等哨兵。`ready` **最后到且不补发**，首屏挂 `message:mount` / `message:done`
-- [ ] **绝不把 `[data-chat="message-body"]` 当回复正文读**——空 AI 气泡挂上时里面是平台占位「消息生成中」。跟字用 `message:stream` 的 `msg.content`、收尾用 `message:done` 的 `msg.content`；`content` 空时**也不要退回去读 DOM**
+- [ ] SDK 能力/事件名符合 30 能力、12 事件公开表，错误处理列明 7 个公开码且能显示未知码；历史 UI_BUSY 等内部记录不扩张公开 API
+- [ ] 无公开 `sdk.once`/`sdk.off`，一次性逻辑自己幂等。ready 最后到且不补发属于 2026-08-26 历史观察；兼容首屏用 mount/done，不只依赖 ready，未复验不宣称新平台结论
+- [ ] 不把生成中 DOM 占位当回复。stream 的 content 是与气泡同步的已揭示累计文字，替换显示而不重复追加；最终正文读 done；content 为空不退回读 DOM，也不假定提前获得完整原始回复
 - [ ] **无 `img onerror` 点火器、无 teapot 系写法**（`onerror` 图 / `window.teapot*` / CoC 注入）——官方明令禁止，改用「一条只放 `<script>` 的规则」
 - [ ] 长期面板（地图/背包/小游戏）挂**舞台 `sdk.stage`**，不挂气泡（气泡滚出屏幕即销毁）
 - [ ] `sdk.message.*` / `sdk.save.*` 等返回 Promise 的调用都有 `.catch`（失败时页面上没有任何提示）
@@ -172,12 +193,20 @@
 - [ ] 无 `iframe` / `link` / `meta` / `form` / `object` / `embed`（白名单外，会被删）
 - [ ] **无全局 CSS 选择器** `*{}` / `html{}` / `body{}` / `:root{}` → 一律改 `[data-chat="root"]`
 - [ ] HTML 顶格、无反引号包裹待渲染 HTML。平台实况会在 Markdown 前删除 4+ 空格，故“4 空格必变代码块”不是实测故障；仍顶格写以通过官方 WARN，并防其他 Markdown 路径差异
-- [ ] 作者 z-index 落在 **3500–7999**（实测安全带）。依据：实测平台 `header`/`statusbar`/`messages`/`composer`/`author-stage` 全是 `z-index:auto` + `position:static`，手册所谓「平台 chrome 占 8000–8999」**不成立**；样式表穷举的真实占用是 `10090` snackbar / `9000` alert / `8200` message-menu / `8100` composer-snack / `8000` share-loading / `3000` stage-full / `2000` stage-content / `40` sdk-debug。3500 起是为避开舞台的 2000/3000，7999 止是为避开平台 8000+ 那几层（越界不会被拦，只会挡住平台长按菜单/提示/弹窗）
-- [ ] 换肤只改 `[data-chat="root"]` 上的 **29 个** `--chat-*` 变量（`【实机实测 2026-08-29】`逐个注入确证，定义在 `[data-theme=dark]` / `[data-theme=light]` 两个选择器上，**无 `:root`、无 `prefers-color-scheme`**）：**气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1**。官方手册正文只列前 10，另把后 18 个单独称作「底栏和白名单弹窗另有 18 个变量」—— 两处加起来才是全集，别只照第一张表。**不写死 `#fff`**（深浅色切换才跟得上）；JS 涂色的订 `theme:change`
-- [ ] 改底栏/输入框/白名单弹窗**不要指望 `--chat-bg`/`--chat-text`/`--chat-accent` 带动** —— 那三个只管消息区语义配色，底栏与宿主弹窗走 `--chat-composer-*`/`--chat-shortcut-*`/`--chat-input-*`/`--chat-modal-*` 这 18 个独立变量；且它们**不能换平台图标**（发送键、顶栏、加号菜单图标改不了）。要随深浅色切换就浅/深各给一套值，别把固定色值说成"会自动适配"
+- [ ] 作者层级按组件用途和目标版本验收。历史样式的 content/full 舞台为 2000/3000，需浮在舞台上的 SBK 面板默认 3500–7999，原生消息菜单/提示等在 8000+；这不是所有元素唯一安全带。舞台不能压住所需抽屉/原生返回，iframe 内提高 z-index 也不能越过宿主弹窗
+- [ ] 沙盒阅读主题的 29 个 `--chat-*` 颜色变量以共享注册表为准（历史观测 2026-08-29）：气泡/整页 10 + 底栏/浮层 18 + 别名 1；composer/shortcut/input/modal 均覆盖，保留原别名，不将只读几何值 `--chat-viewport-height`/`--rpx` 当颜色配置；深浅色各验可读性
+- [ ] 底栏/输入框/iframe 浮层使用独立的 composer/shortcut/input/modal 变量，不假设气泡三色自动带动；宿主弹窗的静态 data-host 样式单列，不假定 iframe 的 `--sbk-*` 自动继承或动态转发。固定色不称自动深浅适配，不替换平台图标/文案
 - [ ] **4 个别名不要写死**：`--chat-bubble-user-bg`/`--chat-bubble-ai-bg` → `var(--chat-bg)`、`--chat-bubble-text` → `var(--chat-text)`、`--chat-more-item-bg` → `var(--chat-modal-surface)`。写死会切断传导链（之后改基色它们不再跟随）
 - [ ] `--chat-viewport-height` **不算样式表变量、不要用 CSS 覆盖**：它是 JS 写在 root 上的内联 style（`clientHeight − 键盘 inset`，随 `visualViewport` 实时更新），内联优先级压过样式表；要读就 `getComputedStyle` 或直接 `var(--chat-viewport-height)`
 - [ ] 功能栏自己补 `flex-shrink:0` 与所需背景/高度；它的**正则输入静态且不随消息重跑**，动态值靠 JS 改 DOM。JS 插入的宿主节点实机可保留，但必须在 mount/done 回调内挂载并做幂等/宿主归一
+
+### 宿主弹窗样式（配置 data-host / hostStyles 时）
+- [ ] 根名符合 [21 根契约](../../scripts/fixtures/mmdsandbox/host-contract.json)（19 + summary + summary-confirm），每个选择器最左为开放的精确 data-host；无作者根前缀、混合非宿主选择器或树外兄弟范围
+- [ ] 未触及充值、SDK 授权、断联、启动加载和登录区域；不读写宿主 DOM，不新增私有接口，不用假控件代替平台真实保存/权限
+- [ ] 文档平铺/无 url 声明限制、测试站 `:has()` 观察、本地 parser 的额外保守拒绝分别注明；没有将“CSS 零过滤”扩展到宿主通路，也没有把 parser 拒绝说成平台绝对禁止
+- [ ] summary 根就在面板本体；根内编辑/锚点使用已观察的 `.summary-ov-edit`/`.summary-ov-anchor`；summary-confirm 位于树外，独立根样式，无虚构内部 class
+- [ ] `hostStyles:["path.css"]` 路径相对配置，输出独立静态 style；默认按需开启，不塞进 base.css/动态阅读主题样式。preset/停用仅控制阅读覆盖，未承诺撤销宿主皮肤或验证动态转发
+- [ ] chat 全景只把抽取 CSS 注入 iframe 外，普通沙盒 CSS 留在内层；thin 不模拟宿主。已观察夹具与未知根占位分别标明，21 根索引不冒充 21 根完整业务验收
 
 ### 审核与验证
 - [ ] **已跑 `scripts/validate.py 文件 --platform mmdsandbox` 且 0 错误**，WARN 逐条看过并确认是有意保留
@@ -185,6 +214,7 @@
 - [ ] 沙盒全景首屏是实际聊天页：仿真控制/证据说明默认折叠，iframe 内无 `✓script` 审计角标，气泡辅助线默认关闭；header/messages/composer 与 left/right/message-extra/actions 槽位均存在
 - [ ] 已在本地浏览器验桌面、窄屏竖向、横屏/软键盘：真实点击、输入、拖动、菜单、设置、stage、深浅色与截图结构无重叠；`--chat-viewport-height` 随 iframe resize/键盘 inset 更新，composer/input 始终可见；字号/颜色/间距用 computed style 复核，不凭压缩截图猜值
 - [ ] 预览能力矩阵已看过：`exact` 可作日常回归，`conservative` 只作保守门禁，`probe-needed` 不当成平台事实
+- [ ] 证据先匹配版本、日期、环境；ready、save.remove、配额、外链加载的历史冲突保留日期，当前部署未复验就明说。旧沙盒未见配额校验不代表服务端无限额，set(null) 逻辑清档不等于释放 key
 - [ ] **真实 MMD 不是日常默认回归环境**：AI 不自行登录账号、不把正式卡/公开卡当夹具。只有出现 `probe-needed` 平台边界，或用户授权最终人工验收时才回真实站；任何「保存编辑」/公开提交先确认对外影响
 - [ ] 若做最终实站验收，已区分瘦预览真实行为：`save.get/save.keys` 会同步抛 `SdkError`，`cache.get` 返回 `undefined`，`composer.visible()` 与 stage 读能力仍可用；不能概括成“一律 NOT_SUPPORTED”
 - [ ] **（仅公开发布的卡才卡这条；私人自用卡与纯草稿跳过）** 固定传输字符 = 人设 + 「已启用 且 常驻 且 概率 100%」的世界书正文，落在 **2000–15000 含边界**；`beginning` **≥200 字**（与 4000 上限夹成 200–4000）。关键词条目、停用条目、概率不足 100% 的常驻条目不计入；**没有用空白换行凑数**。详见 mmd-sandbox.md §10.3
@@ -201,11 +231,11 @@
 - [ ] （分离式）独立正则 json 的 beginning/regex_scripts 与卡内 first_mes/regex_scripts 一致；沙盒的分离式正则 json 走 6 键格式
 - [ ] （单独美化/状态栏流程）默认交付含 正则 json + 规则.md（状态栏生成规则文档）
 
-- [ ] 同层卡使用新增原生动作时，已按 `runtime/mmd-action-modules.md` 检查动作白名单、对应快照 revision、目标引用、确认阶段与会话切换；本地验证和真实站验证分开记录。
+- [ ] **旧版同层卡 `/mmd`** 使用新增原生动作时，已按 `runtime/mmd-action-modules.md` 检查动作白名单、对应快照 revision、目标引用、确认阶段与会话切换；本地验证和真实站验证分开记录。
 
 
-### 同层卡的统一预览与审核入口
+### 旧版同层卡的统一预览与审核入口
 
-同层作品优先按 [统一指南](../creation/same-layer-review.md) 使用 `review_same_layer.py`，复用通用校验及旧 MMD 全景外壳，生成与发布载荷同版本的联动预览和报告。检查 MMD / 同层页切换及共享状态。报告 PASS 仅指实际列出的本地自动项；缺环境为未完成，视觉/剧情审核、真实 MMD 与实体手机分别记证据。普通气泡美化和新页预览仍沿用各自流程。
+旧版同层作品优先按 [统一指南](../creation/same-layer-review.md) 使用 `review_same_layer.py`，复用通用校验及旧 MMD 全景外壳，生成与发布载荷同版本的联动预览和报告。检查 MMD / 同层页切换及共享状态。报告 PASS 仅指实际列出的本地自动项；缺环境为未完成，视觉/剧情审核、真实 MMD 与实体手机分别记证据。**沙盒同层卡改走 [新页指南 §8](../creation/sandbox-same-layer-card.md#8-制作与验收顺序)**，不用此旧页审核器；普通气泡美化沿用各自流程。
 
 同层联动预览还需通过原生完整性检查：对照旧预览快捷/更多/面板清单，验证参数入口未错接为模型列表、总结和用户消息按钮未丢失、原生关闭控件不被同层返回浮钮遮挡。恢复原生 UI 不代表扩展了已审核桥接接口。

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""build_sbk.py —— SBK（MMD 沙盒模式基座）生成器。
+r"""build_sbk.py —— SBK（MMD 沙盒模式基座）生成器。
 
 把声明式 `sbk.config.json` 编译成**可直接导入 MMD 创卡页**的 6 键正则 JSON。
-唯一设计依据：`资料/基座事实卡.md`（下称"事实卡"）。所有规避平台坑的分支都注明节号。
+历史依据：`资料/基座事实卡.md`（下称"事实卡"）；主题变量和宿主 CSS 另对齐 scripts 下的契约。
 
 用法
 ----
@@ -47,6 +47,8 @@
                       给 dark 与 light。生成器编译成 theme.register 可消费的
                       {tokens, tune} 并放进 boot 信封；只下发本卡列出的包。
   preset        str   默认风格包名（须在 presets 里）。玩家挑过后存档优先。
+  hostStyles    list  可选宿主 CSS 路径数组（相对配置目录），严格校验后输出独立静态 style
+                      规则。制作期宿主皮肤不受阅读主题开关控制，不承诺动态跨宿主联动。
   modes         obj   {status:bool, chrome:bool, pinned:bool}，默认 true/true/false。
                       🚨 2.0 语义（设计文档第二节）：三者【职责不同】，不是同一份数据的多个渲染器。
                         status = 气泡内状态面板（唯一的状态数据渲染器，原 snapshot）
@@ -81,6 +83,9 @@
   · `config.theme` 经 boot 信封下发，作合成的最底层「作者基线」；
   · 最终样式 = author base + 选中的 preset + per-mode overrides，一个 `<style>` 承载。
 
+hostStyles 是独立的制作期宿主 CSS 通道，不由 theme.js 写入或撤销。启用该配置后，设置
+面板明确把开关命名为「阅读主题」并说明静态宿主皮肤不受控制。没有该配置时保持原语义。
+
 boot 信封形如 `{"v":2, "base":…, "presets":{…}, "preset":"…"}`，走 `o.theme` 这一个键。
 之所以搭这趟车：`core.js` 只有 `if (o.theme) SBK.theme.apply(o.theme)` 一条主题接线，
 而本工作包不改 `core.js`。信封**恒为非空对象**，故 `modes.chrome` 无论真假，boot 都会
@@ -96,6 +101,8 @@ hud.js → hud-render.js → ui.js → ui-panel.js → ui-stage.js`。
 `sbk-ui-N`，每条拿唯一 slash marker；数组顺序就是运行时装载顺序。绝不从函数或字符串
 中间切脚本。`MAX_SOURCE_RULE=18000` 是不可调高的最终规则门禁：单模块、boot、场景规则
 任何一条超过它都直接 ERROR，必须拆源码/配置，不能让超限文件独占一条或提高阈值绕过。
+所有长度/预算按 UTF-16 单位计量。hostStyles 按完整 CSS 规则边界拆分，保留 @media；
+宿主 CSS 严格校验和最终 18000 门禁不受调试参数 --force 绕过。
 
 退出码：0 全绿（可能有 warn）／1 有 error（不写出文件）／2 配置或 IO 错误。
 """
@@ -181,11 +188,17 @@ class Diag:
 
     def __init__(self):
         self.errors = []
+        self.hard_errors = []
         self.warns = []
         self.notes = []
 
     def err(self, where, msg):
         self.errors.append("%s: %s" % (where, msg))
+
+    def block(self, where, msg):
+        """明确的交付硬门禁，调试用 --force 也不能绕过。"""
+        self.err(where, msg)
+        self.hard_errors.append(self.errors[-1])
 
     def warn(self, where, msg):
         self.warns.append("%s: %s" % (where, msg))
@@ -200,6 +213,11 @@ class Diag:
 
 class BuildError(Exception):
     """配置/IO 级致命错误，直接退出码 2。"""
+
+
+def utf16_len(text):
+    """平台 JavaScript String.length：非 BMP 字符计两个 UTF-16 单位。"""
+    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
 # ---------------------------------------------------------------- 剥注释
@@ -559,7 +577,7 @@ def estimate_budget(rule, input_len, expected_matches, diag, where):
     """
     rs = rule["replaceString"]
     budget = max(BUDGET_FLOOR, input_len * 4)
-    rlen = len(rs)
+    rlen = utf16_len(rs)
 
     hazard = zero_width_hazard(rule["findRegex"])
     if hazard and hazard[0] == "empty-match":
@@ -591,7 +609,7 @@ def check_lengths(rule, diag, where):
     pairs = (("scriptName", "name"), ("findRegex", "regex"), ("replaceString", "content"))
     for field, key in pairs:
         v = rule[field]
-        n = len(v)
+        n = utf16_len(v)
         if n > HARD[key]:
             if key == "content":
                 diag.err(where, "%s %d 字符 > 已确认导入上限 %d——请拆条（§6）。"
@@ -668,7 +686,7 @@ def load_assets(asset_dir, names, diag, strip):
         body = strip_js_comments(raw) if (strip and name.endswith(".js")) else \
                (strip_css_comments(raw) if (strip and name.endswith(".css")) else raw)
         parts.append(body)
-        loaded.append({"name": name, "raw": len(raw), "out": len(body), "text": body})
+        loaded.append({"name": name, "raw": utf16_len(raw), "out": utf16_len(body), "text": body})
     for name in missing:
         diag.warn("assets", "%s 缺失——跳过（WP-2/WP-3 交付后重跑生成器即可合并）。" % name)
     return "\n".join(parts), loaded, missing
@@ -680,22 +698,23 @@ def load_assets(asset_dir, names, diag, strip):
 
 SCRIPT_WRAPPER = "<script>\n%s\n</script>"
 # 包裹开销："<script>\n" + "\n</script>" —— 打包时必须预留，否则贴着阈值会溢出
-WRAPPER_OVERHEAD = len(SCRIPT_WRAPPER % "")
+STYLE_WRAPPER = "<style>\n%s\n</style>"
+WRAPPER_OVERHEAD = utf16_len(SCRIPT_WRAPPER % "")
 MAX_SOURCE_RULE = 18000          # 不可绕过：所有 SBK 源模块规则含 <script> 包装后的硬预算
 DEFAULT_SPLIT_THRESHOLD = MAX_SOURCE_RULE
 
 
-def pack_by_file(loaded, threshold):
-    """按**文件边界**贪心装箱，保持原始顺序。
+def pack_by_file(loaded, threshold, wrapper=SCRIPT_WRAPPER):
+    """按完整条目边界贪心装箱，保持原始顺序。
 
-    粒度是整个文件：每个文件本身是完整 IIFE，切开必然语法错（plan.md 已裁决第 7 条）。
+    脚本条目是完整 IIFE 文件；宿主 CSS 条目是解析后的完整规则（含 media 包装）。
     若单个文件自身就超阈值，允许它独占一条——这比切开它安全得多。
     返回 [[entry, ...], ...]，箱内与箱间顺序均与 `loaded` 一致。
     """
-    room = max(1, threshold - WRAPPER_OVERHEAD)
+    room = max(1, threshold - utf16_len(wrapper % ""))
     bins, cur, cur_len = [], [], 0
     for e in loaded:
-        n = len(e["text"])
+        n = utf16_len(e["text"])
         # 已有内容且再加就超 → 先封箱（+1 是 join 的换行）
         if cur and cur_len + 1 + n > room:
             bins.append(cur)
@@ -737,11 +756,11 @@ def emit_script_rules(rid, base_name, base_marker, loaded, threshold, diag, stri
         rules.append(_rule(rid, name, marker, SCRIPT_WRAPPER % body))
         layout.append({"scriptName": name, "marker": marker,
                        "files": [e["name"] for e in box],
-                       "chars": len(body) + WRAPPER_OVERHEAD})
+                       "chars": utf16_len(body) + WRAPPER_OVERHEAD})
         rid -= 1
     if multi:
         diag.note("%s 合计 %d 字符超阈值 %d，已按文件边界自动拆成 %d 条（顺序保持 %s）"
-                  % (base_name, sum(len(e["text"]) for e in loaded) + WRAPPER_OVERHEAD,
+                  % (base_name, sum(utf16_len(e["text"]) for e in loaded) + WRAPPER_OVERHEAD,
                      threshold, len(bins), " → ".join(e["name"] for e in loaded)))
     for item in layout:
         if item["chars"] > MAX_SOURCE_RULE:
@@ -770,7 +789,7 @@ def emit_script_rules(rid, base_name, base_marker, loaded, threshold, diag, stri
 #      sbk-css 规则的 replaceString 里不含 [data-theme= 覆写块。
 
 # 风格 bundle 六维（美化决策「风格 bundle」冻结）。键名恰好这六个，多一个少一个都 ERROR：
-#   palette    配色 → 落 14 个平台 --chat-* 语义令牌 + --sbk-on-accent
+#   palette    配色 → 落 29 个平台 --chat-* 语义令牌 + --sbk-on-accent
 #   layout     骨架节奏 → --sbk-gap / --sbk-pad / --sbk-radius
 #   ui         控件质感 → --sbk-shadow / --sbk-lift / --sbk-ball / --sbk-drw-w
 #   font       字号行距 → --sbk-fs / --sbk-fs-sm + 结构化 tune(fontSize/lineHeight)
@@ -900,7 +919,7 @@ def ok_token(k, sbk_ok=None):
     sbk_ok 省略/None 时用内置镜像 SBK_PRIVATE_FALLBACK ——【始终严格】。
     🚨 曾经的写法是「读不到白名单就放行一切 --sbk-*」，那等于生成期不校验私有令牌：
        作者写错一个名字（--sbk-wobble）会静默无效，正是本轮要消灭的一类缺陷。
-    🚨 --chat-* 只认平台真实存在的那 14 个：平台没定义的变量写了不报错也不生效，
+    🚨 --chat-* 只认平台真实存在的那 29 个：平台没定义的变量写了不报错也不生效，
        同样是静默失效，必须生成期拦住。
     """
     if not isinstance(k, str) or not k:
@@ -1047,8 +1066,8 @@ def _compile_dim(where, dim, mode, src, dst, diag, sbk_ok):
                 dst["tune"][k] = v
             continue
         if not ok_token(k, sbk_ok):
-            diag.err(where, "%s.%s 里的令牌名 %r 不在白名单内——合法范围：平台 14 个语义名/"
-                            "后缀名、--chat-* 里真实存在的那 14 个、theme.js SBK_OK 列出的 "
+            diag.err(where, "%s.%s 里的令牌名 %r 不在白名单内——合法范围：平台 29 个语义名/"
+                            "后缀名、--chat-* 里真实存在的那 29 个、theme.js SBK_OK 列出的 "
                             "--sbk-* 私有名、以及页面级属性 %s。平台没定义的变量写了不报错"
                             "也不生效，是典型静默失效。" % (dim, mode, k, list(_PAGE_KEYS)))
             ok = False
@@ -1222,17 +1241,21 @@ def build_presets(cfg, diag):
     return out
 
 
-# theme.js 的语义名 → 平台 --chat-* 后缀（与 theme.js MAP 保持一致）
-_THEME_MAP = {
-    "bg": "bg", "surface": "surface", "panel": "surface", "text": "text", "muted": "text-muted",
-    "border": "border", "accent": "accent", "primary": "accent",
-    "userBubble": "bubble-user-bg", "aiBubble": "bubble-ai-bg", "bubbleText": "bubble-text",
-    "sharePick": "share-pick-bg", "inputBg": "input-bg", "inputText": "input-text",
-    "shortcutText": "shortcut-text", "moreItemBg": "more-item-bg",
-}
-_PLATFORM_VARS = {"bg", "surface", "text", "text-muted", "border", "accent",
-                  "bubble-user-bg", "bubble-ai-bg", "bubble-text", "share-pick-bg",
-                  "input-bg", "input-text", "shortcut-text", "more-item-bg"}
+def _platform_registry_from_theme_js():
+    """平台变量和语义别名只在随附 theme.js 的纯 JSON MAP 表注册。"""
+    path = Path(__file__).resolve().parent / "sbk" / "theme.js"
+    match = re.search(r"var MAP = (\{.*?\});", path.read_text(encoding="utf-8"), re.S)
+    if not match:
+        raise BuildError("theme.js 缺少平台变量 JSON MAP 注册表。")
+    registry = json.loads(match.group(1))
+    if not registry or not all(isinstance(k, str) and isinstance(v, str)
+                               for k, v in registry.items()):
+        raise BuildError("theme.js 平台变量 MAP 注册表格式无效。")
+    return registry
+
+
+_THEME_MAP = _platform_registry_from_theme_js()
+_PLATFORM_VARS = set(_THEME_MAP.values())
 
 _AUTHOR_COLOR_VARS = {
     "--chat-bg": "bg", "--chat-surface": "surface", "--chat-text": "text",
@@ -1320,7 +1343,7 @@ def normalize_author_theme(raw, asset_dir, diag):
         for k, v in tok.items():
             where = "config.theme.%s.%s" % (mode, k)
             if not ok_token(k, sbk_ok):
-                diag.err(where, "令牌名不在平台 14 个或 theme.js SBK_OK 白名单内。")
+                diag.err(where, "令牌名不在平台 29 个或 theme.js SBK_OK 白名单内。")
                 continue
             if v is None or v == "":
                 diag.err(where, "主题令牌不能为空。")
@@ -1373,7 +1396,7 @@ def theme_envelope(cfg):
        1.0 只有 modes.chrome=true 时 ui.chrome 才调 theme.start，关掉 chrome 就
        完全没人读偏好存档：玩家上次存的字号/配色开局不生效。
     """
-    return {
+    envelope = {
         "v": 2,
         # 制作期 config.theme（旧配置照旧可用）→ 运行时的【作者基线】，不再是永久覆写
         "base": cfg.get("theme") or None,
@@ -1381,6 +1404,9 @@ def theme_envelope(cfg):
         "presets": cfg.get("presets") or {},
         "preset": cfg.get("preset") or "",
     }
+    if cfg.get("hostStyleRules"):
+        envelope["staticHostStyles"] = True
+    return envelope
 
 
 def boot_script(cfg, diag):
@@ -1696,6 +1722,75 @@ def normalize_schema(schema, diag):
     return out
 
 
+def load_host_styles(raw, base_dir, diag):
+    """严格导入制作期宿主 CSS；过滤诊断或普通沙盒 CSS 都阻止文件进入产物。"""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        diag.block("hostStyles", "必须是 CSS 文件路径数组，路径相对配置文件目录。")
+        return []
+    if not raw:
+        return []
+    # 与预览使用同一保守解析器；不是绕过 iframe 的运行时通道。
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from sandbox_host_css import extract_host_css
+
+    loaded = []
+    for index, value in enumerate(raw):
+        where = "hostStyles[%d]" % index
+        if not isinstance(value, str) or not value.strip():
+            diag.block(where, "每项必须是非空 CSS 文件路径字符串。")
+            continue
+        path = Path(value)
+        if not path.is_absolute():
+            path = Path(base_dir) / path
+        try:
+            source = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError, ValueError) as exc:
+            diag.block(where, "无法读取 UTF-8 CSS 文件 %s：%s" % (path, exc))
+            continue
+        result = extract_host_css(source)
+        for item in result["diagnostics"]:
+            diag.block(where, "%s [%s] %s" % (value, item["code"], item["message"]))
+        local = result["sandbox_css"].strip()
+        if local:
+            diag.block(where, "%s 含非宿主 CSS；hostStyles 只收精确开放 data-host 根，"
+                           "沙盒样式请放在沙盒资源里。" % value)
+        if result["diagnostics"] or local:
+            continue
+        entries = []
+        for n, block in enumerate(result["rules"], 1):
+            size = utf16_len(STYLE_WRAPPER % block)
+            if size > MAX_SOURCE_RULE:
+                diag.block(where, "%s 第 %d 个完整 CSS 规则含 style 包装后 %d UTF-16 单位 > %d；"
+                               "请在源码中拆分规则，不能切断声明或提高门禁。"
+                         % (value, n, size, MAX_SOURCE_RULE))
+            entries.append({"name": "%s#%d" % (value, n), "raw": utf16_len(block),
+                            "out": utf16_len(block), "text": block})
+        if any(utf16_len(STYLE_WRAPPER % e["text"]) > MAX_SOURCE_RULE for e in entries):
+            continue
+        loaded.extend(entries)
+    return loaded
+
+
+def emit_host_style_rules(rid, loaded, threshold, diag):
+    """只沿解析后的完整 CSS 规则边界拆条；@media 包装与内部规则一起保留。"""
+    rules = []
+    boxes = pack_by_file(loaded, threshold, STYLE_WRAPPER)
+    for index, entries in enumerate(boxes, 1):
+        name = "sbk-host-css" + ("-%d" % index if len(boxes) > 1 else "")
+        body = STYLE_WRAPPER % "\n".join(e["text"] for e in entries)
+        rules.append(_rule(rid, name, "{{%s}}" % name, body))
+        rid -= 1
+        if utf16_len(body) > threshold:
+            diag.warn(name, "完整 CSS 规则 %d UTF-16 单位超过自定义拆条阈值 %d，"
+                            "已独占一条，仍须通过固定 %d 门禁。"
+                      % (utf16_len(body), threshold, MAX_SOURCE_RULE))
+    return rules, rid
+
+
 def normalize_config(raw, config_path, diag):
     if not isinstance(raw, dict):
         raise BuildError("配置顶层必须是 JSON 对象。")
@@ -1742,6 +1837,7 @@ def normalize_config(raw, config_path, diag):
         "statusbar": _need_str(cfg, "statusbar", diag),
         "personality": cfg.get("personality") or "",
         "assetDir": adir,
+        "hostStyleRules": load_host_styles(cfg.get("hostStyles"), base, diag),
         # 作者基线走与 theme.js 一致的 token/tune/危险值校验，再进 boot 信封。
         "theme": normalize_author_theme(cfg.get("theme") or {}, adir, diag),
         # 六维风格包源（路径数组或内联映射）→ 稍后由 build_presets 编译进 cfg["presets"]
@@ -1991,11 +2087,18 @@ def build(cfg, diag, strip=True):
     #    1.0 把作者主题编译进这条静态规则，导致 prefs.enabled(false) 只清得掉 theme.js 的
     #    动态 <style>，静态覆写还在 → 「关闭美化＝完全跟随平台」不成立。
     #    作者基线现在走 boot 信封（theme_envelope）交给 theme.js，与 preset/overrides
-    #    合成同一个 #sbk-theme-vars。整卡的主题【只有一个写入者】。
+    #    合成同一个 #sbk-theme-vars。动态阅读主题【只有一个写入者】，独立 hostStyles 由制作期配置管理。
     css_src, loaded, _ = load_assets(adir, ("base.css",), diag, strip)
     assets_report["sbk-css"] = loaded
     rules.append(_rule(rid, "sbk-css", mk["css"], "<style>\n%s\n</style>" % css_src))
     rid -= 1
+
+    # 制作期宿主皮肤独立成条，阅读主题的动态节点不拥有它。
+    host_styles = cfg.get("hostStyleRules") or []
+    if host_styles:
+        host_rules, rid = emit_host_style_rules(rid, host_styles, cfg["splitThreshold"], diag)
+        rules.extend(host_rules)
+        assets_report["sbk-host-css"] = host_styles
 
     # ---- 1b. 风格包编译（进 boot 信封，不进 CSS）----
     cfg["presets"] = build_presets(cfg, diag)
@@ -2089,7 +2192,7 @@ def validate_rules(rules, cfg, diag):
 
     # 输入文本长度：预算 = max(262144, 输入长度×4)。保守取 statusbar/beginning 里较短者，
     # 因为消息正文长度未知；用最小的输入长度得到最紧的预算 → 不会低估风险（§5.2）。
-    input_len = max(1, min(len(cfg["statusbar"]) or 1, len(cfg["beginning"]) or 1))
+    input_len = max(1, min(utf16_len(cfg["statusbar"]) or 1, utf16_len(cfg["beginning"]) or 1))
 
     seen_ids, seen_names, metrics = set(), set(), []
     for r in rules:
@@ -2107,10 +2210,10 @@ def validate_rules(rules, cfg, diag):
         seen_names.add(r["scriptName"])
 
         check_lengths(r, diag, where)
-        if len(r["replaceString"]) > MAX_SOURCE_RULE:
-            diag.err(where, "replaceString %d 字符 > SBK 交付安全上限 %d。所有最终规则都必须留足"
+        if utf16_len(r["replaceString"]) > MAX_SOURCE_RULE:
+            diag.block(where, "replaceString %d 字符 > SBK 交付安全上限 %d。所有最终规则都必须留足"
                             "编辑器保存余量；资源脚本请拆完整 IIFE，boot/场景规则请拆配置或规则。"
-                     % (len(r["replaceString"]), MAX_SOURCE_RULE))
+                     % (utf16_len(r["replaceString"]), MAX_SOURCE_RULE))
         check_slash_form(r, diag, where)
         check_module_syntax(r["replaceString"], diag, where)
         check_csp(r["replaceString"], diag, where)
@@ -2124,8 +2227,8 @@ def validate_rules(rules, cfg, diag):
         m = estimate_budget(r, input_len, exp, diag, where)
         m["scriptName"] = r["scriptName"]
         m["id"] = r["id"]
-        m["nameLen"] = len(r["scriptName"])
-        m["findLen"] = len(r["findRegex"])
+        m["nameLen"] = utf16_len(r["scriptName"])
+        m["findLen"] = utf16_len(r["findRegex"])
         metrics.append(m)
     return metrics
 
@@ -2136,15 +2239,15 @@ def validate_top_level(doc, diag):
     want = {"chatVersion", "pageDepth", "statusbar", "beginning", "personality", "regex_scripts"}
     if keys != want:
         diag.err("top", "顶层必须恰好 6 键 %s，当前 %s。" % (sorted(want), sorted(keys)))
-    if len(doc["beginning"]) > HARD["beginning"]:
+    if utf16_len(doc["beginning"]) > HARD["beginning"]:
         diag.err("top", "beginning %d 字符 > 4000（§6；源码归一常量与 UI 计数器一致）。"
-                 % len(doc["beginning"]))
-    if len(doc["statusbar"]) > HARD["statusbar"]:
-        diag.err("top", "statusbar %d 字符 > 200（§6）——超出被静默截断。" % len(doc["statusbar"]))
+                 % utf16_len(doc["beginning"]))
+    if utf16_len(doc["statusbar"]) > HARD["statusbar"]:
+        diag.err("top", "statusbar %d 字符 > 200（§6）——超出被静默截断。" % utf16_len(doc["statusbar"]))
     # imageUrl 不是 6 键之一，但配置里若出现 URL 字段仍按 2048 硬限（§6）
     for m in re.finditer(r'"(?:imageUrl|avatarUrl)"\s*:\s*"([^"]*)"', json.dumps(doc, ensure_ascii=False)):
-        if len(m.group(1)) > HARD["imageUrl"]:
-            diag.err("top", "imageUrl %d 字符 > 2048（§6）。" % len(m.group(1)))
+        if utf16_len(m.group(1)) > HARD["imageUrl"]:
+            diag.err("top", "imageUrl %d 字符 > 2048（§6）。" % utf16_len(m.group(1)))
     # 可见内容规则的触发串必须能在 statusbar / beginning / 其他规则的 replaceString 里找到，
     # 否则页面上永远不出现（§5.6 功能栏正则输入是 statusbar 自身）。
     soup = [doc["statusbar"], doc["beginning"]] + [r["replaceString"] for r in doc["regex_scripts"]]
@@ -2192,7 +2295,7 @@ def render_report(doc, metrics, assets_report, diag, verbose=False):
     L.append("chatVersion=%s  pageDepth=%s  规则 %d 条（上限 %d）"
              % (doc["chatVersion"], doc["pageDepth"], len(doc["regex_scripts"]), HARD["regexList"]))
     L.append("statusbar %d/200  beginning %d/4000  personality %d 字符"
-             % (len(doc["statusbar"]), len(doc["beginning"]), len(doc["personality"])))
+             % (utf16_len(doc["statusbar"]), utf16_len(doc["beginning"]), utf16_len(doc["personality"])))
     L.append("")
     L.append("%-4s %-14s %8s %8s %10s %10s" % ("id", "scriptName", "find", "replace", "估算输出", "预算"))
     L.append("-" * 72)
@@ -2304,7 +2407,7 @@ def main(argv=None):
     ap.add_argument("--no-strip-comments", action="store_true",
                     help="不剥注释（默认剥：core+theme 带注释已逼近编辑器显示上限 20000）")
     ap.add_argument("--verbose", "-v", action="store_true", help="打印资源合并明细")
-    ap.add_argument("--force", action="store_true", help="即使有 ERROR 也写出文件（仅用于调试）")
+    ap.add_argument("--force", action="store_true", help="有普通 ERROR 仍写出（仅调试；不绕过宿主 CSS 校验及 18000 硬门禁）")
     a = ap.parse_args(argv)
 
     try:
@@ -2315,9 +2418,9 @@ def main(argv=None):
 
     print(render_report(doc, metrics, assets, diag, verbose=a.verbose))
 
-    if diag.errors and not a.force:
-        sys.stderr.write("\n有 %d 条 ERROR，未写出文件。修完重跑，或加 --force 强制写出。\n"
-                         % len(diag.errors))
+    if diag.errors and (not a.force or diag.hard_errors):
+        message = "宿主 CSS 校验及 18000 硬门禁不可通过 --force 绕过。" if diag.hard_errors else "修完重跑，或仅调试时加 --force 强制写出。"
+        sys.stderr.write("\n有 %d 条 ERROR，未写出文件。%s\n" % (len(diag.errors), message))
         return 1
 
     out = Path(a.out)

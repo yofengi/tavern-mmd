@@ -335,6 +335,95 @@ test("chat：message.send 是 Promise<void>，不回传 payload", async () => {
   assert.equal(CONTRACT.sdk.messageSendReturns, "Promise<void>");
 });
 
+test("send(undefined) 读取当前草稿，成功后清空，且不产生 AI 回复", async () => {
+  const { sdk, dom, control } = boot();
+  sdk.input.set("保留完整 草稿 ");
+  const before = control.eventOrder().length;
+  const result = sdk.message.send();
+  assert.equal(typeof result.then, "function");
+  assert.equal(await result, undefined);
+  const last = dom.list.childNodes.at(-1).querySelector('[data-chat="message"]');
+  assert.equal(last.getAttribute("data-from"), "user");
+  assert.equal(last.querySelector('[data-chat="message-body"]').textContent, "保留完整 草稿 ");
+  assert.equal(sdk.input.get(), "");
+  assert.equal(dom.list.childNodes.length, 2, "只追加一条本地用户消息");
+  assert.deepEqual(Array.from(control.eventOrder()).slice(before),
+                   ["message:new", "message:mount", "message:done"]);
+});
+
+test("空消息以 INVALID_ARGS 拒绝，不清草稿、不添加气泡", async () => {
+  const { sdk, dom } = boot();
+  sdk.input.set("未发送的草稿");
+  for (const text of ["", " \n\t ", null]) {
+    await assert.rejects(sdk.message.send(text), { name: "SdkError", code: "INVALID_ARGS" });
+    assert.equal(sdk.input.get(), "未发送的草稿");
+  }
+  sdk.input.set(" \n ");
+  await assert.rejects(sdk.message.send(), { name: "SdkError", code: "INVALID_ARGS" });
+  assert.equal(sdk.input.get(), " \n ");
+  assert.equal(dom.list.childNodes.length, 1);
+});
+
+test("同一发送尚未完成时再次 send 立即 BUSY，后改的草稿保留", async () => {
+  const { sdk, dom, control } = boot();
+  sdk.input.set("第一条");
+  const first = sdk.message.send();
+  assert.equal(control.diagnose().sendPending, true);
+  sdk.input.set("下一条草稿");
+  const second = sdk.message.send();
+  await assert.rejects(second, { name: "SdkError", code: "BUSY" });
+  await first;
+  assert.equal(sdk.input.get(), "下一条草稿");
+  assert.equal(dom.list.childNodes.length, 2);
+  assert.equal(control.diagnose().busy, false);
+  assert.equal(control.diagnose().sendPending, false);
+});
+
+test("可控 BUSY 保留草稿且解除后不自动重发", async () => {
+  const { sdk, dom, control } = boot();
+  sdk.input.set("等待手动发送");
+  assert.equal(control.setBusy(true), true);
+  await assert.rejects(sdk.message.send(), { name: "SdkError", code: "BUSY" });
+  assert.equal(sdk.input.get(), "等待手动发送");
+  assert.equal(control.setBusy(false), false);
+  await Promise.resolve();
+  assert.equal(dom.list.childNodes.length, 1, "解除忙碌后仍等待用户操作");
+  await sdk.message.send();
+  assert.equal(dom.list.childNodes.length, 2);
+  assert.equal(sdk.input.get(), "");
+});
+
+test("流式开始即 BUSY，done 后解除，stream 文本为当前已揭示累计值", async () => {
+  const { sdk, control } = boot();
+  const seen = [];
+  sdk.on("message:stream", (p) => seen.push(p.content));
+  control.stream(["已", "揭示"]);
+  assert.equal(control.diagnose().busy, true);
+  control.setBusy(false);
+  await assert.rejects(sdk.message.send("不能并发"), { code: "BUSY" });
+  assert.deepEqual(seen, ["已", "已揭示"]);
+  assert.equal(control.done().content, "已揭示");
+  assert.equal(control.diagnose().busy, false);
+  await sdk.message.send("完成后手动发");
+});
+
+test("切会话清理强制忙态、流式和旧发送的 pending，不串清新草稿", async () => {
+  const { sdk, control } = boot();
+  sdk.input.set("旧会话发送");
+  const oldSend = sdk.message.send();
+  control.stream("旧回复");
+  control.setBusy(true);
+  control.switchConversation("next");
+  assert.equal(control.diagnose().busy, false);
+  assert.equal(control.diagnose().sendPending, false);
+  assert.equal(control.diagnose().streaming, false);
+  sdk.input.set("新会话草稿");
+  await oldSend;
+  assert.equal(sdk.input.get(), "新会话草稿");
+  await sdk.message.send();
+  assert.equal(sdk.input.get(), "");
+});
+
 test("message.edit 空 serverId 用 INVALID_ARGS 错误码", async () => {
   const { sdk } = boot();
   await sdk.message.edit(null, "x").then(
@@ -506,6 +595,138 @@ test("stage.el 关闭时仍返回 DIV，只有 visible 判开关", () => {
   assert.equal(sdk.stage.el().tagName, "DIV");
 });
 
+test("stage 的 content/full/closed 属性和 visible 一致，切换保留作者节点", () => {
+  const { sdk, dom, control } = boot();
+  const marker = dom.stage.ownerDocument.createElement("canvas");
+  dom.stage.appendChild(marker);
+  assert.equal(dom.stage.getAttribute("data-stage"), "closed");
+  assert.equal(sdk.stage.open(), undefined);
+  assert.equal(dom.stage.getAttribute("data-stage"), "content");
+  assert.equal(dom.stage.hasAttribute("hidden"), false);
+  assert.equal(sdk.stage.visible(), true);
+  assert.equal(sdk.stage.open("full"), undefined);
+  assert.equal(dom.stage.getAttribute("data-stage"), "full");
+  assert.equal(control.diagnose().stageMode, "full");
+  assert.equal(sdk.stage.close(), undefined);
+  assert.equal(dom.stage.getAttribute("data-stage"), "closed");
+  assert.equal(dom.stage.hasAttribute("hidden"), true);
+  assert.equal(sdk.stage.visible(), false);
+  for (const mode of ["content", "full", "closed"]) {
+    assert.equal(control.stageMode(mode), mode);
+    assert.equal(dom.stage.getAttribute("data-stage"), mode);
+    assert.equal(sdk.stage.visible(), mode !== "closed");
+    assert.equal(dom.stage.querySelector("canvas"), marker);
+  }
+});
+
+test("content 几何跟随消息区，full 清除局部坐标交给平台 CSS", () => {
+  const { sdk, dom, win, control } = boot({ config: { viewportHeight: 900 } });
+  let bounds = { left: 30, top: 90, width: 360, height: 650 };
+  dom.root.getBoundingClientRect = () => ({ left: 20, top: 10 });
+  dom.messages.getBoundingClientRect = () => bounds;
+  const value = (name) => dom.stage.style.getPropertyValue(name);
+  sdk.stage.open("content");
+  assert.deepEqual([value("left"), value("top"), value("width"), value("height")],
+                   ["10px", "80px", "360px", "650px"]);
+  bounds = { left: 25, top: 100, width: 300, height: 400 };
+  win._fire("resize");
+  assert.deepEqual([value("left"), value("top"), value("width"), value("height")],
+                   ["5px", "90px", "300px", "400px"]);
+  bounds = { left: 25, top: 100, width: 300, height: 250 };
+  control.setKeyboardInset(300);
+  assert.equal(value("height"), "250px");
+  sdk.stage.open("full");
+  for (const name of ["left", "top", "right", "bottom", "width", "height", "inset"]) {
+    assert.equal(value(name), "", `${name} 不应覆盖 full 的 CSS`);
+  }
+  win._fire("resize");
+  assert.equal(value("height"), "", "full 不应用消息区尺寸");
+});
+
+test("没有布局测量接口时 content 保留 CSS 回退且可正常关闭", () => {
+  const { sdk, dom } = boot();
+  assert.equal(typeof dom.messages.getBoundingClientRect, "undefined");
+  assert.equal(sdk.stage.open("content"), undefined);
+  assert.equal(dom.stage.getAttribute("data-stage"), "content");
+  assert.equal(dom.stage.style.getPropertyValue("height"), "");
+  sdk.stage.close();
+  assert.equal(dom.stage.hasAttribute("hidden"), true);
+});
+
+test("content 舞台在 composer hide/show 后立即同步消息区，无 ResizeObserver 也可用", () => {
+  const { sdk, dom, win } = boot();
+  assert.equal(typeof win.ResizeObserver, "undefined");
+  dom.root.getBoundingClientRect = () => ({ left: 0, top: 0 });
+  dom.messages.getBoundingClientRect = () => ({
+    left: 0, top: 45, width: 360,
+    height: dom.root.getAttribute("data-composer") === "hidden" ? 750 : 650,
+  });
+  sdk.stage.open("content");
+  assert.equal(dom.stage.style.getPropertyValue("height"), "650px");
+  sdk.composer.hide();
+  assert.equal(dom.stage.style.getPropertyValue("height"), "750px");
+  sdk.composer.show();
+  assert.equal(dom.stage.style.getPropertyValue("height"), "650px");
+});
+
+test("ResizeObserver 跟随消息区自动缩放，full 不受影响，dispose 清理观察器", () => {
+  let observer;
+  const { sdk, dom, control } = boot({
+    authorScript(win) {
+      win.ResizeObserver = class {
+        constructor(callback) { this.callback = callback; observer = this; }
+        observe(target) { this.target = target; }
+        disconnect() { this.disconnected = true; }
+      };
+    },
+  });
+  assert.ok(observer, "DOM 就绪后订阅消息区尺寸");
+  assert.equal(observer.target, dom.messages);
+  let height = 650;
+  dom.root.getBoundingClientRect = () => ({ left: 0, top: 0 });
+  dom.messages.getBoundingClientRect = () => ({ left: 0, top: 45, width: 360, height });
+  sdk.stage.open("content");
+  height = 570; // 输入框自动增高，窗口未触发 resize。
+  observer.callback();
+  assert.equal(dom.stage.style.getPropertyValue("height"), "570px");
+  sdk.stage.open("full");
+  height = 500;
+  observer.callback();
+  assert.equal(dom.stage.style.getPropertyValue("height"), "", "full 保留平台 CSS 几何");
+  sdk.stage.open("content");
+  assert.equal(dom.stage.style.getPropertyValue("height"), "500px");
+  control.dispose();
+  assert.equal(observer.disconnected, true);
+  height = 400;
+  observer.callback(); // 已排队的 observer 回调即使到达，也不能继续改舞台。
+  assert.equal(dom.stage.style.getPropertyValue("height"), "500px");
+});
+
+test("返回先关闭打开的舞台；切会话也关闭但不删除作者子树", () => {
+  const events = [];
+  const { sdk, control, dom } = boot({
+    authorScript(win) {
+      for (const name of ["back", "stage:close", "conversation:switch"]) {
+        win.sdk.on(name, (payload) => events.push([name, payload]));
+      }
+    },
+  });
+  const marker = dom.stage.ownerDocument.createElement("canvas");
+  dom.stage.appendChild(marker);
+  sdk.stage.open("full");
+  control.back();
+  assert.deepEqual(events, [["stage:close", undefined]]);
+  assert.equal(sdk.stage.visible(), false);
+  assert.equal(dom.stage.getAttribute("data-stage"), "closed");
+  control.back();
+  assert.deepEqual(events.at(-1), ["back", undefined]);
+  sdk.stage.open("content");
+  control.switchConversation("next");
+  assert.deepEqual(events.slice(-2), [["stage:close", undefined], ["conversation:switch", undefined]]);
+  assert.equal(sdk.stage.visible(), false);
+  assert.equal(dom.stage.querySelector("canvas"), marker);
+});
+
 test("sdk.stage.close 不派 stage:close；平台关闭才派", () => {
   const events = [];
   const { sdk, control } = boot({
@@ -536,13 +757,13 @@ test("switch 清消息与 replay 历史，但订阅仍在", () => {
   const hits = [];
   const { dom, sdk, control } = boot({
     authorScript(win) {
-      win.sdk.on("conversation:switch", (id) => hits.push(["switch", id]));
+      win.sdk.on("conversation:switch", (payload) => hits.push(["switch", payload]));
       win.sdk.on("message:mount", (p) => hits.push(["mount", p.id]));
     },
   });
   assert.equal(hits.filter(([k]) => k === "mount").length, 1);
   control.switchConversation("conv-2");
-  assert.ok(hits.some(([k, v]) => k === "switch" && v === "conv-2"));
+  assert.ok(hits.some(([k, v]) => k === "switch" && v === undefined));
   assert.equal(dom.list.childNodes.length, 0, "消息列表被清空");
   // replay 历史清掉：新的晚订阅者不该收到上一会话的 mount。
   const late = [];
@@ -741,8 +962,35 @@ test("契约声明 ready 无 late replay、裸字面量政策为 WARN", () => {
   // rpx 桌面档：断点 961px、封顶 375/750（旧记 750px/1px 是双错）
   assert.equal(CONTRACT.cssContract.rpx.desktopBreakpoint, "961px");
   assert.equal(CONTRACT.cssContract.rpx.desktopValue, "calc(375px / 750)");
-  // 宿主页那 5 个弹窗卡片 CSS 改不动（探针验证）
-  assert.equal(CONTRACT.cssContract.hostPopups.cardCssCanStyle, false);
+  // 历史探针证明 iframe CSS 不能直接穿透；新版文档另有受控宿主 CSS 转发通道。
+  assert.equal(CONTRACT.cssContract.hostPopups.directIframeCssCanStyle, false);
+  assert.equal(CONTRACT.cssContract.hostPopups.documentedCssRelayCanStyle, true);
+  assert.equal(CONTRACT.cssContract.hostPopups.hostContract, "host-contract.json");
   assert.equal(CONTRACT.cssContract.hostPopups.popups.length, 5);
   assert.equal(CONTRACT.cssContract.inIframeOverlays.cardCssCanStyle, true);
+});
+
+test("公开错误码完整列出七个，与历史内部观察码分开", () => {
+  assert.deepEqual(CONTRACT.sdk.errorCodes.known, [
+    "UNAUTHORIZED", "RATE_LIMITED", "INVALID_ARGS", "HOST_DENIED",
+    "NETWORK", "NOT_SUPPORTED", "BUSY",
+  ]);
+  assert.equal(CONTRACT.sdk.errorCodes.count, CONTRACT.sdk.errorCodes.known.length);
+  assert.deepEqual(CONTRACT.sdk.errorCodes.simulated, ["NOT_SUPPORTED", "INVALID_ARGS", "BUSY"]);
+  for (const code of CONTRACT.sdk.errorCodes.historicalInternalObservations.codes) {
+    assert.equal(CONTRACT.sdk.errorCodes.known.includes(code), false);
+  }
+  assert.equal(CONTRACT.sdk.capabilityCount, 30);
+  assert.equal(CONTRACT.events.count, 12);
+});
+
+test("契约区分历史探针和文档核对日期，stream 记录已揭示累计值", () => {
+  assert.equal(CONTRACT.sourceOfTruth.documentedSdk.checkedDate, "2026-09-05");
+  assert.equal(CONTRACT.sourceOfTruth.localReviewDate, "2026-09-19");
+  assert.equal(CONTRACT.events.lateReplay.observedDate, "2026-08-26");
+  assert.equal(CONTRACT.events.coldStartOrderObservedDate, "2026-08-26");
+  assert.equal(CONTRACT.eventPayloads["message:stream"].contentSemantics, "revealed-cumulative");
+  assert.equal(CONTRACT.eventPayloads["message:stream"].contentBasis, "documented");
+  assert.equal(CONTRACT.eventPayloads["conversation:switch"].shape, "undefined");
+  assert.equal(CONTRACT.cssContract.stageStates.backClosesStage.accuracy, "conservative");
 });

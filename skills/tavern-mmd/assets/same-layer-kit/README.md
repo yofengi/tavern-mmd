@@ -4,6 +4,8 @@
 
 旧页 `/mmd` 专用；**不是新页 SDK/SBK**。这是可修改的独立页面、原生桥接、可选小游戏与本地存档起点，真实 MMD/真机兼容尚待项目验收。
 
+沙盒同层卡 `/mmdsandbox` 走 [SDK + 舞台网页制作](../../references/creation/sandbox-same-layer-card.md)，不能只给本基座补 `chatVersion:1` 就转换平台。
+
 ## 文件
 
 | 文件 | 作用 |

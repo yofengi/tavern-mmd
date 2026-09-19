@@ -1,6 +1,6 @@
 # 当前 MMD 同层卡：独立页面制作
 
-适用：用户要同层卡、独立游戏页面、全屏 HUD，或接管输入、主叙事和整页导航。**目标仍为 `/mmd`（chatVersion:0/缺省），不是第四个平台。** iframe 的 sandbox 属性不等于 `/mmdsandbox`。新聊天页先读 `../platforms/mmd-sandbox.md`，不套用本基座。
+适用：**已确定使用旧页 `/mmd`（chatVersion:0/缺省）**，用户要同层卡、独立游戏页面、全屏 HUD，或接管输入、主叙事和整页导航。同层卡不是第四个平台，也不能仅凭这个词默认旧页。iframe 的 sandbox 属性不等于 `/mmdsandbox`。**新聊天页改读 [沙盒同层卡制作](sandbox-same-layer-card.md)** 与 `../platforms/mmd-sandbox.md`，不套用本基座。
 
 ## 1. 先确定玩法与数据来源
 

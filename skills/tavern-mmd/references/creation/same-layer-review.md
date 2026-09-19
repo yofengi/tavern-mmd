@@ -2,6 +2,8 @@
 
 适用当前 MMD 旧页（`chatVersion:0` / 缺省）的 [同层卡基座](../../assets/same-layer-kit/README.md)。同一个入口固定作品源码，构建导入文件，执行审核，并生成可切换的 MMD / 同层卡联动预览。
 
+**沙盒同层卡（chatVersion:1）不使用本流程**，改走 [沙盒同层卡 §8](sandbox-same-layer-card.md#8-制作与验收顺序) 的新页全景仿真与项目测试。
+
 ## 一个入口如何工作
 
 ```text

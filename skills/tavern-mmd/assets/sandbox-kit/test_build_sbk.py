@@ -13,6 +13,8 @@ import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout, redirect_stderr
+from io import StringIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -652,6 +654,30 @@ class TestThemeOwnership(unittest.TestCase):
         self.assertEqual(B.theme_var("--chat-bg"), "--chat-bg")
 
 
+class TestPlatformThemeRegistry(unittest.TestCase):
+    def test_all_contract_tokens_are_accepted_by_generator(self):
+        contract = Path(__file__).resolve().parents[2] / "scripts/fixtures/mmdsandbox/contract.json"
+        expected = set(json.loads(contract.read_text(encoding="utf-8"))["cssContract"]["designTokens"])
+        self.assertEqual({"--chat-" + k for k in B._PLATFORM_VARS}, expected)
+        d = B.Diag()
+        tokens = {k: "#123456" for k in expected}
+        tokens.update({"--chat-bg": "#000", "--chat-surface": "#000", "--chat-text": "#fff",
+                       "--chat-accent": "#fff", "--chat-border": "#fff"})
+        normalized = B.normalize_author_theme(tokens, Path(__file__).resolve().parent / "sbk", d)
+        self.assertEqual(set(normalized["dark"]["tokens"]), expected)
+        self.assertEqual(d.errors, [])
+
+    def test_new_semantic_aliases_and_read_only_geometry(self):
+        for semantic, suffix in {"composerBg": "composer-bg", "composerText": "composer-text",
+                                 "shortcutBg": "shortcut-bg", "inputPlaceholder": "input-placeholder",
+                                 "inputBorder": "input-border", "modalSurface": "modal-surface",
+                                 "modalBtnBorder": "modal-btn-border"}.items():
+            self.assertTrue(B.ok_token(semantic), semantic)
+            self.assertEqual(B.theme_var(semantic), "--chat-" + suffix)
+        self.assertFalse(B.ok_token("--chat-viewport-height"))
+        self.assertFalse(B.ok_token("--rpx"))
+
+
 class TestThemeEnvelope(unittest.TestCase):
     """boot 信封：作者基线 + 风格包 + 默认包名，走 o.theme 这一个键。"""
 
@@ -1084,15 +1110,16 @@ class TestShippedPresets(unittest.TestCase):
                                                  % (n, dim, mode, bad, sv))
 
     def test_palette_maps_to_platform_tokens(self):
-        """要求之一：至少有一组把 palette 映到 14 个平台令牌。"""
-        doc = json.loads((self.pdir / "素雅阅读.json").read_text(encoding="utf-8"))
-        pal = doc["palette"]["dark"]
-        mapped = {B.theme_var(k) for k in pal if not k.startswith("_")}
         platform = {"--chat-" + v for v in B._PLATFORM_VARS}
-        hit = mapped & platform
-        self.assertEqual(len(hit), 14,
-                         "素雅阅读 的 palette 应覆盖全部 14 个平台令牌，当前 %d 个：%s"
-                         % (len(hit), sorted(hit)))
+        for n in self.NAMES:
+            doc = json.loads((self.pdir / (n + ".json")).read_text(encoding="utf-8"))
+            for mode in ("dark", "light"):
+                pal = doc["palette"][mode]
+                mapped = {B.theme_var(k) for k in pal if not k.startswith("_")}
+                self.assertEqual(len(mapped & platform), 29, (n, mode, mapped))
+                self.assertEqual(pal["moreItemBg"], "var(--chat-modal-surface)")
+                self.assertEqual(pal["composerBg"], pal["bg"])
+                self.assertEqual(pal["modalText"], pal["text"])
 
     def test_other_dims_map_to_sbk_private_tokens(self):
         """layout/ui/font/decoration 必须落到 --sbk-* 已有/合理私有令牌。"""
@@ -1825,6 +1852,103 @@ def js_regex_probe(pattern, flags, samples):
     r = subprocess.run([node, "-e", src], input=payload, capture_output=True,
                        text=True, encoding="utf-8", timeout=60)
     return json.loads(r.stdout)
+
+
+class TestHostStyles(unittest.TestCase):
+    setUp = TestBuildEndToEnd.setUp
+    tearDown = TestBuildEndToEnd.tearDown
+    _write_cfg = TestBuildEndToEnd._write_cfg
+    SHELL_RULE = TestBuildEndToEnd.SHELL_RULE
+
+    def _css(self, text, name="host.css"):
+        (self.tmp / name).write_text(text, encoding="utf-8")
+        return name
+
+    def test_relative_files_emit_separate_static_styles_and_scope_flag(self):
+        paths = [self._css('[data-host="summary"]{color:#fff}', "a.css"),
+                 self._css('[data-host="summary-confirm"]{background:#111}', "b.css")]
+        doc, _, _, d = B.build_document(self._write_cfg(hostStyles=paths))
+        self.assertEqual(d.errors, [])
+        host = [r for r in doc["regex_scripts"] if r["scriptName"].startswith("sbk-host-css")]
+        self.assertTrue(host, "hostStyles 未输出独立宿主样式规则")
+        css = "\n".join(r["replaceString"] for r in host)
+        self.assertIn('data-host="summary"', css)
+        self.assertIn('data-host="summary-confirm"', css)
+        base = next(r for r in doc["regex_scripts"] if r["scriptName"] == "sbk-css")
+        self.assertNotIn("data-host", base["replaceString"])
+        boot = next(r for r in doc["regex_scripts"] if r["scriptName"] == "sbk-boot")
+        self.assertIn('"staticHostStyles":true', boot["replaceString"])
+
+    def test_style_split_preserves_rules_and_media_using_utf16_budget(self):
+        blocks = ['[data-host="summary"] .a{--label:"' + "😀" * 4700 + '";}',
+                  '@media (max-width:600px){[data-host="summary-confirm"]{--label:"' + "😀" * 4700 + '";}}']
+        doc, _, _, d = B.build_document(self._write_cfg(hostStyles=[self._css("\n".join(blocks))]))
+        self.assertEqual(d.errors, [])
+        host = [r for r in doc["regex_scripts"] if r["scriptName"].startswith("sbk-host-css")]
+        self.assertEqual(len(host), 2)
+        self.assertIn("@media", host[1]["replaceString"])
+        for rule in host:
+            self.assertLessEqual(len(rule["replaceString"].encode("utf-16-le")) // 2, B.MAX_SOURCE_RULE)
+            self.assertEqual(rule["replaceString"].count("{"), rule["replaceString"].count("}"))
+
+    def test_rejects_invalid_or_nonhost_css_without_silently_cleaning(self):
+        cases = ['[data-host="sdk-prompt"]{color:red}', '.local{color:red}',
+                 '[data-host="summary"]{color:red;background:url(x)}',
+                 '[data-host="summary"]{.nested{color:red}}',
+                 '[data-host="summary"]:has(.x){color:red}',
+                 '[data-host="summary"]{color:red}.local{color:blue}']
+        for css in cases:
+            with self.subTest(css=css):
+                doc, _, _, d = B.build_document(self._write_cfg(hostStyles=[self._css(css)]))
+                self.assertTrue(any("hostStyles" in e for e in d.errors), d.errors)
+                self.assertFalse(any(r["scriptName"].startswith("sbk-host-css") for r in doc["regex_scripts"]))
+
+    def test_rejects_unsplittable_rule_over_fixed_budget(self):
+        css = '[data-host="summary"]{--label:"' + "😀" * 9000 + '";}'
+        _, _, _, d = B.build_document(self._write_cfg(hostStyles=[self._css(css)]))
+        self.assertTrue(any("hostStyles" in e and "18000" in e for e in d.errors), d.errors)
+
+    def test_rejects_bad_config_and_missing_file(self):
+        for value in ("host.css", [17], ["missing.css"]):
+            with self.subTest(value=value):
+                _, _, _, d = B.build_document(self._write_cfg(hostStyles=value))
+                self.assertTrue(any("hostStyles" in e for e in d.errors), d.errors)
+
+    def test_absent_host_styles_keep_existing_output_scope(self):
+        doc, _, _, d = B.build_document(self._write_cfg())
+        self.assertEqual(d.errors, [])
+        self.assertNotIn("staticHostStyles", json.dumps(doc))
+        self.assertFalse(any(r["scriptName"].startswith("sbk-host-css") for r in doc["regex_scripts"]))
+
+    def test_force_cannot_write_rejected_host_styles_or_over_budget_rules(self):
+        cases = [dict(hostStyles=[self._css('[data-host="summary"]{background:url(x)}')]),
+                 dict(sceneRules=[dict(self.SHELL_RULE), {"scriptName": "too-big", "findRegex": "/marker/",
+                                                         "replaceString": "😀" * 9001}])]
+        for i, cfg in enumerate(cases):
+            out = self.tmp / ("rejected-%d.json" % i)
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = B.main([str(self._write_cfg(**cfg)), "--out", str(out), "--force"])
+            self.assertNotEqual(rc, 0)
+            self.assertFalse(out.exists())
+
+
+class TestUtf16Budgets(unittest.TestCase):
+    def test_statusbar_emoji_boundary_uses_javascript_units(self):
+        doc = {"chatVersion": 1, "pageDepth": 2, "statusbar": "😀" * 101,
+               "beginning": "", "personality": "", "regex_scripts": []}
+        d = B.Diag()
+        B.validate_top_level(doc, d)
+        self.assertTrue(any("statusbar 202" in e for e in d.errors), d.errors)
+
+    def test_rule_length_budget_and_module_packing_use_javascript_units(self):
+        rule = {"scriptName": "emoji", "findRegex": "/marker/", "replaceString": "😀" * 10001}
+        d = B.Diag()
+        B.check_lengths(rule, d, "T")
+        metric = B.estimate_budget(rule, 1, 1, d, "T")
+        self.assertEqual(metric["replaceLen"], 20002)
+        self.assertTrue(any("20002" in warning for warning in d.warns), d.warns)
+        entries = [{"name": "a.js", "text": "😀" * 300}, {"name": "b.js", "text": "😀" * 300}]
+        self.assertEqual(len(B.pack_by_file(entries, 1000)), 2)
 
 
 class TestProtocolBracketForm(unittest.TestCase):

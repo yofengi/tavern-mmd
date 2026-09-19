@@ -30,6 +30,7 @@ import re
 import os
 import html as html_mod
 from html.parser import HTMLParser
+import sandbox_host_preview as host_preview
 
 from validate import (classify_mmd_onclick,
                       _split_findregex_literal as _split_regex_literal,
@@ -1671,14 +1672,14 @@ SANDBOX_SEND_SCAFFOLD = (
     "if(!v)return;"
     "var ctl=window.__MMD_SANDBOX_SIM__&&window.__MMD_SANDBOX_SIM__.control;"
     "if(!ctl)return;"
-    "ta.value='';"
-    # 走 SDK 真实表面；thin profile 下 message.send 是 rejected Promise，
-    # 此时退回控制 API 追加气泡，并把拒绝原因打进诊断（这正是要让作者看到的差异）。
+    "function failed(e){var n=D.querySelector('[data-preview-send-error]');"
+    "if(!n){n=D.createElement('span');n.setAttribute('data-preview-send-error','1');"
+    "n.setAttribute('role','status');ta.parentNode.appendChild(n);}"
+    "n.textContent='发送未成功：'+((e&&e.code)||'UNKNOWN')+'（草稿保留）';}"
     "try{var p=window.sdk.message.send(v);"
-    "if(p&&typeof p.then==='function'){p.then(null,function(e){"
-    "ctl.addUser(v);ctl.log.warnings.push('message.send 被拒（'+(e&&e.code)+'）："
-    "瘦预览下写类能力不可用，已退回本地追加气泡。');});}}"
-    "catch(e){ctl.addUser(v);}"
+    "if(p&&typeof p.then==='function')p.then(function(){"
+    "var n=D.querySelector('[data-preview-send-error]');if(n)n.remove();},failed);"
+    "}catch(e){failed(e);}"
     "};"
     "btn.addEventListener('click',function(ev){ev.stopPropagation();send();});"
     "ta.addEventListener('keydown',function(ev){"
@@ -1751,6 +1752,8 @@ SANDBOX_TOOL_BUTTONS = (
     ("追加 AI", "addAI()", "追加一条 AI 气泡，派 new/mount/done"),
     ("流式追加", "stream(['流式','片段'])", "开一条流式气泡并逐块派 message:stream"),
     ("结束流式", "done()", "给流式气泡派 message:done"),
+    ("模拟忙态", "setBusy(true)", "本地忙态：发送返回BUSY并保留草稿"),
+    ("解除忙态", "setBusy(false)", "解除手动忙态；仍在stream时请结束流式"),
     ("多轮对话", None, "连续追加一轮用户+带更新状态块的 AI，检验历史快照与收窄"),
     ("切深浅色", "theme()", "改 root 的 data-theme 并派 theme:change"),
     ("切会话", "switchConversation()", "清消息与补发历史并派 conversation:switch"),
@@ -1764,7 +1767,7 @@ SANDBOX_TOOL_BUTTONS = (
 )
 
 
-def _sandbox_toolbar_html(obj):
+def _sandbox_toolbar_html(obj, profile="chat"):
     """沙盒全景工具栏。按钮调 iframe 内的控制 API，模拟平台侧动作。"""
     rows = []
     for label, expr, title in SANDBOX_TOOL_BUTTONS:
@@ -1795,7 +1798,7 @@ def _sandbox_toolbar_html(obj):
     return ('<details class="preview-tools" data-preview-tools="1">'
             '<summary>沙盒仿真控制（默认折叠）</summary><div class="preview-tools-body">'
             '<span class="preview-tools-label">平台侧动作</span>%s'
-            '%s</div></details>' % ("".join(rows), _sandbox_panel_tools_html()))
+            '%s</div></details>' % ("".join(rows), _sandbox_panel_tools_html(profile)))
 
 
 # 浮层开关按钮：分两组摆，标签直接写清"卡片能改 / 平台侧改不动"，
@@ -1843,7 +1846,7 @@ SANDBOX_PANEL_TOOLS_HOST2 = (
 )
 
 
-def _sandbox_panel_tools_html():
+def _sandbox_panel_tools_html(profile="chat"):
     """沙盒浮层开关（预览工具，非被测产物）。"""
     win = "document.querySelector('.pano-frame').contentWindow"
     parts = ['<span class="preview-tools-label">iframe 内浮层（卡片 CSS 能改）</span>']
@@ -1864,21 +1867,8 @@ def _sandbox_panel_tools_html():
             '<button class="preview-tool" type="button" title="舞台 %s 态'
             '（实测 content=absolute/z-2000、full=fixed/z-3000、closed=display:none）" '
             'onclick="%s.__sbxPanels.stage(\'%s\')">舞台 %s</button>' % (mode, win, mode, mode))
-    parts.append('<span class="preview-tools-label">宿主页弹窗（平台侧 · 卡片改不动，'
-                 '只看遮挡层级）</span>')
-    for name, label, tip in SANDBOX_PANEL_TOOLS_HOST:
-        parts.append(
-            '<button class="preview-tool" type="button" title="%s（渲染在宿主页 uni-app，'
-            '跨源 iframe 之外；探针验证在卡里改 --chat-modal-* 对它无效）" '
-            'onclick="%s.__sbxPanels.open(\'%s\')">%s</button>'
-            % (html_mod.escape(tip, quote=True), win, name, label))
-    # 二层用 open2：**不关父面板**，与真机一致（点说明后设置页仍在下面）
-    for name, label, tip in SANDBOX_PANEL_TOOLS_HOST2:
-        parts.append(
-            '<button class="preview-tool" type="button" title="%s。用 open2 打开，'
-            '不关父面板；关闭只回到父面板" '
-            'onclick="%s.__sbxPanels.open2(\'%s\')">%s</button>'
-            % (html_mod.escape(tip, quote=True), win, name, label))
+    if profile == "chat":
+        parts.append(host_preview.root_tools())
     parts.append('<span class="preview-tools-label">输入框三态</span>')
     for state, lab, tip in (
             ("", "折叠", "基线态：min-height 82rpx、单行居中（实测）"),
@@ -1927,7 +1917,7 @@ def _sandbox_panel_tools_html():
             'onclick="%s.__sbxPanels.theme(\'%s\')">%s</button>' % (win, t, lab))
     parts.append(
         '<button class="preview-tool" type="button" title="关闭所有浮层" '
-        'onclick="%s.__sbxPanels.closeAll()">全部关闭</button>' % win)
+        'onclick="%s.__sbxPanels.closeAll();if(window.__sbxHostPreview)window.__sbxHostPreview.closeAll()">全部关闭</button>' % win)
     return "".join(parts)
 
 
@@ -2892,6 +2882,7 @@ body{display:flex;flex-direction:column;background:#17181a}
 [data-chat="composer"]{position:static;left:auto;right:auto;bottom:auto;flex:0 0 auto;display:flex;
   flex-direction:column;align-items:stretch;gap:0;padding:0;background:var(--chat-composer-bg);border:0;
   color:var(--chat-composer-text);z-index:auto}
+[data-chat="root"][data-composer="hidden"] [data-chat="composer"]{display:none}
 [data-slot="toolbar"]{display:block;height:0}
 /* ── 底栏：实测复刻（2026-08-29）。官方手册「底栏和白名单弹窗」那 18 个变量的靶点。
    🚨 旧版这里用 .pano-shortcuts/.pano-shortcut/.pano-compose-row/.pano-input-shell 四个
@@ -3121,148 +3112,7 @@ body{display:flex;flex-direction:column;background:#17181a}
 [data-chat="root"]:has([data-probe="history-loading"][data-open="on"]) [data-chat="messages"]{
   visibility:hidden;flex:0 0 0;min-height:0;overflow:hidden}
 
-/* ── 宿主页弹窗：卡片 CSS **打不到**，只画层级遮挡轮廓 ──────────────────────
-   实测：模型设置/对话设置/总结剧情/用户人设/分享 五个渲染在宿主页（h5.aitchat.org 的
-   uni-app），吃宿主 51 个 --background-color 系变量；在卡片 iframe 内注入
-   --chat-modal-* 对它们**零影响**（探针验证：注入 #00ff00 后弹窗仍 #17181a、
-   该变量在其上解析为未定义）。所以预览刻意把它们画成**灰底斜纹的"平台侧"占位**，
-   不套 --chat-modal-* —— 套了就是撒谎，作者会白写一堆选择器。*/
-.pano-host-popup{position:absolute;left:0;right:0;bottom:0;z-index:10075;display:none;
-  box-sizing:border-box;font-family:inherit}
-.pano-host-popup[data-open="on"]{display:block}
-/* 🚨 z-index 逐个实测（2026-08-29），不是一档：
-   9000  = model / model-switch / conversation / share / assist-alert
-   10075 = conv / role
-   1e9   = summary（比别的高 5 个数量级，组件永远盖不过它）
-   曾把 model 记成 10075 —— 实测是 9000。 */
-.pano-host-popup[data-host-popup="model"],
-.pano-host-popup[data-host-popup="model-switch"],
-.pano-host-popup[data-host-popup="conversation"],
-.pano-host-popup[data-host-popup="share"],
-.pano-host-popup[data-host-popup="assist-alert"]{z-index:9000}
-.pano-host-popup[data-host-popup="summary"]{z-index:1000000000}
-/* 消息编辑面：实测 position:fixed、z-9999、遮罩 rgba(0,0,0,.7)（比别的宿主弹窗深）、
-   整屏而非底升。仍归 .pano-host-popup 家族 —— 它在宿主页，卡片 CSS 打不到。 */
-.pano-host-popup[data-host-popup="message-edit"]{z-index:9999;top:0}
-.pano-host-popup[data-host-popup="message-edit"][data-open="on"]{display:flex;
-  align-items:stretch;justify-content:center}
-.pano-host-popup[data-host-popup="message-edit"] .pano-host-mask{background:rgba(0,0,0,.7)}
-.pano-host-popup[data-host-popup="message-edit"] .pano-host-sheet{width:100%%;
-  border-radius:0;display:flex;flex-direction:column}
-.pano-host-popup .ph-edit-surface{flex:1;min-height:140px;white-space:pre-wrap}
-/* 模型行（对话模型选择）：实机每行含名称/简介/电量/解锁/成功率，选中行有勾与描边 */
-.pano-host-popup .ph-mi{background:#2c2e32;border-radius:8px;padding:9px 10px;
-  margin-bottom:7px;border:1px solid transparent}
-.pano-host-popup .ph-mi.is-sel{border-color:#ff6d97}
-.pano-host-popup .ph-mi.is-sel::before{content:'\2713';float:right;color:#ff6d97;
-  font-size:12px;margin-left:6px}
-.pano-host-popup .ph-mi-top{display:flex;align-items:center;gap:6px}
-.pano-host-popup .ph-newbadge{font-style:normal;font-size:9px;background:#ff6d97;
-  color:#fff;border-radius:3px;padding:1px 5px}
-.pano-host-popup .ph-mi-bot{display:flex;align-items:center;gap:10px;margin-top:6px;
-  flex-wrap:wrap}
-.pano-host-popup .ph-badge{font-size:9px;background:#33353b;color:#c5c5c5;
-  border-radius:10px;padding:2px 7px}
-/* AI帮聊 alert：实测 u-fade-zoom + flex 居中 + 260px 定宽 + radius 10px（不是底部升起） */
-.pano-host-popup[data-host-popup="assist-alert"][data-open="on"]{display:flex;
-  align-items:center;justify-content:center;top:0}
-.pano-host-popup[data-host-popup="assist-alert"] .pano-host-sheet{width:260px;
-  border-radius:10px;background:#1e1f24}
-/* 遮罩实测 .5（沙盒宿主页），旧 MMD 聊天页是 .7 —— 别混。 */
-.pano-host-popup .pano-host-mask{position:absolute;inset:0;background:rgba(0,0,0,.5)}
-.pano-host-popup .pano-host-sheet{position:relative;background:#17181a;color:#fff;
-  border-top-left-radius:10px;border-top-right-radius:10px;padding:16px;
-  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.045) 0 8px,transparent 8px 16px)}
-.pano-host-popup[data-host-popup="conv"] .pano-host-sheet,
-.pano-host-popup[data-host-popup="role"] .pano-host-sheet{border-radius:0}
-.pano-host-popup .pano-host-tag{display:inline-block;margin-bottom:8px;padding:2px 8px;
-  border-radius:4px;background:#d29922;color:#000;font-size:10px;font-weight:600}
-.pano-host-popup .pano-host-title{font-size:15px;font-weight:600;margin-bottom:6px}
-.pano-host-popup .pano-host-note{font-size:11px;line-height:1.5;color:#c5c5c5}
-.pano-host-popup .pano-host-close{position:absolute;top:10px;right:12px;width:22px;height:22px;
-  border:0;border-radius:50%%;background:rgba(255,255,255,.08);color:#c5c5c5;font-size:14px;cursor:pointer}
-
-/* ── 宿主弹窗内容复刻（ph-* = preview-host，2026-09-06 实机）─────────────────
-   刻意**不吃** --chat-modal-*：这层在跨源 iframe 之外，作者改不动。写死取值就是
-   为了让作者在预览里试着改 --chat-modal-bg 时**看不到变化**，与真机一致。
-   实测高度：model 348 / conv 618 / summary 607 / conversation 273 / role 618。
-   二层：conv-intro 315x577、summary-intro 371x143，都是 fade-zoom 居中。 */
-.pano-host-popup .ph-body{margin-top:10px;font-size:11px;color:#e6e6e6;
-  max-height:60vh;overflow:auto}
-.pano-host-popup .ph-body b{color:#fff;font-size:12px}
-.pano-host-popup .ph-desc,.pano-host-popup .ph-hint{display:block;color:#8d949d;font-size:10px}
-.pano-host-popup .ph-hint{display:inline;margin-left:6px}
-.pano-host-popup .ph-bar{display:flex;justify-content:space-between;align-items:center;
-  padding:6px 0 10px;border-bottom:1px solid #333;margin-bottom:8px}
-.pano-host-popup .ph-ok{color:#ff6d97;font-weight:600}
-.pano-host-popup .ph-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.pano-host-popup .ph-model{color:#fff}
-.pano-host-popup .ph-pill{background:#3a2d33;color:#ff6d97;border-radius:11px;padding:2px 9px;font-weight:600}
-.pano-host-popup .ph-pill i{font-style:normal;font-size:9px;opacity:.75}
-.pano-host-popup .ph-card{background:#2c2e32;border-radius:8px;padding:9px 10px;margin-bottom:8px}
-.pano-host-popup .ph-card-head{display:flex;justify-content:space-between;align-items:center}
-.pano-host-popup .ph-caret{color:#8d949d}
-.pano-host-popup .ph-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
-.pano-host-popup .ph-chips.ph-right{justify-content:flex-end}
-.pano-host-popup .ph-chip{position:relative;background:#33353b;border-radius:6px;
-  padding:5px 10px;font-size:10px;color:#c5c5c5}
-.pano-host-popup .ph-chip.is-sel{background:#ff6d97;color:#fff}
-.pano-host-popup .ph-chip.is-off{opacity:.45}
-.pano-host-popup .ph-chip i{display:block;font-style:normal;font-size:9px;opacity:.8}
-/* 二层入口标记：ⓘ 与 ? 都做成可点小圆，提示"这里还能再开一层" */
-.pano-host-popup .ph-intro,.pano-host-popup .ph-help{display:inline-flex;align-items:center;
-  justify-content:center;width:13px;height:13px;margin-left:5px;border-radius:50%%;
-  border:1px solid currentColor;font-size:9px;font-style:normal;cursor:pointer;vertical-align:middle}
-.pano-host-popup .ph-sw-row{display:flex;justify-content:space-between;align-items:center}
-.pano-host-popup .ph-sw{flex:0 0 auto;width:34px;height:18px;border-radius:9px;background:#4a4d55;position:relative}
-.pano-host-popup .ph-sw.is-sel{background:#ff6d97}
-.pano-host-popup .ph-sw::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;
-  border-radius:50%%;background:#fff}
-.pano-host-popup .ph-sw.is-sel::after{left:auto;right:2px}
-.pano-host-popup .ph-label{display:flex;justify-content:space-between;margin:10px 0 6px;color:#fff;font-size:11px}
-.pano-host-popup .ph-textbox{background:#1e1f24;border-radius:6px;padding:9px;min-height:34px;color:#8d949d}
-.pano-host-popup .ph-input{background:#1e1f24;border-radius:6px;padding:9px;margin-top:6px;color:#8d949d;
-  display:flex;justify-content:space-between}
-.pano-host-popup .ph-pi{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:6px;
-  margin-bottom:5px;background:#33353b}
-.pano-host-popup .ph-pi>span:first-child{flex:1;color:#fff}
-.pano-host-popup .ph-pi.is-sel{background:rgba(255,109,151,.16);border:1px solid #ff6d97}
-.pano-host-popup .ph-radio{flex:0 0 auto;width:13px;height:13px;border-radius:50%%;border:1px solid #8d949d}
-.pano-host-popup .ph-pi.is-sel .ph-radio{border-color:#ff6d97;background:#ff6d97}
-.pano-host-popup .ph-dashed{border:1px dashed #4a4d55;border-radius:8px;padding:12px;
-  text-align:center;color:#8d949d}
-.pano-host-popup .ph-cost{margin:10px 0;text-align:center;color:#c5c5c5;font-size:10px}
-.pano-host-popup .ph-btn{margin-top:10px;background:#ff6d97;color:#fff;border-radius:23px;
-  padding:11px;text-align:center;font-weight:600;font-size:12px}
-.pano-host-popup .ph-item{display:flex;align-items:center;gap:9px;padding:7px 0}
-.pano-host-popup .ph-avatar{flex:0 0 auto;width:34px;height:34px;border-radius:50%%;background:#4a4d55}
-.pano-host-popup .ph-item>span:nth-child(2){flex:1}
-.pano-host-popup .ph-cur{color:#ff6d97;font-size:10px}
-.pano-host-popup .ph-radios{display:flex;gap:6px;justify-content:space-between}
-.pano-host-popup .ph-rd{font-size:10px;color:#c5c5c5;display:flex;align-items:center;gap:4px}
-.pano-host-popup .ph-rd::before{content:'';width:12px;height:12px;border-radius:50%%;border:1px solid #8d949d}
-.pano-host-popup .ph-rd.is-sel{color:#fff}
-.pano-host-popup .ph-rd.is-sel::before{border-color:#ff6d97;background:#ff6d97}
-.pano-host-popup .ph-note-inline{margin:8px 0 6px;color:#d29922;font-size:10px}
-.pano-host-popup .ph-center{text-align:center}
-.pano-host-popup .ph-alert-title{font-size:14px;font-weight:600;color:#fff;margin-bottom:9px}
-.pano-host-popup .ph-alert-text{font-size:11px;line-height:1.65;color:#e6e6e6;text-align:left}
-.pano-host-popup .ph-check{display:flex;align-items:center;justify-content:center;gap:6px;
-  margin:12px 0;font-size:10px;color:#c5c5c5}
-.pano-host-popup .ph-check i{width:12px;height:12px;border:1px solid #8d949d;border-radius:2px}
-.pano-host-popup .ph-alert-btns{display:flex;justify-content:space-around;align-items:center;
-  margin-top:12px;padding-top:10px;border-top:1px solid #333;font-size:12px}
-/* 二层：与 assist-alert 同为 fade-zoom 居中。conv-intro 实测 315 宽、summary-intro 371 宽。
-   z-index 必须压住各自的父面板，否则作者会以为二层被吞了。 */
-.pano-host-popup[data-host-popup="conv-intro"][data-open="on"],
-.pano-host-popup[data-host-popup="summary-intro"][data-open="on"]{display:flex;
-  align-items:center;justify-content:center;top:0}
-.pano-host-popup[data-host-popup="conv-intro"]{z-index:10076}
-.pano-host-popup[data-host-popup="conv-intro"] .pano-host-sheet{width:315px;
-  border-radius:10px;background:#2c2e32;max-height:70vh;overflow:auto}
-.pano-host-popup[data-host-popup="summary-intro"]{z-index:1000000001}
-.pano-host-popup[data-host-popup="summary-intro"] .pano-host-sheet{width:371px;
-  border-radius:10px;background:#2c2e32}
+/* 宿主夹具样式在 sandbox_host_preview.py，仅注入外层文档。 */
 
 /* legacy 自造类：骨架上仍挂着这些 class（.pano-shortcuts/.pano-shortcut/.pano-compose-row/
    .pano-compose-icon/.pano-send/.pano-input-shell），但**不再给它们任何样式** ——
@@ -3501,13 +3351,14 @@ SANDBOX_PANEL_SCAFFOLD = (
     "return D.querySelector('[data-chat=\"'+name+'\"]')"
     "||D.querySelector('[data-probe=\"'+name+'\"]')"
     "||D.querySelector('.pano-host-popup[data-host-popup=\"'+name+'\"]');}"
+    "function hostRequest(action,name){parent.postMessage({type:'mmd-preview-host',action:action,name:name},'*');return true;}"
     "function open(name){closeAll();var el=nodeOf(name);"
-    "if(el){el.setAttribute('data-open','on');}return !!el;}"
+    "if(el){el.setAttribute('data-open','on');return true;}return hostRequest('open',name);}"
     # 二层弹窗名单（实机：都是从某个一层宿主面板内部再点开、z-index 压住父面板）。
     # open2 不调 closeAll —— 父面板必须留在下面，否则预览会骗作者说"打开说明会关掉设置页"。
     "var SECOND={'conv-intro':1,'summary-intro':1};"
     "function open2(name){var el=nodeOf(name);"
-    "if(el){el.setAttribute('data-open','on');}return !!el;}"
+    "if(el){el.setAttribute('data-open','on');return true;}return hostRequest('open2',name);}"
     "function closeOne(name){var el=nodeOf(name);"
     "if(el){el.setAttribute('data-open','off');}return !!el;}"
     "function toggleInstr(){var sb=D.querySelector('[data-chat=\"shortcut\"]');"
@@ -3521,10 +3372,8 @@ SANDBOX_PANEL_SCAFFOLD = (
     "t.textContent='\\u4e0d\\u77e5\\u9053\\u600e\\u4e48\\u56de\\uff1f\\u8ba9AI\\u5e2e\\u4f60';"
     "var ar=D.createElement('span');ar.className='assistant-tip-arrow';"
     "t.appendChild(ar);a.appendChild(t);return true;}"
-    "function stage(mode){var s=D.querySelector('[data-chat=\"author-stage\"]');"
-    "if(!s)return null;s.removeAttribute('hidden');"
-    "s.setAttribute('data-stage',mode);"
-    "s.textContent=mode==='closed'?'':'\\u821e\\u53f0 '+mode;return mode;}"
+    "function stage(mode){var sim=window.__MMD_SANDBOX_SIM__;"
+    "return sim?sim.control.stageMode(mode):null;}"
     "function themeOf(t){var r=D.querySelector('[data-chat=\"root\"]');"
     "if(r)r.setAttribute('data-theme',t);return t;}"
     "window.__sbxPanels={open:open,closeAll:closeAll,"
@@ -3550,7 +3399,7 @@ SANDBOX_PANEL_SCAFFOLD = (
     "ev.stopPropagation();open2(this.getAttribute('data-host-open2'));};}"
     "var sc=D.querySelectorAll('[data-chat=\"shortcut\"] > button');"
     "var map={model:'model',style:'conv',summary:'summary',"
-    "conversations:'model',persona:'role'};"
+    "conversations:'conversation',persona:'role'};"
     "for(var j=0;j<sc.length;j++){(function(b){b.onclick=function(ev){"
     "ev.stopPropagation();var a=b.getAttribute('data-action');"
     "if(a==='instructions'){toggleInstr();}else if(map[a]){open(map[a]);}};})(sc[j]);}"
@@ -3571,14 +3420,14 @@ SANDBOX_PANEL_SCAFFOLD = (
     # 作者的全局美化能打到这批（面板在 iframe 内），所以点开后要能看出自己的 CSS 效果。
     "function snack(msg){var s=D.querySelector('[data-chat=\"snack\"]');if(!s)return;"
     "s.textContent=msg;closeAll();s.setAttribute('data-open','on');}"
-    "var MORE={style:'conv',summary:'summary',persona:'role',conversations:'model'};"
+    "var MORE={style:'conv',summary:'summary',persona:'role',conversations:'conversation',instructions:'instructions',extra:'extra',background:'background',reset:'reset'};"
     "var LABEL={reset:'\\u91cd\\u7f6e\\u804a\\u5929',export:'\\u5bfc\\u51fa\\u804a\\u5929',"
     "'role-edit':'\\u7f16\\u8f91\\u89d2\\u8272',background:'\\u66f4\\u6362\\u80cc\\u666f',"
     "extra:'\\u8bbe\\u5b9a\\u8865\\u5145',help:'\\u6e38\\u73a9\\u6559\\u7a0b'};"
     "var mi=D.querySelectorAll('[data-chat=\"more-panel\"] > button');"
     "for(var k=0;k<mi.length;k++){(function(b){b.onclick=function(ev){"
     "ev.stopPropagation();var a=b.getAttribute('data-action');"
-    "if(a==='instructions'){closeAll();toggleInstr();return;}"
+    "if(a==='instructions'){open('instructions');return;}"
     "if(MORE[a]){open(MORE[a]);return;}"
     "snack((LABEL[a]||a)+'\\uff1a\\u5e73\\u53f0\\u4fa7\\u52a8\\u4f5c\\uff0c"
     "\\u9884\\u89c8\\u4e0d\\u6a21\\u62df\\u771f\\u5b9e\\u526f\\u4f5c\\u7528');};})(mi[k]);}"
@@ -3664,24 +3513,11 @@ SANDBOX_PANEL_SCAFFOLD = (
 
 
 def _host_popup(name, title, note, body=""):
-    """宿主弹窗占位。
-
-    body 给的是**实机真实内容的复刻**（2026-09-06 探到），让作者看到真机这一层长什么样、
-    占多高、盖住哪段消息流；note 仍写 scope 类名/z-index/"卡片改不动"的判据。
-    仍然刻意保留斜纹底 + 黄标签：这层的样式**不吃** --chat-modal-*，画得再像也不能让作者
-    以为能改它。body 里的类名统一加 `ph-` 前缀（preview-host），与真机类名不撞。
-    """
-    return (
-        '<div class="pano-host-popup" data-host-popup="%s" data-open="off">'
-        '<div class="pano-host-mask" data-host-close="%s"></div>'
-        '<div class="pano-host-sheet">'
-        '<button class="pano-host-close" type="button" data-host-close="%s">&#215;</button>'
-        '<span class="pano-host-tag">平台侧 · 卡片改不动</span>'
-        '<div class="pano-host-title">%s</div>'
-        '<div class="pano-host-note">%s</div>'
-        '%s'
-        '</div></div>' % (name, name, name, title, note, body)
-    )
+    """历史布局样本移至外层宿主；开放根可经静态CSS转发换肤。"""
+    # 旧记录只保留为取证样本，不能继续声称新通道不可用。
+    note = ('历史结构参考（2026-09-06）；根范围按2026-09-19手册。'
+            '内部 ph-* 是预览示意，不是平台稳定类；不模拟真实保存。')
+    return host_preview.popup(name, title, note, body)
 
 
 # ── 实机内容复刻（2026-09-06，卡 316991，414x896）────────────────────────────
@@ -4062,9 +3898,10 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
     tested_content = apply_platform_limits(chat_inner, platform)
     hooks = _panorama_hooks(platform)
     hoisted = ""
+    host_css, host_diagnostics = "", []
     if sandbox:
         # 装卡即抽出的 style/script，与匹配无关，整张卡只装一次。
-        assets = collect_sandbox_assets(obj)
+        assets, host_css, host_diagnostics = host_preview.split_assets(collect_sandbox_assets(obj))
         if assets:
             hoisted = ('<div data-preview-hoisted="1">%s</div>'
                        % apply_platform_limits(assets, platform, script_badges=False))
@@ -4206,7 +4043,7 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
                  snack=SANDBOX_SNACK, snackbar=SANDBOX_SNACKBAR,
                  sharebar=SANDBOX_SHARE_BAR, sharepickbar=SANDBOX_SHARE_PICK_BAR,
                  shareshot=SANDBOX_SHARE_SHOT,
-                 hostpopups=SANDBOX_HOST_POPUPS)
+                 hostpopups="")
     elif platform == "mmd":
         page = _mmd_panorama_page(tested_content, hooks, runtime, send_scaffold)
     else:
@@ -4259,11 +4096,11 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
     banner = make_banner(platform, src_name, n).replace("预览平台", "全景预览 ｜ 平台")
     audit = _findregex_audit_html(obj, platform) + _onclick_audit_html(chat_inner, platform)
     if sandbox:
-        audit += ('<div class="frag-warn">NOTE 已模拟：[data-chat]/[data-slot] 钩子结构与 14 个 '
+        audit += ('<div class="frag-warn">NOTE 已模拟：[data-chat]/[data-slot] 钩子结构与 29 个 '
                   '--chat-* 设计令牌默认值（深色一套为实测真值；共 29 个＝气泡 10＋白名单 18＋别名 1，'
                   '官方手册正文只列前 10），另注入 '
                   '--rpx 尺寸基准；--chat-viewport-height 由模拟宿主写在 root 内联 style，'
-                  '并随 iframe resize/键盘 inset 更新（后者不属那 14 个）。'
+                  '并随 iframe resize/键盘 inset 更新（后者不属颜色变量）。'
                   '</div>'
                   '<div class="frag-warn">NOTE 气泡那圈淡描边是<b>默认关闭的预览辅助线，'
                   '真机上没有</b>：实测平台气泡三色与页面背景<b>同色</b>（深色都是 #17181a），'
@@ -4287,7 +4124,7 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
                          for x in find_dangling_markers(obj, platform))
     if sandbox:
         # 沙盒走仿真控制台（模拟平台侧动作）；MMD/ST 保留原路由脚手架工具。
-        tools = _sandbox_toolbar_html(obj)
+        tools = _sandbox_toolbar_html(obj, profile)
         label = ('沙盒聊天页仿真 · profile=%s · 深色实测外壳 · window.sdk 已装'
                  % html_mod.escape(profile))
     else:
@@ -4317,6 +4154,20 @@ def assemble_panorama(obj, platform, src_name, sandbox_profile="chat"):
         '<iframe class="pano-frame" srcdoc="%s" sandbox="%s"></iframe>'
         '</div>%s' % (label, tools, srcdoc, frame_sandbox, audit_panel)
     )
+    if sandbox:
+        notes = ''.join('<div class="frag-warn">HOST %s: %s</div>' %
+                        (html_mod.escape(d['code']), html_mod.escape(d['message']))
+                        for d in host_diagnostics)
+        if profile == 'chat':
+            # Do not copy ordinary sandbox CSS or author scripts into this document.
+            body += ('<style>' + host_preview.HOST_CSS + '</style>' +
+                     host_preview.complete_popups(SANDBOX_HOST_POPUPS) +
+                     '<style data-preview-host-style="1">' + host_css + '</style>' +
+                     host_preview.HOST_SCRIPT)
+            notes += '<div class="frag-warn">宿主 CSS 为文档子集的保守预览；动态主题转发、内部类和真实保存仍需平台验证。</div>'
+        else:
+            notes += '<div class="frag-warn">瘦预览没有宿主弹窗；宿主 CSS 未注入，需切 chat 预览或真实聊天页验收。</div>'
+        body += notes
     return PANORAMA_PAGE_TEMPLATE % {"platform": platform, "banner": banner,
                                      "body": body, "marker_css": MARKER_CSS}
 

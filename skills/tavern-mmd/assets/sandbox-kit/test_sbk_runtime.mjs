@@ -608,6 +608,47 @@ function testThemeRuntimeContracts() {
   t(style.textContent.includes('--chat-accent'), 'enabled(true) 恢复合成主题');
 }
 
+function testCompleteThemeRegistry() {
+  const t = group('complete theme registry');
+  const { SBK, doc } = freshTimed(THEME_FILES);
+  const contract = JSON.parse(readFileSync(join(HERE, '../../scripts/fixtures/mmdsandbox/contract.json'), 'utf8'));
+  const expected = contract.cssContract.designTokens;
+  eq(SBK.theme.vars().map((v) => '--chat-' + v).sort(), expected.slice().sort(), '运行时覆盖契约全部 29 变量');
+  eq(Object.keys(SBK.theme.base()).map((k) => '--chat-' + SBK.theme.tokens[k]).sort(), expected.slice().sort(), '深色基线也覆盖全部 29 变量');
+  const tokens = Object.fromEntries(expected.map((k) => [k, '#123456']));
+  tokens['--chat-viewport-height'] = '1px';
+  SBK.theme.apply(tokens);
+  const style = doc.head.childNodes.find((n) => n.id === SBK.theme.styleId);
+  for (const k of expected) t(style.textContent.includes(k + ':'), k + ' 被运行时接受');
+  t(!style.textContent.includes('--chat-viewport-height'), 'viewport 几何值保持只读');
+  SBK.theme.apply({ composerBg: '#234567', modalSurface: '#345678', moreItemBg: 'var(--chat-modal-surface)' });
+  t(style.textContent.includes('--chat-composer-bg:#234567;'), '底栏语义别名生效');
+  t(style.textContent.includes('--chat-modal-surface:#345678;'), '弹窗语义别名生效');
+  t(style.textContent.includes('--chat-more-item-bg:var(--chat-modal-surface);'), '保留 more-item-bg 别名');
+  SBK.theme.apply('native');
+  t(style.textContent === '', 'native 清空完整动态主题');
+  t(doc.head.childNodes.filter((n) => n.id === SBK.theme.styleId).length === 1, '仍只有一个动态主题所有者');
+}
+
+function testStaticHostStyleScope() {
+  const t = group('static host style scope');
+  const { SBK, doc } = freshTimed(THEME_FILES);
+  SBK.theme.apply(themeEnvelope());
+  const original = SBK.theme.prefs.form();
+  t(original.textContent.includes('启用美化（关闭＝跟随平台）'), '未配置 hostStyles 保持原开关语义');
+  const staticStyle = doc.createElement('style');
+  staticStyle.textContent = '[data-host="summary"]{color:red}';
+  doc.head.appendChild(staticStyle);
+  SBK.theme.apply({ ...themeEnvelope(), staticHostStyles: true });
+  const form = SBK.theme.prefs.form();
+  t(form.textContent.includes('启用阅读主题'), '有宿主皮肤时明确阅读主题开关');
+  t(form.textContent.includes('宿主皮肤不受此开关控制'), '表单解释制作期皮肤范围');
+  SBK.theme.prefs.enabled(false);
+  const dynamicStyle = doc.head.childNodes.find((n) => n.id === SBK.theme.styleId);
+  t(dynamicStyle.textContent === '', '关闭仍清空动态阅读主题');
+  t(staticStyle.textContent.includes('data-host'), '主题所有者不删除制作期静态样式');
+}
+
 /* =======================================================================
    4) stage 延迟竞态（审计报告问题 4）
    ======================================================================= */
@@ -1240,6 +1281,8 @@ async function main() {
   testStoreLoadAfterThrottle();
   testStoreMergeThinPreview();
   testThemeRuntimeContracts();
+  testCompleteThemeRegistry();
+  testStaticHostStyleScope();
   testSchemaPersist();
   testHostId();
   testMountHostDedupe();

@@ -3,8 +3,9 @@
  * 经典脚本，零 module、零外部依赖。必须在**作者 hoisted scripts 之前**执行，
  * 这样作者脚本顶层拿到的 window.sdk 就已经在位（实机也是脚本执行时 sdk 已存在）。
  *
- * 事实依据（唯一）：sandbox-foundation/资料/基座事实卡.md
- *                   sandbox-foundation/资料/探针实测原始数据.md
+ * 事实依据：按 contract.json 的日期/环境区分历史探针、当前公开文档与保守模拟。
+ *           2026-08 历史探针见 sandbox-foundation/资料/基座事实卡.md；
+ *           2026-09 文档对照见 references/platforms/mmd-sandbox.md。
  * 共享契约：      scripts/fixtures/mmdsandbox/contract.json
  *
  * 🚨 这不是完整平台，也不冒充完整平台。每个能力都带 accuracy：
@@ -21,7 +22,7 @@
   if (W.__MMD_SANDBOX_SIM__) { return; }
 
   var CFG = W.__MMD_SANDBOX_SIM_CONFIG__ || {};
-  var CONTRACT_VERSION = '1.1.0';
+  var CONTRACT_VERSION = '1.2.0';
   var PROFILE = CFG.profile === 'thin-preview' ? 'thin-preview' : 'chat';
   var THIN = PROFILE === 'thin-preview';
 
@@ -60,8 +61,8 @@
     }
   })();
 
-  // 实机错误码共 7 个（事实卡 §4.4，手册漏记 BUSY/NETWORK）；完整名单未探全，
-  // 模拟器只用已确证的 NOT_SUPPORTED。
+  // 公开契约列 7 个错误码；历史源码里的内部码另记在 fixture，不并入公开名单。
+  // 本地实现 NOT_SUPPORTED / INVALID_ARGS / BUSY，不伪造授权、限频或网络服务。
   function SdkError(code, message) {
     var e = new Error(message || code);
     e.name = 'SdkError';
@@ -456,28 +457,57 @@
       if (THIN) { return thinThrow('composer.show'); }
       var r = root();
       if (r) { r.setAttribute('data-composer', 'visible'); }
+      syncStageGeometry();
       return syncOk('composer.show', []);
     },
     hide: function () {
       if (THIN) { return thinThrow('composer.hide'); }
       var r = root();
       if (r) { r.setAttribute('data-composer', 'hidden'); }
+      syncStageGeometry();
       return syncOk('composer.hide', []);
     }
   };
 
+  var sendPending = null;
+  var forcedBusy = false;
+  function isBusy() { return !!(sendPending || forcedBusy || streaming); }
+
   var message = {
     send: function (text) {
       if (THIN) { return thinReject('message.send'); }
+      if (isBusy()) {
+        return rejected('message.send', [text],
+          SdkError('BUSY', '当前仍在发送或生成；草稿已保留，请等待后手动发送。'));
+      }
+      var ta = textarea();
+      var draft = ta ? String(ta.value || '') : '';
+      var content = text === undefined ? draft : text;
+      if (typeof content !== 'string' || !content.trim()) {
+        return rejected('message.send', [text], SdkError('INVALID_ARGS', '消息不能为空'));
+      }
+      // 用每次发送的独立标记跨过 Promise 完成边界，防止同步连点和事件回调重入。
+      // 切会话会清标记；旧会话的完成回调不能清新会话的草稿/发送态。
+      var pending = {};
+      sendPending = pending;
       // 本地只追加用户气泡：真实模型回复必须回真实站。
-      var made = pushMessage('user', text === undefined ? '' : text, 'done');
+      var made = pushMessage('user', content, 'done');
       emit('message:new', made.payload, made.bubble);
       emit('message:mount', made.payload, made.bubble);
       emit('message:done', made.payload, made.bubble);
       note('message.send 只在本页追加用户气泡；**没有真实 AI 回复**，模型行为需回真实聊天页验证。');
       // 实机签名是 Promise<void>：不要把 payload 当返回值喂给作者，那会让人以为
       // 能从 send() 的结果里读到消息 id/serverId。要拿消息请订阅 message:* 事件。
-      return resolved('message.send', [text], undefined);
+      function complete() {
+        if (sendPending === pending) {
+          sendPending = null;
+          // 不抹去等待期间用户新写的下一条草稿。
+          if (ta && String(ta.value || '') === draft) { ta.value = ''; }
+        }
+        return undefined;
+      }
+      var result = resolved('message.send', [text], undefined);
+      return result && typeof result.then === 'function' ? result.then(complete) : complete();
     },
     edit: function (serverId, content) {
       if (THIN) { return thinReject('message.edit'); }
@@ -567,23 +597,73 @@
     }
   };
 
-  var stageOpen = false;
+  var currentStageMode = 'closed';
+  var stageGeometryProps = ['inset', 'left', 'top', 'right', 'bottom', 'width', 'height'];
+  var stageGeometryObserver = null;
+
+  function clearStageGeometry(el) {
+    if (!el || !el.style) { return; }
+    for (var i = 0; i < stageGeometryProps.length; i++) {
+      el.style.setProperty(stageGeometryProps[i], '');
+    }
+  }
+
+  function syncStageGeometry() {
+    if (disposed || currentStageMode !== 'content') { return; }
+    var el = stageEl(), messages = nq('[data-chat="messages"]');
+    var parent = el && (el.offsetParent || root());
+    if (!el || !el.style || !messages || !parent) { return; }
+    // 无布局测量能力的假 DOM 保留 CSS 回退；不编造平台固定像素高度。
+    if (!messages.getBoundingClientRect || !parent.getBoundingClientRect) { return; }
+    var rect = messages.getBoundingClientRect(), box = parent.getBoundingClientRect();
+    if (!isFinite(rect.left) || !isFinite(rect.top) || !isFinite(rect.width) ||
+        !isFinite(rect.height) || !isFinite(box.left) || !isFinite(box.top)) { return; }
+    el.style.setProperty('left', (rect.left - box.left - (parent.clientLeft || 0) +
+      (parent.scrollLeft || 0)) + 'px');
+    el.style.setProperty('top', (rect.top - box.top - (parent.clientTop || 0) +
+      (parent.scrollTop || 0)) + 'px');
+    el.style.setProperty('width', Math.max(0, rect.width) + 'px');
+    el.style.setProperty('height', Math.max(0, rect.height) + 'px');
+    el.style.setProperty('right', 'auto');
+    el.style.setProperty('bottom', 'auto');
+  }
+
+  function observeStageGeometry() {
+    if (disposed || stageGeometryObserver || typeof W.ResizeObserver !== 'function') { return; }
+    var messages = nq('[data-chat="messages"]');
+    if (!messages) { return; }
+    // 输入框自动增高、状态栏变高等布局变化未必触发 window.resize。
+    // 只观察消息区，避免舞台自身的几何写入形成观察循环。
+    stageGeometryObserver = new W.ResizeObserver(syncStageGeometry);
+    stageGeometryObserver.observe(messages);
+  }
+
+  function setStageMode(mode) {
+    currentStageMode = mode === 'closed' ? 'closed' : (mode === 'full' ? 'full' : 'content');
+    var el = stageEl();
+    if (el) {
+      el.setAttribute('data-stage', currentStageMode);
+      if (currentStageMode === 'closed') { el.setAttribute('hidden', ''); }
+      else { el.removeAttribute('hidden'); }
+      // full 的 fixed/inset 与层级仍由平台 CSS 决定，模拟器不压过作者的样式。
+      clearStageGeometry(el);
+      syncStageGeometry();
+    }
+    return currentStageMode;
+  }
+
   var stage = {
     // 🚨 关闭时仍返回 DIV（实测），绝不能靠 el() 是否 null 判开关。
     el: function () { return record('stage.el', [], stageEl()); },
-    visible: function () { return record('stage.visible', [], stageOpen); },
+    visible: function () { return record('stage.visible', [], currentStageMode !== 'closed'); },
     // stage.open/close 都是**同步 void**。瘦预览下 stage 实测可用
     // （stage_visible=false / stage_el=<DIV> 均正常返回），故两 profile 同一实现。
-    open: function () {
-      var el = stageEl();
-      stageOpen = true;
-      if (el) { el.removeAttribute('hidden'); }
-      return syncOk('stage.open', []);
+    open: function (mode) {
+      setStageMode(mode === 'full' ? 'full' : 'content');
+      return syncOk('stage.open', [mode]);
     },
     close: function () {
-      var el = stageEl();
-      stageOpen = false;
-      if (el) { el.setAttribute('hidden', ''); }
+      setStageMode('closed');
       // 🚨 sdk.stage.close() **不派发** stage:close（事实卡 §4.4）。
       // 只有平台自己关闭舞台才派 → 见 control.stageClose()。
       record('stage.close', [], 'closed without stage:close event');
@@ -624,6 +704,9 @@
     boot: function () {
       if (booted) { return false; }
       booted = true;
+      // 作者顶层可能在 DOM 尚未出现时 open，完成解析后同步同一状态。
+      setStageMode(currentStageMode);
+      observeStageGeometry();
       // 真机由宿主按当前 visualViewport 把该值写成 root 内联变量。
       control.setViewportHeight(CFG.viewportHeight || W.innerHeight || 1205);
       var bubble = nq('[data-chat="message"][data-from="ai"]');
@@ -652,7 +735,7 @@
       emit('message:done', made.payload, made.bubble);
       return made.payload;
     },
-    /* 流式：先 new+mount，再逐块 message:stream（content 为累计值），done() 收尾。
+    /* 流式：先 new+mount，再逐块 message:stream（content 为已揭示累计值），done() 收尾。
        实机流式阶段跳过整条正则管线，故此处不做替换。 */
     stream: function (chunks) {
       var list = Object.prototype.toString.call(chunks) === '[object Array]'
@@ -672,8 +755,8 @@
                             'ai', streaming.payload.serverId);
         emit('message:stream', p, streaming.bubble);
       }
-      note('message:stream 的载荷形状按 new/mount/done 的 4 键同构实现，属保守推断；' +
-           '流式分块节奏与真实模型输出需回真实聊天页验证。');
+      note('message:stream.content 按 2026-09-05 文档记录实现为与气泡同步的已揭示累计文字；' +
+           '其余 4 键同构与流式分块节奏仍为本地保守模拟，需回真实聊天页验证。');
       return streaming.content;
     },
     done: function () {
@@ -701,6 +784,9 @@
        但**不清订阅**（无 off，订阅不可撤销）。 */
     switchConversation: function (id) {
       streaming = null;
+      sendPending = null;
+      forcedBusy = false;
+      if (currentStageMode !== 'closed') { control.stageClose(); }
       replayHistory['message:mount'] = [];
       replayHistory['message:done'] = [];
       var list = nq('[data-chat="list"]');
@@ -709,8 +795,8 @@
         for (i = 0; i < list.childNodes.length; i++) { kids.push(list.childNodes[i]); }
         for (i = 0; i < kids.length; i++) { list.removeChild(kids[i]); }
       }
-      emit('conversation:switch', id === undefined ? 'sim-conversation-2' : id, null);
-      note('conversation:switch 载荷形状未确证（这里给会话 id 字符串），属 probe-needed。');
+      emit('conversation:switch', undefined, null);
+      note('conversation:switch 按平台参考 §4.9 无载荷；切会话先关闭舞台的事件顺序属保守模拟。');
       return true;
     },
     theme: function (name) {
@@ -724,17 +810,27 @@
       emit('theme:change', next, null);
       return next;
     },
-    back: function () { emit('back', undefined, null); return true; },
+    back: function () {
+      // 平台参考 §4.9：舞台开着时先关舞台，back 不一定交给作者。
+      // 本地确定性选择消耗这次 back；并非声称最新平台所有分支均如此。
+      if (currentStageMode !== 'closed') { return control.stageClose(); }
+      emit('back', undefined, null);
+      return true;
+    },
+    stageMode: function (mode) { return setStageMode(mode); },
+    setBusy: function (busy) { forcedBusy = !!busy; return isBusy(); },
     /* 平台侧关闭舞台才派 stage:close；sdk.stage.close() 不派（事实卡 §4.4）。 */
     stageClose: function () {
-      var el = stageEl();
-      stageOpen = false;
-      if (el) { el.setAttribute('hidden', ''); }
+      setStageMode('closed');
       emit('stage:close', undefined, null);
       return true;
     },
     dispose: function () {
       disposed = true;
+      if (stageGeometryObserver) {
+        stageGeometryObserver.disconnect();
+        stageGeometryObserver = null;
+      }
       emit('dispose', undefined, null);
       return true;
     },
@@ -743,6 +839,7 @@
       var r = root();
       var v = String(px === undefined ? 1205 : px) + 'px';
       if (r && r.style) { r.style.setProperty('--chat-viewport-height', v); }
+      syncStageGeometry();
       return v;
     },
     setKeyboardInset: function (inset) {
@@ -760,7 +857,11 @@
         booted: booted,
         disposed: disposed,
         streaming: !!streaming,
-        stageVisible: stageOpen,
+        busy: isBusy(),
+        forcedBusy: forcedBusy,
+        sendPending: !!sendPending,
+        stageVisible: currentStageMode !== 'closed',
+        stageMode: currentStageMode,
         eventCount: LOG.events.length,
         callCount: LOG.calls.length,
         scopeBlockedCount: LOG.scopeBlocked.length,
@@ -804,9 +905,10 @@
 
   // 本地 iframe 尺寸变化时同步宿主内联高度。真机由 visualViewport 驱动；
   // 预览页 setViewportSize 会触发 iframe window.resize，不能沿用冷启动旧值。
-  if (!CFG.viewportHeight && W && typeof W.addEventListener === 'function') {
+  if (W && typeof W.addEventListener === 'function') {
     W.addEventListener('resize', function () {
-      control.setViewportHeight(W.innerHeight || 1205);
+      if (!CFG.viewportHeight) { control.setViewportHeight(W.innerHeight || 1205); }
+      else { syncStageGeometry(); }
     });
   }
 

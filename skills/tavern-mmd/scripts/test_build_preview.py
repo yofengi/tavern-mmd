@@ -2034,34 +2034,17 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertIn("data-msg-kind", sim)
         self.assertIn("rootEl.setAttribute('data-chat-state', 'sent')", sim)
 
-    def test_host_popups_are_marked_unstylable_not_faked(self):
-        """🚨 宿主页那 5 个弹窗渲染在 h5 域的 uni-app 里，跨源 iframe 之外。
-
-        探针验证：在卡片 iframe 内注入 --chat-modal-bg:#00ff00 后打开模型设置，
-        它仍是 #17181a，且该变量在其上解析为「未定义」。所以预览**只画层级占位**、
-        明确标注平台侧，绝不套 --chat-modal-* —— 套了就是撒谎，作者会白写选择器。
-        """
-        chrome = html_mod.unescape(bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json"))
-        for name in ("model", "conv", "summary", "role", "share",
-                     "conversation", "assist-alert", "model-switch"):
-            with self.subTest(name=name):
-                self.assertIn('data-host-popup="%s"' % name, chrome)
-        self.assertIn("平台侧 · 卡片改不动", chrome)
-        self.assertIn("对它无效", chrome)
-        # 占位壳用硬编码灰底斜纹，不吃白名单令牌（吃了就等于宣称能改）
-        css = bp._sandbox_chrome_css()
-        sheet = css.split(".pano-host-popup .pano-host-sheet{", 1)[1].split("}", 1)[0]
-        self.assertIn("background:#17181a", sheet)
-        self.assertNotIn("--chat-modal", sheet)
-        # 实测 z-index 差异：总结剧情 1000000000，分享 9000（旧聊天页是 10075）
-        self.assertIn('.pano-host-popup[data-host-popup="summary"]{z-index:1000000000}', css)
-        self.assertIn("z-index <b>9000</b>", chrome)
-        # 2026-09-06 实机复刻的内容块也一律不吃 --chat-modal-*（画得像 ≠ 能改）
-        ph_rules = [ln for ln in css.splitlines() if ".pano-host-popup .ph-" in ln]
-        self.assertTrue(ph_rules, "ph-* 内容复刻样式缺失")
-        for ln in ph_rules:
-            with self.subTest(rule=ln[:48]):
-                self.assertNotIn("--chat-", ln)
+    def test_host_popups_remain_outside_sandbox_with_documented_css_relay(self):
+        """直接CSS隔离仍在；2026-09手册新增宿主静态转发，不沿用8月绝对禁令。"""
+        page = bp.assemble_panorama(self.CARD, "mmdsandbox", "t.json")
+        frame = html_mod.unescape(re.search(r'<iframe class="pano-frame" srcdoc="([^"]*)"', page).group(1))
+        for name in ("model", "conv", "summary", "role", "share", "conversation", "model-switch"):
+            self.assertIn('data-host-popup="%s"' % name, page)
+        self.assertNotIn('<div class="pano-host-popup"', frame)
+        self.assertIn('data-preview-host-style="1"', page)
+        self.assertIn('data-host="summary-confirm"', page)
+        self.assertIn('静态转发', page)
+        self.assertNotIn('平台侧 · 卡片改不动', page)
 
     def test_host_second_layer_popups_stack_over_parent(self):
         """二层弹窗（实机 2026-09-06）：对话设置的 .intro-icon → .alert-scope（315x577，
@@ -2078,7 +2061,7 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
                 self.assertIn('data-host-popup="%s"' % name, chrome)
         # 二层入口挂在父面板内容里
         self.assertIn('data-host-open2="conv-intro"', chrome)
-        self.assertIn('data-host-open2="summary-intro"', chrome)
+        self.assertIn('data-host-open2="summary-confirm"', chrome)
         # open2 不关父面板；关闭钮对二层走 closeOne
         self.assertIn("function open2(name){", chrome)
         self.assertNotIn("function open2(name){closeAll()", chrome)
@@ -2086,7 +2069,7 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
         self.assertIn("if(SECOND[n]){closeOne(n);}else{closeAll();}", chrome)
         self.assertIn("open2:open2", chrome)
         # 层级：summary-intro 必须比父面板 summary(1000000000) 高
-        css = bp._sandbox_chrome_css()
+        css = bp.host_preview.HOST_CSS
         self.assertIn('.pano-host-popup[data-host-popup="summary-intro"]{z-index:1000000001}', css)
         self.assertIn('.pano-host-popup[data-host-popup="conv-intro"]{z-index:10076}', css)
 
@@ -2120,10 +2103,10 @@ class TestSandboxPanoramaChrome(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertIn(label, chrome)
         # note 里写明"不在 iframe 内"与 data-host 判据，作者才不会白写选择器
-        self.assertIn("它不在 iframe 内", chrome)
+        self.assertIn("宿主 CSS 预览", chrome)
         self.assertIn('data-host="message-edit"', chrome)
         # 实测层级与遮罩
-        css = bp._sandbox_chrome_css()
+        css = bp.host_preview.HOST_CSS
         self.assertIn('.pano-host-popup[data-host-popup="message-edit"]{z-index:9999', css)
         self.assertIn('.pano-host-popup[data-host-popup="message-edit"] .pano-host-mask'
                       '{background:rgba(0,0,0,.7)}', css)

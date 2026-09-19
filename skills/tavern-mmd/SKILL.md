@@ -1,6 +1,6 @@
 ---
 name: tavern-mmd
-description: 为MMD（魅魔岛/sexyai.top，含沙盒模式新聊天页）和本地酒馆SillyTavern创建角色卡、世界书、美化（状态栏/全局美化）、同层卡（独立网页UI、原生桥接、可选游戏引擎与存档）。触发词：同层卡、网页UI、小游戏、MMD、魅魔岛、沙盒模式、沙盒、新版对话框、MMD新页、新聊天页、chatVersion、酒馆角色卡、角色卡、世界书、状态栏、全局美化、美化、正则、开场白、uni-app酒馆、在线酒馆、sexyai。支持指令 /cardplan /cardplanmax /mmd /mmdsandbox /st /worldbook /beautify /helpmmd。
+description: 为MMD（魅魔岛/sexyai.top，含沙盒模式新聊天页）和本地酒馆SillyTavern创建角色卡、世界书、美化（状态栏/全局美化）、同层卡（旧页原生桥接网页、新页沙盒SDK舞台网页，可选游戏与存档）。触发词：同层卡、沙盒同层卡、网页UI、new-mmd-hud、小游戏、MMD、魅魔岛、沙盒模式、沙盒、新版对话框、MMD新页、新聊天页、chatVersion、酒馆角色卡、角色卡、世界书、状态栏、全局美化、美化、正则、开场白、uni-app酒馆、在线酒馆、sexyai。支持指令 /cardplan /cardplanmax /mmd /mmdsandbox /st /worldbook /beautify /helpmmd。
 ---
 
 # tavern-mmd：三平台酒馆角色卡创作
@@ -16,6 +16,8 @@ description: 为MMD（魅魔岛/sexyai.top，含沙盒模式新聊天页）和�
 
 MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `chatVersion: 1`（官方叫「新页 / 新聊天页」，本 skill 叫「沙盒模式」）走 `/mmdsandbox`，`chatVersion: 0`/缺省走 `/mmd`。选错产出静默失效（脚本装上但 SDK 全不在，页面无报错）。
 
+**同层卡也必须分新旧页，不能默认旧页。** 同层卡是呈现形态，不是平台：旧版用独立 iframe + Host 原生桥接，沙盒用官方 SDK + `sdk.stage` 自绘完整网页。用户已指定 `/mmdsandbox` 时直接进入沙盒同层指南；仅有“同层卡”且无平台记录才问。HTML `iframe sandbox` 属性不代表 MMD 沙盒模式。
+
 ## 平台差异矩阵（所有技术分流的依据）
 
 | 能力 | 本地酒馆 /st | 当前MMD /mmd | 沙盒模式 /mmdsandbox |
@@ -27,18 +29,19 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | `findRegex` 形态 | 任意正则 | **强制 `/pattern/flags` slash literal**，固定标记也要包斜杠 | **交付统一 `/pattern/flags` slash 形态**（约定，非硬性）：实机复验裸字面量也生效（卡 64304 A/B，2026-08-30），与 worker 源码一致；统一 slash 为跨平台一致，校验器对裸字面量出 WARN 不出 ERROR |
 | 稳定选择器 | 正常 DOM | ❌ 平台 class 名会变 | ✅ `[data-chat]` / `[data-slot]` 承诺不改名（作者自写 `data-*` 会被净化删掉，自己的元素用 class/id） |
 | 状态栏方案 | 雷达法/KV V4.0均可 | **动态/自创NPC：混合态雷达法**；固定字段：原生`$field`（最轻零JS）或 KV V4.0（带骨架），AI 择一 | `<script>` + SDK：`message:done` 取 `msg.content` 解析后渲染；短小可见块可纯规则替换（`$1`/`$名字`）零 JS；长期面板挂舞台 `sdk.stage`；**雷达法/onerror 引擎不可移植** |
-| 全局美化 | 主题/自定义CSS | 静态换肤，或 day/night/native 三态运行时主题包（含玩家微调、route 生命周期） | 改 **29** 个 `--chat-*` 变量换肤（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1；官方手册正文只列前 10，后 18 个另节单列），覆盖写 `[data-chat="root"][data-theme=*]`（特异度 (0,2,0)）才不被平台切回；订 `theme:change` 跟随深浅色；舞台承载长期面板。基座见 `assets/sandbox-kit/` |
+| 全局美化 | 主题/自定义CSS | 静态换肤，或 day/night/native 三态运行时主题包（含玩家微调、route 生命周期） | 沙盒阅读主题覆盖 **29** 个 `--chat-*` 颜色变量，跟随 `theme:change`；宿主弹窗另用 **21 个 `[data-host]` 根**的静态 `<style>` 抽取过滤通道，不是跨源 DOM 接口。SBK 的制作期 `hostStyles` 与运行时阅读主题开关分开；见宿主指南 |
 | 事件处理 | 正常 | inline onclick 使用已验证的干净形式 `window.__fn&&__fn()` 或 `eval(getElementById('FUNC').dataset.s)`；禁代码字符串字面量与直接DOM赋值；复杂组件可动态绑定 handler；stopPropagation必加 | 顶层 `function`/`const`/`class` 自动挂 `window`，`onclick="tap()"` 直接可用（**`svg` 内的 onclick 会被删**）；气泡内按钮在 `message:mount` 里绑，回调内同步抓引用，跨异步边界不再查询气泡 DOM |
 | MVU/STScript/酒馆助手 | ✅ | ❌（保守） | ❌（官方 SDK 顶替，见下行） |
-| 官方 SDK / 存档 / 舞台 | ❌（走酒馆自身生态） | ❌ 无 | ✅ **30 能力 / 12 事件**；`sdk.save` 落服务端跨设备（上限由宿主动态下发，**不写死 10 key**）、`sdk.cache` 刷新即失、`sdk.stage` 舞台放长期面板 |
-| 平台状态变量（`sdk.vars`/`vars:change`/`<abc_vars>`） | ❌（走 MVU 等酒馆生态） | ❌ 无 | ⚠️ **业务规则已确认、运行契约未公布**：仅新页可开、最多 6 层 80 键、快照随消息存并按楼层回溯、`{{var}}` 只替换本轮新组装内容、分享页与瘦预览可读不可写。官方 `contract.json` 至今没有这几个名字 → 校验器判 WARN「契约未补齐」，**不许编造签名**，也**不许说平台不支持**。现阶段状态栏仍走「AI 正文吐 `[状态]` 块 + 脚本解析」。详见 mmd-sandbox.md §14 |
-| 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | ✅ **可导 v2 整卡**（png/json）：编辑页导入 v2 卡按**新卡**处理，故「新版聊天页」仍可选 → 沙盒可用整卡路线。也可走 6键正则 json + 独立 persona 文本 |
+| 官方 SDK / 存档 / 舞台 | ❌（走酒馆自身生态） | ❌ 无 | ✅ **30 能力 / 12 事件 / 7 公开错误码**；`sdk.save` 用版本化对象合并保存，文档 10 key 与历史源码差异需按目标版本验收，不承诺无限额；`sdk.cache` 当场缓存、`sdk.stage` 长期面板 |
+| 同层卡 / 完整自绘网页 | 按酒馆自身生态 | 独立 Frame + Host 原生桥接；旧页四键正则包；`assets/same-layer-kit/` | 官方 SDK 薄适配 + `sdk.stage` 的 content/full 模式；新页六键正则包；制作见 `references/creation/sandbox-same-layer-card.md`，不继承旧页桥接动作表 |
+| 平台状态变量（`sdk.vars`/`vars:change`/`<abc_vars>`） | ❌（走 MVU 等酒馆生态） | ❌ 无 | ⚠️ 业务规则沿用项目资料：仅新页可开、最多 6 层 80 键、快照随消息存并按楼层回溯、`{{var}}` 只替换本轮新组装内容、分享页与瘦预览可读不可写。但 **2026-09-05 网页核对与本轮资料未提供完整运行契约**；不得推测签名、返回值或导入字段，也不据此声称平台不支持。现阶段状态栏按已确认的 AI 正文协议解析；数据来源见 mmd-sandbox.md §14 |
+| 角色卡导入 | json/png | png（**仅v2**，不识别v3；jpg弃用、不能直接导入json整卡） | ✅ **可导 v2 PNG 整卡**：编辑页导入按新卡处理，首次保存前选新版。JSON 整卡直接导入记录冲突、待复验（见 card-json.md 文首），当前作源码/备份；也可走 6键正则 json + 独立 persona 文本 |
 | 世界书导入 | json/png | png/json/角色卡连带 | png/json/角色卡连带（创卡页原文：「可导入PNG或json格式世界书」）；**唯一限制**是不能塞进 6键导入正则 json（那份顶层出现 `entries`/`character_book` 等判 ERROR），走整卡时正常放 `character_book` |
 | 世界书条目标题 | 无限制 | **≤20字**（`comment`；中文一字算1、标点计入，超出截断） | **≤20字**（同为 MMD 创卡页限制，本 skill 保留；官方校验脚本不查此项，故降级为 WARN） |
 
 **当前MMD已实测**：`<script>` 与 ES6 解禁、`onerror` 可多行可用双引号、正则上限 130 条。`<script>` 不能做 per-message 自渲染/定位（`document.currentScript` 不可用 + 同段脚本只加载一次被去重），逐消息状态栏引擎仍用 img onerror；独立同层卡使用文档级单例与 iframe；这不妨碍 document-level 单例用一次性 `<script>` bootstrap，并在重复入口复用既有实例。MVU/STScript 等未确认能力仍按无处理（保守）。
 
-**沙盒模式证据等级**：平台事实已由沙盒应用源码逆向 + 三轮真机探针复核。与官方资料冲突时按 `源码 > 隔离实测 > 官方手册 > 官方 skill`；完整真值只读 `references/platforms/mmd-sandbox.md` 与 `sandbox-foundation/资料/基座事实卡.md`。`chatVersion` **只在新建卡导入时被读取**，无法通过导入把老卡升级成新页，交付时必须书面提醒用户新建卡。
+**沙盒模式证据规则**：先核对版本、日期与运行环境，再比较同一范围内的源码、实测和文档。2026-08/09 历史探针保留；2026-09-05 网页核对记录补充 BUSY 与已揭示累计流式语义，本轮 37 页手册补充 21 个宿主根。旧 ready/save.remove/配额/外链冲突按日期限定并待目标版本复验，不能用旧实现绝对否定新文档，也不能将本地模拟标为新实测。来源汇总见 `references/platforms/mmd-sandbox.md` 和 `references/beautify/sandbox-host-styles.md`。`chatVersion` 的既有导入记录要求新建卡，交付仍提醒「新建卡 + 首次保存前选择新版」。
 
 **沙盒验证默认本地优先**：日常开发先跑 `validate.py` 与本地沙盒仿真页，完成 DOM、SDK、主题、舞台、移动视口和截图回归。AI **不默认登录真实 MMD 账号**，不把正式卡或公开卡当测试夹具；真实站只保留标为 `probe-needed` 的平台边界探针与用户授权后的最终人工验收。
 
@@ -47,7 +50,7 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | 用户意图 | 读取文档 |
 |---|---|
 | 平台技术细节/避坑 | `references/platforms/{mmd,mmd-sandbox,sillytavern}.md` |
-| 沙盒模式（`chatVersion:1` 新聊天页）任何技术问题：SDK/舞台/存档/`message:mount`/6键导入 json/人设格式 | `references/platforms/mmd-sandbox.md`（该平台唯一权威；**不要**套用 mmd.md 的 onerror/雷达法那套） |
+| 沙盒模式（`chatVersion:1` 新聊天页）任何技术问题：SDK/舞台/存档/`message:mount`/6键导入 json/人设格式 | `references/platforms/mmd-sandbox.md`（该平台分层来源汇总；按日期/环境读取，**不要**套用 mmd.md 的 onerror/雷达法） |
 | **已选新页**的平台状态变量 / 好感度 / 背包 / 养成 / 地图持久化「数据放哪」 | `references/platforms/mmd-sandbox.md` §14（三来源分工：平台状态变量 vs `sdk.save` vs `sdk.cache`；`<abc_vars>` 不可碰；契约未补齐的边界）。**动手写界面前先定数据来源**，别让同一个剧情数值有两份真值 |
 | 新页公开发布门槛（要过审核的卡） | `references/platforms/mmd-sandbox.md` §10.3（固定传输 2000–15000、`beginning` ≥200）。私人自用卡与纯草稿不受此约束 |
 | 角色设定/性格写作 | `references/creation/character.md` |
@@ -55,12 +58,14 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | 开场白 | `references/creation/opening.md` |
 | 文风控制 | `references/creation/style.md` |
 | 美化风格选择/风格库/换配色换主题 | **先读** `references/beautify/style-system.md`（token契约+6维度+分装+覆盖）；风格清单见 `references/beautify/style-db/README.md` |
-| **同层卡 / 独立网页UI / 替换聊天界面 / 网页小游戏** | 先确认旧页 `chatVersion:0`/缺省，再读 `references/creation/same-layer-card.md` + `references/runtime/mmd-native-bridge.md` + `assets/same-layer-kit/README.md`。默认独立 Frame + 原生桥接 Host；游戏引擎可选。数据/背包/地图需求不可自动改平台。新页改走 SDK/舞台；私有后端 Host 仅实验，见 `references/runtime/mmd-backend-host.md` |
-| **同层卡预览 / 审核 / MMD 原生页联动** | `references/creation/same-layer-review.md`。默认用作品配置驱动 `scripts/review_same_layer.py`，统一构建、通用/专项审核、旧 MMD 联动预览、浏览器检查与报告。预览嵌入原样发布载荷，原生页与同层页共享本地模拟状态；真实平台与实体手机证据另列 |
-| **同层卡中的模型列表/模型切换/模型设置/原生功能可用范围** | `references/runtime/mmd-model-controls.md` + `references/runtime/mmd-native-capabilities.md`。模型组默认随卡打包启动，可用 `--no-models` 关闭。基座已接入固定上游 61 项已实现动作；仅定义的 6 项保持不可用。现成对话页包含按需开关的功能模块，见 `references/creation/same-layer-dialogue.md` |
-| **同层卡原生动作：消息编辑/删除/回溯、会话管理、人设、补充设定、指令、导航与原生面板** | `references/runtime/mmd-action-modules.md` + `references/runtime/mmd-native-capabilities.md`。默认功能层内置 61 项；新增 52 项已有模块入口与操作流程；先读 `references/creation/same-layer-dialogue.md` 再组合/换肤，接口不足的设置跳回原生页。参数、revision 与确认阶段按合同处理；真实平台兼容性单独验收 |
+| **同层卡 / 独立网页UI / 替换聊天界面 / 网页小游戏** | **先按已选平台分流**：旧页 `/mmd` → `references/creation/same-layer-card.md` + `references/runtime/mmd-native-bridge.md` + `assets/same-layer-kit/README.md`；沙盒 `/mmdsandbox` → `references/creation/sandbox-same-layer-card.md` + `references/platforms/mmd-sandbox.md`。无平台记录先问，数据/背包/地图需求不可自动改平台。游戏引擎均可选；旧页私有后端实验另见 `references/runtime/mmd-backend-host.md` |
+| **沙盒同层卡 / 新页完整网页 / new-mmd-hud / 贪心鬼新版 HUD** | `references/creation/sandbox-same-layer-card.md`。分析或迁移该上游再读 `references/runtime/new-mmd-hud-audit.md`；借鉴网页分层，SDK 合同以平台资料为准，不能原样搬 Mock、四键导出器或旧页 bridge。当前为制作方法，尚无新页同层专用成品基座/一键构建器 |
+| **同层卡预览 / 审核 / MMD 原生页联动** | **旧页专用**：`references/creation/same-layer-review.md`，用 `scripts/review_same_layer.py` 构建、校验、联动预览与报告。**沙盒同层**：`references/creation/sandbox-same-layer-card.md` §8，使用新页全景 chat/thin 仿真并补项目测试；不调用旧页专用审核器。均测试原样发布载荷，真实平台与实体手机证据另列 |
+| **旧版同层卡中的模型列表/模型切换/模型设置/原生功能可用范围** | **仅 `/mmd`**：`references/runtime/mmd-model-controls.md` + `references/runtime/mmd-native-capabilities.md`。模型组默认随卡打包启动，可用 `--no-models` 关闭；固定上游 61 项已实现动作、6 项仅定义不可用。界面见 `references/creation/same-layer-dialogue.md`。沙盒不继承这份能力表，改读沙盒同层指南 §3 |
+| **旧版同层卡原生动作：消息编辑/删除/回溯、会话管理、人设、补充设定、指令、导航与原生面板** | **仅 `/mmd`**：`references/runtime/mmd-action-modules.md` + `references/runtime/mmd-native-capabilities.md`；现成 UI 见 `references/creation/same-layer-dialogue.md`。参数、revision 与确认阶段按合同处理，真实平台另验。沙盒按官方 SDK 映射，未开放动作返回原生界面 |
 | 状态栏 | **先分平台**。沙盒模式（`/mmdsandbox`）→ `references/beautify/sandbox-kit.md`（SBK 基座，沙盒唯一适用方案：`status` 气泡内唯一数据面板 + `chrome` 功能栏入口 + 可选 `pinned` 精简条；雷达法/影渲法/onerror 引擎不可移植）。当前MMD/本地酒馆 → 动态/自创NPC **首选** `references/beautify/statusbar-radar.md`（雷达法）或 `references/beautify/statusbar-shadowcast.md`（影渲法/ShadowCast，Shadow DOM 隔离、markdown 免疫、含双轨代谢，11靶验证+生成器）；固定字段走原生 `$field`（最轻）或 `statusbar.md`（KV V4.0），由 AI 择一 + 对应平台文档；换风格见 beautify/style-system.md |
 | 全局美化 | **先分平台**。沙盒模式（`/mmdsandbox`）→ `references/beautify/sandbox-kit.md` 主题层（语义 token → 平台 **29** 个 `--chat-*`，覆盖写 `[data-chat="root"][data-theme=*]` 才不被平台深浅色切回）。当前MMD/本地酒馆 → `references/beautify/global-css.md` + 对应平台文档；先区分**静态换肤 / 当前 MMD 三态运行时主题包**。只要需要 day/night/native、玩家微调、设置或持久偏好候选，默认再读 `references/beautify/theme-runtime.md`；新资产优先见 `assets/global-beautify-examples/mmd-theme-runtime/README.md`，风格映射见 `style-system.md` |
+| **新页宿主弹窗换肤 / data-host / 模型设置 / 总结与确认层** | `references/beautify/sandbox-host-styles.md`：21 根（19 + summary + summary-confirm）、静态 CSS 抽取过滤、排除区、summary 根内编辑/锚点与树外确认。SBK 可选 `hostStyles:["path.css"]` 独立静态输出；停用运行时阅读主题不撤销宿主皮肤。chat 外层预览为保守近似，thin 不模拟宿主；不能推测动态转发、宿主 DOM 或新 SDK |
 | 悬浮组件（可拖动悬浮球/侧边栏抽屉/带菜单的悬浮按钮） | `references/beautify/floating-components.md`（light DOM 认证写法：img onerror 注入 + CSS类 + classList，菜单跟随本体+翻转避裁+选项可点击）；沙盒模式改走 `<script>` + `sdk.stage` 舞台，见 `references/platforms/mmd-sandbox.md`；**Shadow DOM 隔离变体**见 `references/beautify/statusbar-shadowcast.md`（host 挂 body + shadow 内 fixed，样式不外泄/不被染色，已验证） |
 | 正则规则 | `references/beautify/regex-rules.md` |
 | 角色卡JSON输出 | `references/output/card-json.md` |
@@ -71,7 +76,7 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | **沙盒基座（SBK）现成资产** | `assets/sandbox-kit/`（**沙盒专用**）：`sbk/` 的 `base.css` + 11 个完整经典脚本模块（内核/存储/启动/主题/协议/HUD/UI/舞台）+ `build_sbk.py` 生成器 + `sbk.config.example.json` + 协议说明。改 config 跑生成器即得可导入的 6 键 JSON（自动按完整 IIFE 边界拆条）。方法论见 `references/beautify/sandbox-kit.md`。**不能用于 /mmd 与 /st**（依赖 `sdk.*` 与 `[data-chat]`，只在沙盒新页存在） |
 | 交付前自检 | `references/quality/checklist.md` |
 
-**同层卡先于普通状态栏分流。** 在 main.md 分别记录「目标平台 / 呈现形态 / 连接方式 / 状态权威 / 存档位置」；默认为当前MMD / 同层独立页面 / 原生桥接 / 可选确定规则引擎 / 有作用域的 Host 本地存档。只需聊天网页时关闭引擎；需要游戏时 AI 仅叙述已结算事实。`iframe sandbox` 是浏览器隔离属性，不等于 `/mmdsandbox`。
+**同层卡先于普通状态栏分流，再按平台选制作路线。** 在 main.md 记录「目标平台 / chatVersion / 呈现形态 / 连接方式 / 状态权威 / 存档位置 / 验证层级」。旧页用 Frame + 原生桥接，持久化按可靠作用域选 Host 本地存档；沙盒用 SDK + 舞台，持久进度按平台合同选 `sdk.save`。只需聊天网页时不加载引擎；需要游戏时 AI 仅叙述已结算事实。不要把 SBK 状态栏模板当完整同层聊天页，也不要把旧页 61 项能力当沙盒 SDK 已支持。
 
 按需读取，不要一次全读。技术产出必读对应平台文档；写正文必读 creation/character.md 的写作规则节。
 
@@ -116,7 +121,7 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 
 沙盒模式的交付形态、人设成对标签格式与「必须新建卡 + 首次保存前选新版聊天页」提醒，详见 `references/platforms/mmd-sandbox.md` 第 9 节。
 
-**整张角色卡可导出为图片**（`/mmd`、`/st`、`/mmdsandbox` 三平台均可）：MMD 系用 png 导入整卡（不能导入 json 整卡；**jpg 已弃用**，实测 MMD 读不出卡数据），本地酒馆 png/json 均可。交付整卡图片前用弹窗问底图来源（默认米黄底图 / 用户图），用 `scripts/make_card_image.py` 生成（只产 png），详见 output/card-json.md 第 7 节。沙盒模式与当前 MMD 同样传 v2 卡；差别只在导入后**首次保存前必须在创卡页选「使用新版」聊天页**（见下节铁律）。
+**整张角色卡可导出为图片**（`/mmd`、`/st`、`/mmdsandbox` 三平台均可）：MMD 系默认用 v2 PNG 导入整卡（旧页不能直接导 JSON；沙盒 JSON 直接导入记录冲突、待复验；**jpg 已弃用**），本地酒馆 png/json 均可。交付整卡图片前用弹窗问底图来源（默认米黄底图 / 用户图），用 `scripts/make_card_image.py` 生成（只产 png），详见 output/card-json.md 第 7 节。沙盒导入后**首次保存前必须在创卡页选「使用新版」聊天页**（见下节铁律）。
 
 ## 整卡输出形态（末尾询问）
 
@@ -127,7 +132,7 @@ MMD 有两条互不通用的技术路线，问平台时必须区分：卡的 `ch
 | 形态 | 产出 | 说明 |
 |---|---|---|
 | (a) 内嵌正则的整卡 PNG | 一张 png（卡内含设定+世界书+正则） | 推荐。导入即设定/世界书/正则一次到位 |
-| (b) 内嵌正则的整卡 JSON | 一份 v2 卡 json（含内嵌 regex_scripts） | MMD 系不能直接导入 json 整卡，多用于本地酒馆或备份 |
+| (b) 内嵌正则的整卡 JSON | 一份 v2 卡 json（含内嵌 regex_scripts） | 旧 MMD 不能直接导入，沙盒直接导入待复验；当前作源码/备份，本地酒馆可用 |
 | (c) 分离式 | 角色卡 + 独立正则 json + 状态栏规则.md | 卡与正则分文件，便于单独维护/复用。沙盒的正则 json 走 6 键格式 |
 
 **沙盒模式（`/mmdsandbox`）附加铁律**：整卡路线要在交付说明里写明「①导入必须走**新建卡**（编辑页导入 v2 卡按新卡处理）；②**首次保存前**在创卡页把「新版聊天页」选成**使用新版**，该选择**首次保存后永久不可改**」。漏了第②步，卡能进但 `sdk.*`/`[data-chat]`/舞台全不在，页面无任何报错。走分离式（c）时，6 键正则 json 里的 `chatVersion: 1` 只在新建卡导入时被读取，同样要提醒。

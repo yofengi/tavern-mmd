@@ -8,23 +8,26 @@
  var d = W.document;
  var STYLE_ID = 'sbk-theme-vars';
 
- /* §7.1 平台每套 14 个变量，定义在 [data-theme=dark]（L1234）与 [data-theme=light]（L1250）。
-   手册只记 10 个，漏 share-pick-bg / input-bg / input-text / shortcut-text / more-item-bg。
+ /* 平台每套 29 个颜色变量，定义在 [data-theme=dark] 与 [data-theme=light]。
    ⚠ 无 :root 定义、无 prefers-color-scheme → 覆盖 :root 不生效。
    ⚠ --chat-viewport-height 不在此列：JS 写在 root 的内联 style（随 visualViewport 更新），CSS 覆盖不了。
    ⚠ --rpx = calc(100vw / 750) 是平台尺寸基准，改它整体错位 → 只读不写。 */
- var VARS = ['bg', 'surface', 'text', 'text-muted', 'border', 'accent',
-  'bubble-user-bg', 'bubble-ai-bg', 'bubble-text',
-  'share-pick-bg', 'input-bg', 'input-text', 'shortcut-text', 'more-item-bg'];
-
- /* 语义 token → 平台 --chat-* 映射。作者写语义名，基座翻译。 */
+ /* 语义 token → 平台 --chat-* 的唯一注册表；保持纯 JSON，build_sbk.py 直接读取。
+   VARS 从它去重派生，运行时直接加载本文件也可用，不依赖构建注入。 */
  var MAP = {
-  bg: 'bg', surface: 'surface', panel: 'surface', text: 'text', muted: 'text-muted',
-  border: 'border', accent: 'accent', primary: 'accent',
-  userBubble: 'bubble-user-bg', aiBubble: 'bubble-ai-bg', bubbleText: 'bubble-text',
-  sharePick: 'share-pick-bg', inputBg: 'input-bg', inputText: 'input-text',
-  shortcutText: 'shortcut-text', moreItemBg: 'more-item-bg'
+  "bg":"bg", "surface":"surface", "panel":"surface", "text":"text", "muted":"text-muted",
+  "border":"border", "accent":"accent", "primary":"accent",
+  "userBubble":"bubble-user-bg", "aiBubble":"bubble-ai-bg", "bubbleText":"bubble-text",
+  "sharePick":"share-pick-bg", "composerBg":"composer-bg", "composerText":"composer-text",
+  "shortcutBg":"shortcut-bg", "shortcutText":"shortcut-text", "inputBg":"input-bg", "inputText":"input-text",
+  "inputPlaceholder":"input-placeholder", "inputBorder":"input-border",
+  "modalBg":"modal-bg", "modalSurface":"modal-surface", "modalText":"modal-text", "modalMuted":"modal-muted",
+  "modalAccent":"modal-accent", "modalInputBg":"modal-input-bg", "modalInputText":"modal-input-text",
+  "modalCancelBg":"modal-cancel-bg", "modalBtnBg":"modal-btn-bg", "modalBtnBorder":"modal-btn-border",
+  "moreItemBg":"more-item-bg"
  };
+ var VARS = [];
+ Object.keys(MAP).forEach(function (k) { if (VARS.indexOf(MAP[k]) < 0) VARS.push(MAP[k]); });
 
  function toVar(k) {
   if (k.indexOf('--') === 0) return k;                 // 直给 --chat-* 或自定义 --sbk-*
@@ -45,7 +48,7 @@
  var SBK_OK = {
   'gap': 1, 'pad': 1, 'radius': 1,          // layout：节奏
   'fs': 1, 'fs-sm': 1, 'lh': 1,             // font：字号/次级字号/行距
-  'on-accent': 1,                           // palette：accent 上的前景（平台 14 个里没有）
+  'on-accent': 1,                           // palette：accent 上的前景（平台 29 个里没有）
   'shadow': 1, 'lift': 1, 'ball': 1, 'drw-w': 1,   // ui：浮层阴影/提亮层/悬浮球/抽屉宽
   'glow': 1, 'hp': 1, 'mp': 1, 'sp': 1, 'xp': 1    // decoration：发光半径 + 四条语义色
  };
@@ -56,7 +59,7 @@
    等于绕过令牌白名单。合法值（#hex / rgba() / calc() / 阴影列表）都不含这些。 */
  var DANGER = /\}|\{|;|<\/style|<\/script|url\s*\(|@import|expression\s*\(|javascript\s*:/i;
 
- /* 令牌名白名单：平台语义名 / 14 个平台后缀 / --chat-* 里确实存在的那 14 个 /
+ /* 令牌名白名单：平台语义名 / 29 个平台后缀 / --chat-* 里确实存在的那 29 个 /
    SBK_OK 私有名 / PAGE 页面级属性。其余一律拒——包括 --chat- 里的臆造名：
    平台没定义的变量写了不报错也不生效，是典型静默失效。 */
  function okToken(k) {
@@ -116,13 +119,14 @@
 
  var current = null;   // 最近一次真正写出的合成结果，便于上层回读
  /* 表单和抽屉实现拆到 theme-panel.js；start() 可先于该模块运行，故配置真值留在基础层。 */
- var pc = { title: '\u9605\u8bfb\u8bbe\u7f6e', width: '' };
+ var pc = { title: '\u9605\u8bfb\u8bbe\u7f6e', width: '', staticHostStyles: false };
  function configure(opt) {
   if (opt) {
    if (opt.title) pc.title = String(opt.title);
    if (opt.width) pc.width = String(opt.width);
+   if (hasOwn(opt, 'staticHostStyles')) pc.staticHostStyles = opt.staticHostStyles === true;
   }
-  return { title: pc.title, width: pc.width };
+  return { title: pc.title, width: pc.width, staticHostStyles: pc.staticHostStyles };
  }
 
  /* ================= 单一运行时所有权（审计报告高风险 1） =================
@@ -130,7 +134,7 @@
    再写 #sbk-theme-vars。后果是 prefs.enabled(false) 只清得掉动态那条，静态覆写还在
    → 「关闭美化＝完全跟随平台」不成立，preset/reset/native 的优先级也不可证明。
    2.1 起【只有本文件写主题】：静态 sbk-css 只装 base.css 骨架，作者基线改由 boot
-   载荷下发到这里，与 preset、per-mode overrides 合成同一个 <style>。 */
+   载荷下发到这里，与 preset、per-mode overrides 合成同一个 <style>。hostStyles 属制作期宿主皮肤，不由此模块撤销。 */
  var ab = null;    // 作者基线（制作期 config.theme）：{dark:{tokens,tune},light:{…}}
  var nf = false; // apply(null)/'native' 的三态之 native；enabled(true) 会清掉它
  var started = false;      // start/信封只做一次读档，chrome 的第二次 start 幂等
@@ -200,7 +204,7 @@
     apply({bg:'#111'})                     → 基线两套同值
     apply({dark:{…},light:{…}})            → 基线分两套
     apply({v:2,base:…,presets:…,preset:…}) → boot 信封（生成器下发，见 build_sbk.py）
-    apply(null) / apply('native')          → 三态之 native：撤掉全部覆盖，真跟随平台 */
+    apply(null) / apply('native')          → 三态之 native：撤掉全部动态阅读主题覆盖，阅读配色跟随平台 */
  function apply(x) {
   if (!x || x === 'native') { nf = true; boot1(); render(); return; }
   if (typeof x === 'object' && x.v === 2 && (hasOwn(x, 'base') || hasOwn(x, 'presets'))) {
@@ -220,6 +224,7 @@
     故 modes.chrome 无论真假，boot 都会走到这里并把主题层 start 一次。 */
  function envelope(e) {
   var k, ps = e.presets, wasStarted = started;
+  configure({ staticHostStyles: e.staticHostStyles === true });
   if (ps && typeof ps === 'object') {
    for (k in ps) if (hasOwn(ps, k)) regOne(k, ps[k]);
   }
@@ -259,7 +264,7 @@
   return function () { SBK.off('theme', fn); };
  }
 
- /* §9 深色主题实测真值（探针读 getComputedStyle 所得，14 个变量全部存在）。
+ /* 深色基线对齐 2026-08-29 的 29 变量契约，more-item-bg 保留 modal-surface 别名。
    供作者「微调而非全替」时作基线：SBK.theme.apply(SBK.theme.base()) 再改几项。
    ⚠ 三个背景实测同色（页面/用户气泡/AI 气泡均 #17181a）→ 想做气泡与页面分层必须自己拉开对比。 */
  var DARK = {
@@ -267,7 +272,12 @@
   border: '#333', accent: '#ff6d97',
   userBubble: '#17181a', aiBubble: '#17181a', bubbleText: '#fff',
   inputBg: '#1e1f24', inputText: '#fff', shortcutText: '#fff',
-  moreItemBg: '#2c2e32', sharePick: '#2c2e32'
+  moreItemBg: 'var(--chat-modal-surface)', sharePick: '#2c2e32',
+  composerBg: '#17181a', composerText: '#fff', shortcutBg: '#2c2e32',
+  inputPlaceholder: '#c5c5c5', inputBorder: '#ff6d97',
+  modalBg: '#17181a', modalSurface: '#2c2e32', modalText: '#fff', modalMuted: '#c5c5c5',
+  modalAccent: '#ff6d97', modalInputBg: '#1e1f24', modalInputText: '#fff',
+  modalCancelBg: '#ffb7cc', modalBtnBg: '#33353b', modalBtnBorder: 'transparent'
  };
 
  /* ================= preset + overrides 两层合成（2.0 §4 / 盘点 B.5） =================
@@ -540,7 +550,7 @@
 
  /* 唯一的落地口。三态：nf / 停用美化 → 真 native；否则合成三层。 */
  function render() {
-  // 「停用美化」= 旧 native：撤销全部覆盖，完全跟随平台（沙盒下 textContent='' 是【真】native）
+  // 「停用美化」= 旧 native：撤销动态阅读主题覆盖，阅读配色跟随平台；静态 hostStyles 不受此开关控制
   // 🚨 单一所有权的兑现点：静态 sbk-css 里已经没有 theme 覆写了，所以清空【真的】等于跟随平台。
   if (nf || !prefs.on) { write(null); return; }
   write({ dark: resolve('dark'), light: resolve('light') }, BRIDGE);
@@ -671,7 +681,7 @@
     },
   mode: mode,
   onChange: onChange,
-  vars: function () { return VARS.slice(); },         // 14 个平台后缀名，供 WP-4 校验
+  vars: function () { return VARS.slice(); },         // 29 个平台后缀名
   tokens: MAP,                                        // 语义名 → 平台后缀
   page: PAGE,                                         // 需 !important 的页面级属性名
   base: function () { var r = {}, k; for (k in DARK) r[k] = DARK[k]; return r; }, // 实测深色基线副本

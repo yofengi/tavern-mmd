@@ -1,0 +1,99 @@
+/* 制作期宿主皮肤；只适用 chatVersion:1。
+   变量在宿主根显式声明，不依赖 iframe 的 --sbk-* 跨源继承。
+   使用配方时可调整这两根的颜色；SBK 玩家阅读主题开关不会撤销它。 */
+[data-host="summary"], [data-host="summary-confirm"] {
+  --summary-paper: #15232d;
+  --summary-card: #203340;
+  --summary-ink: #ecf3f7;
+  --summary-muted: #bdced8;
+  --summary-line: #526d7e;
+  --summary-accent: #a5dccc;
+  background: var(--summary-paper);
+  color: var(--summary-ink);
+  border: 1px solid var(--summary-line);
+  border-radius: 16px;
+}
+[data-host="summary"] {
+  box-sizing: border-box;
+  width: min(560px, 94vw);
+  height: min(760px, 88vh);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+[data-host="summary"] .summary-top,
+[data-host="summary"] .summary-footer,
+[data-host="summary"] .summary-edit-header {
+  flex-shrink: 0;
+  padding: 12px;
+  background: var(--summary-paper);
+  color: var(--summary-ink);
+}
+[data-host="summary"] .summary-body {
+  flex: 1;
+  min-height: 0;
+  height: 0;
+  overflow-y: auto;
+  padding: 0 12px;
+}
+[data-host="summary"] .summary-card {
+  background: var(--summary-card);
+  border: 1px solid var(--summary-line);
+  border-radius: 10px;
+  padding: 12px;
+}
+[data-host="summary"] .summary-label,
+[data-host="summary"] .summary-cost-note {
+  color: var(--summary-muted);
+}
+[data-host="summary"] .summary-tier,
+[data-host="summary"] .summary-preset-item,
+[data-host="summary"] .summary-btn,
+[data-host="summary"] .summary-anchor-empty {
+  background: var(--summary-card);
+  color: var(--summary-ink);
+  border: 1px solid var(--summary-line);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+[data-host="summary"] .summary-tier.selected,
+[data-host="summary"] .summary-preset-item.selected {
+  border-color: var(--summary-accent);
+  outline: 2px solid var(--summary-accent);
+  outline-offset: -2px;
+}
+[data-host="summary"] .summary-save-btn {
+  background: var(--summary-accent);
+  color: var(--summary-paper);
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 16px;
+}
+[data-host="summary"] .summary-overlay {
+  background: var(--summary-paper);
+  color: var(--summary-ink);
+}
+[data-host="summary"] .summary-ov-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+[data-host="summary"] textarea {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--summary-card);
+  color: var(--summary-ink);
+  border: 1px solid var(--summary-line);
+  border-radius: 8px;
+  padding: 12px;
+}
+@media (max-width: 480px) {
+  [data-host="summary"] { width: 96vw; }
+  [data-host="summary"] .summary-footer { flex-wrap: wrap; gap: 8px; }
+}
+@media (max-height: 540px) {
+  [data-host="summary"] { height: 94vh; max-height: 94vh; }
+  [data-host="summary"] .summary-top,
+  [data-host="summary"] .summary-footer { padding: 8px; }
+}

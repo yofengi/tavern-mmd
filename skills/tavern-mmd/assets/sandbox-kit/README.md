@@ -26,7 +26,7 @@ MMD 沙盒模式的状态栏 / 美化基座：三层运行时（内核 / 主题 
 | `sbk/core.js` | **内核基础**：SDK 快照、claim、事件桥、状态仓、调度与 DOM/宿主工具；创建 `window.SBK` |
 | `sbk/core-store.js` | **持久化**：`save/load/merge/clear/key`、800ms 合并队列与 save→cache→内存降级 |
 | `sbk/core-boot.js` | **编排**：schema/modes/pinned 归一、精简条与 `SBK.boot` |
-| `sbk/theme.js` | **主题引擎**：14 个平台 token、作者基线/preset/overrides 合成、偏好语义与持久化 |
+| `sbk/theme.js` | **主题引擎**：29 个平台 token 的共享注册表、作者基线/preset/overrides 合成、偏好语义与持久化 |
 | `sbk/theme-panel.js` | **主题设置界面**：表单、设置抽屉与 `prefs.form/panel/toggle/open/close` |
 | `sbk/protocol.js` | **协议解析器**：`[状态]…[/状态]` 块 → 状态对象 |
 | `sbk/hud.js` | **HUD 基础**：vnode、十二种控件、归一化、控件注册表 `SBK.ui.hud` |
@@ -101,13 +101,13 @@ SBK.theme.start(presetName, opts);                       // 读存档 + 合成 +
 
 SBK.theme.prefs.presets()          // -> 已注册的风格包名数组
 SBK.theme.prefs.preset(name?)      // 读/切风格包
-SBK.theme.prefs.enabled(v?)        // 启用美化；false = 撤销全部覆盖，完全跟随平台（对应旧 native）
+SBK.theme.prefs.enabled(v?)        // false = 撤销动态阅读主题，阅读配色跟随平台（不撤销 hostStyles）
 SBK.theme.prefs.get(k, m?) / .set(k, v, m?)   // 玩家微调，按 dark/light 分开存
 SBK.theme.prefs.reset()            // 只清【当前模式】的 overrides，另一侧不动
 SBK.theme.prefs.resetAll()         // 清两套 overrides，但保留 preset 与启用状态
 SBK.theme.prefs.fields()           // -> 微调字段表（控件清单的唯一真源）
 SBK.theme.prefs.form() / .panel() / .toggle() / .open() / .close()
-SBK.theme.reset()                  // = apply(null)，撤销全部主题覆盖
+SBK.theme.reset()                  // = apply(null)，撤销全部动态阅读主题覆盖
 ```
 
 三条纪律（做错代价很大）：
@@ -118,7 +118,23 @@ SBK.theme.reset()                  // = apply(null)，撤销全部主题覆盖
 
 持久化复用 `SBK.store` 的三级降级链（`sdk.save` → `sdk.cache` → 内存）。运行时偏好仍位于保留字段 `_sbkTheme`，切会话时不会清掉；落盘则调用 `store.merge({_sbkTheme:…})` 做顶层补丁，不把当前 state 冒充完整业务存档。业务 `store.save(obj)` 在同一 800ms 窗口与补丁合成一次写入，并自动保留调用方未显式覆盖的 `_sbk*` 内部键。
 
-🚨 **设置面板里没有「日间/夜间/原生」三按钮，这是刻意的。** 沙盒的 `light|dark` 是**平台级**、玩家在平台设置里切，**作者只能读不能写** → 那三个按钮按了切不动，放上去就是坏控件。取代物是**风格包选择 + 启用美化开关（关＝跟随平台）+ 玩家微调（字号/行距/正文色/强调色/气泡色/气泡透明度）**。
+🚨 **设置面板里没有「日间/夜间/原生」三按钮，这是刻意的。** 沙盒的 `light|dark` 是**平台级**、玩家在平台设置里切，**作者只能读不能写**。设置面板提供风格包、阅读主题开关与玩家微调（字号/行距/正文色/强调色/气泡色/气泡透明度）。未配置 `hostStyles` 时保留「启用美化（关闭＝跟随平台）」；配置静态宿主皮肤后改为「启用阅读主题」，同时显示「制作期宿主皮肤不受此开关控制」。
+
+`theme.js` 的纯 JSON `MAP` 是平台变量与语义别名的唯一注册表，Python 构建器直接读取它；直接加载 JS 也可运行。支持完整 29 项，包括 `composerBg/Text`、`shortcutBg/Text`、`inputBg/Text/Placeholder/Border` 和 10 项 `modal*`。可写语义名、平台后缀或完整 `--chat-*` 名；`--chat-viewport-height` 与 `--rpx` 继续只读。三套随附 preset 已从各自深浅色 palette 补全底栏与 modal 色，`moreItemBg` 保持 `var(--chat-modal-surface)` 别名。作者局部 `theme` 覆写只改所写字段，不自动派生额外颜色。
+
+### 制作期可选宿主皮肤 `hostStyles`
+
+```json
+"hostStyles": ["styles/host.css"]
+```
+
+数组中的 CSS 路径相对配置文件目录。只列本卡需要的宿主皮肤文件；默认未启用，不把全部弹窗一起换肤。生成器输出独立 `sbk-host-css` / `sbk-host-css-N` 静态 `<style>` 规则，由平台的宿主 CSS 通道抽取；不进入 `base.css` 或 `#sbk-theme-vars`，也不在玩家切换 preset 时重写。
+
+文件必须只包含以开放 `[data-host="…"]` 为最左根的规则，根后可接后代空格或 `>`；`summary-confirm` 是独立根。开放范围见 [21 根契约](../../scripts/fixtures/mmdsandbox/host-contract.json)。构建器与预览共用 [保守 CSS 解析器](../../scripts/sandbox_host_css.py)：支持平铺规则和 `@media`，拒绝未知根、树外兄弟、混合沙盒选择器、原生嵌套、`url()`、未支持的复杂选择器及文案改写声明。任何诊断或剩余非宿主 CSS 都会拒绝该文件并阻止交付，不静默取清洗后的片段；这是本地支持子集，不是平台全部语法的断言。
+
+样式按完整规则边界拆条，保留 `@media` 包装。包括 `<style>` 包装在内，每条必须不超过 **18000 UTF-16 单位**（emoji 通常计 2）；单个完整规则超限时要求作者拆源码。`--force` 不能绕过宿主 CSS 校验或最终 18000 门禁。
+
+`prefs.enabled(false)` / `apply('native')` 仍清空唯一动态阅读主题节点；制作期宿主皮肤要修改配置后重新生成。动态 style 的宿主转发、撤销与跨主题联动尚待当前平台实测，不能假定沙盒变量会继承到宿主。
 
 ### 🚨 `SBK.ui.hud` 已废弃
 
@@ -146,9 +162,9 @@ python build_sbk.py my-card.json --out dist/my-card.json --verbose
 python ../../scripts/validate.py dist/my-card.json --type regex --platform mmdsandbox
 ```
 
-生成器会打印一张表：每条规则的 `findRegex` / `replaceString` 长度与**输出预算**估算。预算超限（事实卡 §5.2）会直接报 ERROR 并拒绝写文件（`--force` 可强写，仅调试用）。
+生成器会打印一张表：每条规则的 `findRegex` / `replaceString` 长度与**输出预算**估算，统一按 JavaScript 的 UTF-16 单位计量。错误会阻止写出；`--force` 仅能绕过普通调试错误，不能绕过宿主 CSS 校验或最终 18000 门禁。
 
-所有正式产物都会剥源注释；`--no-strip-comments` 只供本地排查。生成器对**最终每条规则**执行不可调高的 18000 字符安全门禁，因此保留注释导致超限时会直接报错，不会产出只能导入、不能在编辑器保存的规则。
+所有正式产物都会剥源注释；`--no-strip-comments` 只供本地排查。生成器对**最终每条规则**执行不可调高的 18000 UTF-16 单位安全门禁，因此保留注释导致超限时会直接报错，不会产出只能导入、不能在编辑器保存的规则。
 
 ### 交付物形态
 
@@ -164,25 +180,30 @@ chatVersion(=1) / pageDepth(=2) / statusbar / beginning / personality / regex_sc
 - `personality` 虽然写在 JSON 里，但**导入页不读这个字段**——它只是随 JSON 归档。走分离式时你得自己把它从 JSON 里复制出来，**手工粘贴**进创卡页的人设框。这是分离式路线唯一需要手工搬运的部分。
 - 模型侧输出约定（要模型每轮吐 `[状态]` 块）必须写进 `personality`，否则状态栏永远没数据。模板见 `sbk/协议说明.md` 第六节。
 
-### 自动拆条：为什么会有 `sbk-core-1..4` / `sbk-ui-1..5`
+### 自动拆条：为什么会有 `sbk-core-1..4` / `sbk-ui-1..10`
 
-`splitThreshold` 默认 18000，且**不能调高**。生成器只按连续的完整 IIFE 文件边界装箱，严格保持装载顺序；任一单模块或最终规则超过 18000 都直接 ERROR，必须在源码/配置侧继续拆，不能靠提高阈值或任意切字符串绕过。
+`splitThreshold` 默认 18000 UTF-16 单位，且**不能调高**。脚本按连续的完整 IIFE 文件边界装箱，宿主样式按完整 CSS 规则边界装箱，保持原始顺序；任一单模块或最终规则超过 18000 都直接 ERROR，必须在源码/配置侧继续拆，不能靠提高阈值、`--force` 或任意切字符串绕过。
 
-当前示例配置的实测布局：
+2026-09-19 随附示例配置的本地构建布局（不含可选宿主皮肤，单位为 UTF-16）：
 
 ```text
 sbk-core-1  11914  core.js
-sbk-core-2  14449  core-store.js + core-boot.js
-sbk-core-3  18000  theme.js
-sbk-core-4   7029  theme-panel.js
+sbk-core-2  15621  core-store.js + core-boot.js
+sbk-core-3  17217  theme.js
+sbk-core-4   7637  theme-panel.js
 sbk-ui-1     7671  protocol.js
 sbk-ui-2    17841  hud.js
-sbk-ui-3    12719  hud-render.js + ui.js
-sbk-ui-4    13392  ui-panel.js
-sbk-ui-5     5207  ui-stage.js
+sbk-ui-3    12785  hud-render.js + ui.js
+sbk-ui-4    16060  ui-panel.js
+sbk-ui-5     9275  ui-nav.js + ui-icon.js + ui-fan.js
+sbk-ui-6    16729  ui-dock.js
+sbk-ui-7    16660  ui-bubble.js + ui-inject.js
+sbk-ui-8     9367  ui-codex.js
+sbk-ui-9    13841  ui-map.js
+sbk-ui-10    5207  ui-stage.js
 ```
 
-每条规则有唯一 slash marker，`regex_scripts` 数组序就是装载顺序。13 条完整示例仍远低于 130 条上限。
+每条规则有唯一 slash marker，`regex_scripts` 数组序就是装载顺序。18 条完整示例仍远低于 130 条上限。
 
 ## 关键约束速查（最容易踩的几条）
 

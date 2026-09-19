@@ -6,12 +6,14 @@
 
 > 🚨 **平台归属：本方法论只针对 MMD沙盒模式（`/mmdsandbox`）。** 它全程依赖 `sdk.*` 与 `[data-chat]` / `[data-slot]` DOM 契约，这两样**只在沙盒新聊天页存在** → 不能用于当前 MMD（`/mmd`）与本地酒馆（`/st`）。反向亦然：雷达法与影渲法**不能用于沙盒**，理由见末节。
 
-> ⚠️ **验证状态**：本文档陈述的**平台事实**（事件时序、CSS 令牌、净化行为、层级）来自**三轮真机探针 + 沙盒应用逆向源码**，且**已实机实测**，可信度高。
+> **证据范围**：事件时序、CSS 令牌、净化和层级中的实测项主要来自 2026-08/09 的历史探针与源码；先匹配版本、日期、环境再判断证据，不能全部视为最新平台实测。本轮另按资料补充 21 根宿主样式通道，见 [宿主弹窗换肤](sandbox-host-styles.md)。
 > **基座代码 2.0 的历史实机截图已通过**（2026-08-26，卡 64257 预览）：单面板、三分组卡、语义色和宿主唯一。3.0 修复与模块拆分的当前自动化证据记录在 `sandbox-quality-review/工作/验证记录.md`；测试数量以实际运行报告为准，不在本文固定写死。
 > **当前本地 GUI 已覆盖**单宿主/单状态面板、preset 切换、tooltip 原生按钮、多轮/switch 与 chat/thin profile。拖动、真实舞台几何、系统主题/触控/软键盘及真实多轮 AI 仍属 `probe-needed` 或最终人工验收范围。
 > 🚨 **要在预览里验证，必须点底部「保存编辑」——预览只读卡片正式数据，不读草稿。** 正则面板的「保存配置」只进内存草稿、底部「保存草稿」只写服务端草稿，两者预览都看不到。这一条踩错会让你误以为基座坏了（实机验收时正是它造成四轮误判）。操作纪律见 `../../assets/sandbox-kit/README.md` 的「怎么在实机验证自己的卡」节。
 
 平台事实一律不在本文档展开，指向 `../platforms/mmd-sandbox.md`（已含全部实测修正）。本文档只讲**方法论与设计思路**：为什么必须这么做。
+
+用户要完整自绘聊天网页时，先读 [沙盒同层卡制作](../creation/sandbox-same-layer-card.md)。SBK 是状态栏/美化基座，不等于完整同层聊天页；组合时统一舞台所有权，不同时启动两个模块争抢舞台。
 
 ## 一、为什么沙盒需要一套新方法论
 
@@ -27,7 +29,7 @@
 | 只能 `img onerror` 点火 | `<script>` 是**一等公民**，装卡即抽出并执行；且官方**明令禁止** `img onerror` 点火器与 teapot 系写法 | 点火器整套删掉，直接写脚本 |
 | 需要 Shadow DOM 隔离 | 沙盒是部署在 `c<卡片ID>.sbx.aitchat.org` 的**独立 Vue 应用，以跨源 iframe 嵌入宿主**。实测 `getRootNode()===document` 为真、`window===window.top` 为 **false** | **iframe 本身就是隔离边界**，隔离已经免费到手 |
 
-第二条是根本理由，值得说透。跨源 iframe 意味着：作者代码跑在**自己的文档、自己的源**里，不可能污染宿主，宿主样式也漏不进来。此时再套一层 Shadow DOM，收益为零，代价却实打实：
+跨源 iframe 已提供文档隔离，作者 JS 不能据此访问宿主 DOM，CSS 变量也不会自然跨文档继承。平台另外开放静态 `[data-host]` CSS 抽取过滤，并不移除隔离；不能再概括成“宿主永远改不了”。SBK 默认采用 light DOM，再加 Shadow DOM 会额外引入以下适配工作：
 
 - 平台的 29 个 `--chat-*` 设计令牌定义在 iframe 文档的 `[data-theme]` 上，shadow 内**继承不到**具体规则，主题跟随得自己重新搭一遍；
 - 平台 CSS 变量、`--rpx` 尺寸基准全部要手动透传；
@@ -52,9 +54,9 @@
 
 顺便一个好消息：`[data-slot="statusbar"]` 是 `[data-chat="root"]` 的 flex item，**天然不随消息列表滚动**，不需要自己写粘顶。但它**没有 `flex-shrink:0`**（`header` 和 `composer` 都有，唯独它没有），内容一多就被压扁 → 基座必须自己补上（事实卡 §7.3 / 硬约束 13）。
 
-### 2.2 作者脚本早于 DOM 执行、`ready` 最后到且无补发 → 冷启动只能挂 mount/done
+### 2.2 历史启动顺序要求兼容初始化，不只依赖 ready
 
-两个实测事实叠在一起，把冷启动的写法逼成唯一解：
+以下两项来自 2026-08-26 瘦预览探针与当时源码；当前部署待复验。基座用幂等 mount/done 保留兼容路径：
 
 **其一，脚本跑完时 DOM 还不存在。** 探针在脚本顶层调 `document.getElementById('pbOut')` 取自己刚「写入」功能栏的节点 → **返回 `null`**；同一探针在事件回调里再取 → **成功**。`<style>`/`<script>` 是装卡即抽出并立即执行的，而功能栏与消息 HTML 由 Vue 在之后才挂进 DOM（事实卡 §4.1 / 硬约束 17）。
 
@@ -66,9 +68,9 @@
 message:new  →  message:mount  →  message:done  →  ready
 ```
 
-这跟「ready 表示页面就绪、可以做首屏」的直觉**完全相反**。而且 `ready` **没有 late replay**，有补发的反而是 `message:mount` 与 `message:done`（与官方手册说法相反）。更糟的是外链脚本未被 await，首个外链之后的内联脚本注册的 `ready` 回调**永久收不到**（事实卡 §3）。
+当时 ready 没有 late replay，mount/done 有补发，与文档口径有差异；历史外链未 await 又使迟注册可能错过事件（事实卡 §3）。后续文档的补发和加载顺序要求须按目标版本复验，不能据旧代码绝对否定。
 
-→ **首屏渲染只能挂 `message:mount` / `message:done`**（有补发，历史气泡也会被处理），挂 `ready` 会晚一整轮甚至永远不到（硬约束 5）。
+→ 首屏用幂等 `message:mount` / `message:done`，ready 可做就绪/重试信号，但不是唯一初始化入口。
 
 ### 2.3 `sdk.on` 无 `off`/`once` + 预览会重跑 → 必须单例幂等
 
@@ -184,7 +186,7 @@ fields: [
 
 ### 3.4 明确不移植
 
-Shadow DOM 与降级链、`img onerror` 点火、禁裸双引号铁律、`String.fromCharCode` 拼方括号、ES5 写法、`localStorage` 直存偏好（改 `sdk.save`）、`body`/`html` 全局选择器、雷达法对抗哨兵补丁。**这些是旧平台约束的产物，在沙盒是纯负债。**
+Shadow DOM 与降级链、`img onerror` 点火、禁裸双引号铁律、`String.fromCharCode` 拼方括号、ES5 限制、`body`/`html` 全局选择器、雷达法对抗哨兵补丁不照搬。存储按用途选：单卡本地偏好可用 `localStorage`，需要跨设备的进度才用 `sdk.save`；不要把本地偏好一律迁移为服务端写入。
 
 ## 四、三层架构
 
@@ -266,7 +268,7 @@ SBK.theme.reset()                    // = apply(null)
 // 偏好核心语义在 theme.js；表单/抽屉扩展在 theme-panel.js，chrome 由 ui-panel.js 调用
 SBK.theme.prefs.presets()            // -> 已注册的风格包名数组
 SBK.theme.prefs.preset(name?)        // 读/切风格包
-SBK.theme.prefs.enabled(v?)          // 启用美化；false = 撤销全部覆盖，完全跟随平台
+SBK.theme.prefs.enabled(v?)          // 阅读主题开关；false 撤销动态阅读覆盖，不撤销静态 hostStyles
 SBK.theme.prefs.get(k, m?) / .set(k, v, m?)    // 玩家微调，按 dark/light 分开存
 SBK.theme.prefs.reset(m?)            // 只清【当前模式】的 overrides，另一侧不动
 SBK.theme.prefs.resetAll()           // 清两套 overrides，保留 preset 与启用状态
@@ -365,6 +367,8 @@ worker 用这个正则剥掉非白名单标签（事实卡 §5.4）：
 
 平台每套主题 **29 个** `--chat-*` 令牌（气泡/整页 10 + 底栏与白名单弹窗 18 + 别名 1），定义在 `[data-theme=dark]` 与 `[data-theme=light]` 上。**官方手册正文只列前 10 个**，另把后 18 个单独称作「底栏和白名单弹窗另有 18 个变量」——两处加起来才是全集（事实卡 §7.1、`../platforms/mmd-sandbox.md` §6.1）。另有 `--rpx = calc(100vw / 750)` 是平台全部尺寸的基准，**只读不写**，改它整体错位。
 
+当前 `sbk/theme.js` 的纯 JSON `MAP` 是 29 个平台颜色变量与语义别名的共同注册表，`build_sbk.py` 直接读取它，避免两份名单漂移。新增补齐的 composer/shortcut/input/modal 颜色与已有气泡变量走同一主题合成；保留 `moreItemBg → var(--chat-modal-surface)` 等别名，作者局部覆盖只改所写字段。`--chat-viewport-height` 与 `--rpx` 仍是只读几何值，不纳入调色盘。
+
 ### 换肤写哪个选择器
 
 ```css
@@ -375,7 +379,7 @@ worker 用这个正则剥掉非白名单标签（事实卡 §5.4）：
 
 对比两个错误写法：
 - 只写 `[data-theme=dark]` → 同特异度，靠源顺序取胜，**脆**；
-- 写 `:root` → **完全无效**。平台**没有 `:root` 定义、没有 `prefers-color-scheme`**，覆盖一个不存在的定义不会生效。
+- 写 `:root` → 选中 html，不能可靠覆盖后代平台 root 自己定义的同名变量；在正确的 `[data-chat="root"][data-theme]` 节点上赋值。
 
 还有一个陷阱：`--chat-viewport-height` **不是样式表变量**，是 JS 写在 root 上的**内联 style**（`clientHeight - 键盘 inset`，随 `visualViewport` 更新）→ CSS 覆盖不了它。
 
@@ -404,7 +408,7 @@ worker 用这个正则剥掉非白名单标签（事实卡 §5.4）：
 → 设置面板**不放「日间/夜间/原生」三按钮**。前两个按了切不动，放上去就是**坏控件**。取代物：
 
 - **风格包选择**（作者预置多套 preset，玩家挑一套）；
-- **启用美化开关**（关 = 撤销全部覆盖、完全跟随平台，对应旧 `native`。沙盒下这是**真** native）；
+- **启用阅读主题开关**（关 = 撤销主题引擎的动态阅读覆盖；制作期静态宿主皮肤不受此开关控制，不能承诺整卡完全恢复平台外观）；
 - **玩家微调**（字号、行距、正文色、强调色、气泡色、气泡透明度）。
 
 配套的两条实现纪律：
@@ -430,6 +434,16 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 
 读档必须**再兜一层 try/catch**：瘦预览下 `save.get`/`save.keys` **同步抛 `SdkError`**，取不到偏好只能回默认，不能炸整卡。
 
+### 制作期可选宿主皮肤 `hostStyles`
+
+```json
+{"hostStyles": ["styles/host.css"]}
+```
+
+路径相对配置文件。生成器校验开放根和保守 CSS 子集，按完整规则边界输出独立 `sbk-host-css` / `sbk-host-css-N` 静态 `<style>`；默认不启用，不进入 `base.css` 或 `#sbk-theme-vars`。只选择作品需要的根，21 根及总结配方见 [宿主指南](sandbox-host-styles.md) 与 [summary.css](../../assets/sandbox-host-styles/summary.css)。
+
+宿主 CSS 与阅读主题分别交付：玩家切 preset 或停用阅读主题不重写、也不撤销这份静态样式；启用 `hostStyles` 时设置面板明确显示该边界。iframe 运行时 style/变量再次转发、切卡清理与停用撤销尚未验证，不能用未经公开的宿主 DOM、postMessage 或 SDK 接口补齐。内层 `--sbk-*` 也不能假设会继承到外层。
+
 ## 七、组件层
 
 ### 7.1 浮层挂哪里
@@ -446,7 +460,7 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 
 → 作者用 1000–1999 **会盖住 header 和输入框**。目前没出事只是因为作者内容大多落在带 `opacity:.9` 的 `message-body` 里，被层叠上下文囚禁住了——**这是偶然保护，不可依赖**。
 
-**3500–7999** 是唯一安全带（硬约束 12）：避开 `stage-full` 的 3000，也避开平台弹窗的 8000+。基座预置 `--sbk-z-panel: 3500` / `--sbk-z-pop: 3600`。
+对需要浮在舞台上面的 SBK 面板，历史样式记录支持默认 **3500–7999**；基座预置 `--sbk-z-panel:3500` / `--sbk-z-pop:3600`。这不是所有作者元素唯一可用的层级范围：自绘舞台、阅读层和抽屉要明确相互次序，content/full 的 2000/3000 与 8000+ 原生浮层按目标版本复验。宿主弹窗位于另一文档，不能靠提高 iframe 内 z-index 越过它。
 
 ### 7.3 舞台开关只能用 `stage.visible()`
 
@@ -510,6 +524,8 @@ resolved(mode) = PRESET[风格包名][mode] + overrides[mode]
 ## 八、工作流
 
 ① 复制配置 → ② 修改主题/schema/正文 → ③ 生成器与 validator → ④ 本地 sandbox `chat` + `thin-preview` → ⑤ 桌面/竖屏/横屏 GUI 与截图。只有能力矩阵标为 `probe-needed`，或用户授权最终人工验收时才进真实站；AI 不默认登录账号、不把正式卡/公开卡当日常夹具。
+
+配置 `hostStyles` 时额外检查 chat 全景的 iframe 外宿主索引、过滤诊断和 summary 根内编辑/锚点/树外确认范围；thin 不模拟宿主换肤。先跑阅读主题启用/停用，确认没有误称宿主皮肤也被撤销。stage 的 content/full、关闭/重开保留作者 DOM，以及 BUSY 保稿/不重试均可本地回归；真实几何、过滤器、持久化与设备边界仍分开记录。
 
 **SBK 生成器的产物是一份 6 键 JSON**（即分离式路线：导入正则 JSON + 手工粘贴 persona）。但要区分两件事：生成器只产这一份，而**沙盒平台本身能导 v2 整卡**（`【用户实测】`，见 `../output/card-json.md` 第 9 节）—— 旧版本这里写「沙盒不用 PNG 整卡、不用 `chara_card_v2`」是**错的，已更正**。
 

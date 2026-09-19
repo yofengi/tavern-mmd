@@ -113,7 +113,9 @@
     }
 
     var cb = H('input', { type: 'checkbox', onchange: function () { prefs.enabled(cb.checked); refresh(); } });
-    box.appendChild(row('\u542f\u7528\u7f8e\u5316\uff08\u5173\u95ed\uff1d\u8ddf\u968f\u5e73\u53f0\uff09', cb));
+    var scopeLabel = H('span'), scopeNote = H('div', { 'class': 'sbk-set__label' });
+    box.appendChild(row(scopeLabel, cb));
+    box.appendChild(scopeNote);
 
     grp = H('div', { 'class': 'sbk-set__grp' });
     fields = prefs.fields();
@@ -126,6 +128,10 @@
 
     function refresh() {
       var j;
+      var hostSkin = kit.configure().staticHostStyles;
+      scopeLabel.textContent = hostSkin ? '启用阅读主题' : '\u542f\u7528\u7f8e\u5316\uff08\u5173\u95ed\uff1d\u8ddf\u968f\u5e73\u53f0\uff09';
+      scopeNote.textContent = hostSkin ? '关闭后阅读配色跟随平台；制作期宿主皮肤不受此开关控制。' : '';
+      scopeNote.style.display = hostSkin ? '' : 'none';
       cb.checked = prefs.enabled();
       if (sel_) sel_.value = prefs.preset();
       for (j = 0; j < ctls.length; j++) {

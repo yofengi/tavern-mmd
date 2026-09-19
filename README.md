@@ -10,7 +10,7 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 
 - MMD 自己就有**两套互不通用的聊天页**：当前 MMD（旧聊天页）支持 `<script>` 与 ES6（实测全支持），逐消息状态栏用 `img onerror` 定位，同层卡则用文档级单例与独立 iframe；**沙盒模式**（新聊天页，角色卡 `chatVersion: 1`）把 `<script>` 变成一等公民，另给官方 SDK（30 能力 / 12 事件）、稳定 `[data-chat]` 选择器、舞台与跨设备存档，且**明令禁止 `img onerror` 点火器**
 - 正则限额 130 条（findRegex ≤ 1000 字符、replaceString ≤ 20000 字符），导入格式与本地酒馆不同：当前 MMD 是 4 键 json 且 findRegex 必须包斜杠，沙盒模式是 6 键 json；两条路线交付统一 slash 匹配式，沙盒实测也接受裸字面量
-- 角色卡：MMD 系（当前 MMD 与沙盒模式）都仅支持 chara_card_v2（不识别 v3），整卡只能用 png 导入。沙盒模式**同样可导 v2 整卡** —— 编辑页导入 v2 卡按**新卡**处理，创卡页「新版聊天页」单选仍可选；也可改走分离式的导入正则 json + 独立人设文本
+- 角色卡：MMD 系（当前 MMD 与沙盒模式）都用 chara_card_v2（不识别 v3），整卡默认用 PNG 导入；沙盒整卡 JSON 直接导入存在历史记录冲突，当前作源码/备份，待复验。沙盒编辑页导入 v2 卡按**新卡**处理，创卡页「新版聊天页」单选仍可选；也可走分离式六键正则 JSON + 独立人设文本
 - 不支持酒馆助手、MVU 变量框架、STScript
 
 通用的角色卡创作流程在 MMD 上会产出无法运行的卡。本 skill 内置 **平台差异矩阵**，根据目标平台自动选择可行的技术方案（如 MMD 状态栏首选混合态雷达法：模型只输出纯键值对，JS 引擎动态装配 UI）。
@@ -23,7 +23,7 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 | 角色卡创作 | 标准流程（快问快答）与深度共创流程（开放讨论 + 方案收敛）两种模式 |
 | 世界书制作 | 索引源文件工作流（entry_id 稳定、uid/order build 重排）、蓝绿灯策略、token 预算、递归控制 |
 | 状态栏 | 首选混合态雷达法（特征嗅探 + 动态DOM + 双轨生命周期 + 七重防御）；KV V4.0 轻量备选 |
-| 同层卡 | 旧页独立 HTML/CSS/JS 页面 + 原生桥接；功能层内置固定上游已实现的 61 项动作，示例 UI 提供消息和模型组；可选确定规则小游戏、有作用域本地存档、导入导出；原生功能通过能力适配与返回入口保留。原创基座见 `assets/same-layer-kit/`，真实 MMD 联调仍需项目验证 |
+| 同层卡 | **旧版**：独立网页 + Host 原生桥接，基座 `assets/same-layer-kit/`，固定上游 61 项动作。**沙盒新版**：官方 SDK + 舞台内完整自绘网页，独立制作与迁移指南，尚无专用成品基座/一键构建器。两者都可选规则游戏；旧页本地存档与新页 SDK 存档分别处理，真实 MMD 联调另验 |
 | 全局美化 | 静态换肤 / 当前 MMD day-night-native 三态运行时主题包二档；运行时含 owner/version、路由重入、可恢复清污、玩家分主题覆盖与移动端设置面板协议 |
 | 项目管理 | 每个项目独立文件夹（main.md / plan.md / 资料 / 工作 / output），断点续作 |
 | 质量保障 | 写作规则（绝对零度 / 八股化扫描 / 具体性检查）+ 分层交付检查清单（含运行时主题矩阵） |
@@ -32,7 +32,8 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 
 skill 自带多个纯 Python 标准库脚本（零依赖，全 agent 通用），AI 会根据 skill 指引在制作与交付前自行调用，用法详见 `skills/tavern-mmd/scripts/README.md`。
 
-- **同层卡制作**：按 [同层卡制作指南](skills/tavern-mmd/references/creation/same-layer-card.md) 复制基座，使用 `build_same_layer.py` 构建、`verify_same_layer.py` 验证，并跑独立浏览器测试。构建为 Python 标准库；JS 语法验证与引擎测试用 Node，浏览器测试需 Playwright 和浏览器。
+- **旧版同层卡制作**：按 [旧版同层卡制作指南](skills/tavern-mmd/references/creation/same-layer-card.md) 复制基座，使用 `build_same_layer.py` 构建、`verify_same_layer.py` 验证，并跑独立浏览器测试。构建为 Python 标准库；JS 语法验证与引擎测试用 Node，浏览器测试需 Playwright 和浏览器。
+- **沙盒同层卡制作**：按 [沙盒同层卡制作指南](skills/tavern-mmd/references/creation/sandbox-same-layer-card.md) 开发自有网页、接官方 SDK、打包六键正则 JSON，使用新页全景 chat/thin 仿真和项目测试；不调用旧页专用同层审核器。贪心鬼新版工程的可借鉴结构与接口差异见 [new-mmd-hud 审查](skills/tavern-mmd/references/runtime/new-mmd-hud-audit.md)。
 - **JSON 格式审核**：AI 调用 `scripts/validate.py` 对导入 json 做静态审核（JSON 合法性、BOM、双重转义、平台红线、字符数限额、v2 与世界书字段）。
 - **世界书源文件工具**：AI 调用 `scripts/worldbook_tool.py` 管理 `工作/世界书/` 的 add/delete/move/rename/show/search/build/check，避免直接编辑大 JSON。
 - **状态栏 / 全局美化预览**：AI 调用 `scripts/build-preview.py` 生成 HTML 沙箱，再用 agent 的 Preview 工具自行查看渲染、测交互。
@@ -139,6 +140,7 @@ clone 本仓库到任意位置，在该 agent 的规则文件（AGENTS.md / 系�
 /mmdsandbox → /beautify   # 沙盒模式状态栏（<script>+SDK，长期面板挂舞台）
 /st → /worldbook          # 本地酒馆世界书（全字段，json 直接导入）
 /mmd 做同层卡，网页聊天 + 可存档小游戏  # 原生桥接；引擎可选
+/mmdsandbox 做沙盒同层卡，完整网页聊天  # 官方 SDK + full 舞台；不继承旧页桥接
 /mmd → /cardplanmax       # 从零共创一张当前 MMD 完整角色卡
 ```
 
@@ -199,10 +201,11 @@ commands/                         # 8 个斜杠指令
 | 角色卡格式 | v3 json / png | 仅 chara_card_v2，整卡走 png | 不用 v2、**官方禁整卡 PNG**：正则 json + persona 文本 |
 | MVU/STScript | ✅ | ❌（保守） | ❌（官方 SDK 顶替） |
 
-> 证据等级不同，别混用：当前 MMD 的结论多为本 skill 实机实测（`<script>`、ES6、正则上限均已确认）；**沙盒模式的结论来自官方手册与官方校验脚本，尚未做过实机探针**，官方没写的（沙盒底层形态、`document.currentScript`）一律标 `【原文未说明】`，不做推断补齐。任一平台上未确认的能力都按「不可用」保守处理并标"待验证"，详见 `skills/tavern-mmd/references/platforms/mmd.md` 与 `mmd-sandbox.md`。
+> 证据等级不同，别混用：平台事实按源码、隔离实测、官方手册与官方 skill 分级，沙盒已有源码和真机探针记录，详见 `skills/tavern-mmd/references/platforms/mmd-sandbox.md`。第三方 Mock、示例网页和本地测试不构成真实平台证据；未确证运行契约标待验证，不能凭模拟器补齐。平台状态变量已确认存在但运行签名尚未公布，不能据此说平台不支持。
 
 ## 来源与致谢
 
+- **新版同层网页架构参考**：[贪心鬼 new-mmd-hud，固定提交 cc6a126](https://github.com/Godcount10/new-mmd-hud/tree/cc6a126e61eefa4c57b2ae63a461b96f3bb9b17f)。借鉴 SDK 适配、可选功能/规则层与网页渲染层分离；本仓库新增审查和制作说明，不打包其源码或模型资源，原仓库与依赖授权分别核对。
 - **社区快照边界**：早期 MMD 平台（已退役，存档在仓库根 `过时资产/`）的开发规范、类名定义、KV-Robust V4.0 与 2026-06-21 日间美化均为用户提供的社区文档快照；除文内保留的既有署名外，作者、原 URL 与许可证未完整记录，仅作兼容研究参考，不宣称原创。雷达法材料保留既有“黑洞猫”署名，但原 URL 与许可证同样未记录。
 - **架构启发后的重写**：当前 MMD `theme-runtime.md` 的 day/night/native 生命周期、owner/version 租约、可恢复 property delta、存储 schema 和测试矩阵，以及 `assets/global-beautify-examples/mmd-theme-runtime/` 对应新资产，均是在既有材料提供架构启发后重新设计与实现，不复制旧运行时代码。其 MMD 实机验证状态只以资产 README / 测试记录为准，本 README 不替代实机证据。
 

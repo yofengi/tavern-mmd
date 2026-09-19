@@ -2,7 +2,7 @@
 
 定位：角色卡 JSON 权威参考。**本地酒馆（`/st`）交付 v3**（第1-4节）；**当前 MMD（`/mmd`）与沙盒模式（`/mmdsandbox`）都交付 v2**（第5节，MMD 系仅识别 v2，不识别 v3）。
 
-> ✅ **更正**：旧版本这里写「沙盒模式不走 v2 / v3 打包，也不走 PNG 整卡，官方明令禁止」—— **那是错的，已删除**。`【用户实测】`**沙盒可以导入 v2 整卡（PNG/JSON）**：编辑页导入 v2 卡按**新卡**处理，「新版聊天页」单选仍可改，所以整卡路线能到达新页。因此**第 1-8 节对沙盒同样适用**（按 v2 走第 5 节）；第 9 节现在只讲沙盒**特有的前置条件**与分离式路线。
+> ✅ **更正**：旧版本「沙盒不走 v2 / PNG 整卡」是错的。`【用户实测记录】`编辑页导入 v2 卡按**新卡**处理，「新版聊天页」单选仍可改，所以整卡路线能到达新页，第 1-8 节的 v2 打包适用。**文件入口需区分**：现存记录同时有“PNG/JSON 可导”与“JSON 不可直接导”的矛盾，缺逐格式复验证据；沙盒整卡交付默认用 PNG，v2 JSON 先作为源码/备份，**直接导入 JSON 标待复验，不承诺支持或不支持**。六键正则 JSON 可导不受此问题影响。第 9 节另讲沙盒新建卡条件。
 
 ## 平台 → 适用章节
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 本地酒馆 `/st` | chara_card_v3 JSON，或 PNG 整卡 | 第 1-4 节、第 6-8 节 |
 | 当前 MMD `/mmd` | chara_card_v2，PNG 整卡承载 | 第 1-3 节、**第 5 节**、第 6-8 节 |
-| MMD沙盒模式 `/mmdsandbox` | chara_card_v2 整卡（PNG/JSON），**或**分离式正则 JSON + persona 文本 | 第 1-3 节、**第 5 节**、第 6-8 节，**外加第 9 节**（沙盒特有前置条件） |
+| MMD沙盒模式 `/mmdsandbox` | chara_card_v2 PNG 整卡（JSON 源码/备份），**或**分离式正则 JSON + persona 文本 | 第 1-3 节、**第 5 节**、第 6-8 节，**外加第 9 节**；JSON 整卡直接导入待复验 |
 
 ---
 
@@ -238,7 +238,7 @@ python -m json.tool output/卡名.json > /dev/null && echo OK
 | 平台 | png 整卡 | jpg 整卡 | json 整卡 |
 |---|---|---|---|
 | 当前 MMD `/mmd` | ✅ | ❌ 已弃用（实测读不出卡数据） | ❌ 不能直接导入整卡（仅世界书/正则可 json 导入） |
-| MMD沙盒模式 `/mmdsandbox` | ✅ `【用户实测】`（导入按新卡处理） | ❌ 已弃用 | ❌ 不能直接导入整卡（仅世界书/正则可 json 导入） |
+| MMD沙盒模式 `/mmdsandbox` | ✅ `【用户实测】`（导入按新卡处理） | ❌ 已弃用 | ⚠️ 记录冲突，直接导入待复验；目前作源码/备份，正则/世界书 JSON 另论 |
 | 本地酒馆 `/st` | ✅ | ❌ 已弃用 | ✅ |
 
 > **沙盒模式可以生成整张图片卡**，与当前 MMD 同样传 v2 卡 JSON 给 `make_card_image.py`。差别只在导入后**首次保存前必须在创卡页选「使用新版」聊天页**（第 9 节）。
@@ -272,7 +272,7 @@ python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/�
 | 形态 | 产出 | 适用 |
 |---|---|---|
 | (a) 内嵌正则的整卡 PNG | 一张 png，卡内含设定+世界书+`data.extensions.regex_scripts` | 推荐。MMD 系导入即一次到位 |
-| (b) 内嵌正则的整卡 JSON | v2 卡 json（含内嵌 regex_scripts） | MMD 系不能直接导 json 整卡，多用于本地酒馆/备份 |
+| (b) 内嵌正则的整卡 JSON | v2 卡 json（含内嵌 regex_scripts） | 旧 MMD 不能直接导；沙盒直接导入待复验。当前作源码/备份，本地酒馆可直接导 |
 | (c) 分离式 | 角色卡 + 独立正则 json（见 regex-output.md）+ 状态栏规则.md | 卡与正则分文件，便于单独维护/复用 |
 
 内嵌正则放进 `data.extensions.regex_scripts`（见第 4 节）：`/mmd` 与 `/st` 用 4 字段格式（id/scriptName/findRegex/replaceString）；**沙盒模式的规则内容按沙盒纪律写**（`<script>` 一等公民、禁 `img onerror` 点火器、`id` 负数、slash 形态），字段结构同为那 4 个。分离式的独立正则 json 的 `beginning`/`regex_scripts` 应与卡内 `first_mes`/`regex_scripts` 保持一致，避免分开导入时互相覆盖；沙盒的分离式正则 json 走 6 键格式（`regex-output.md` 第三节）。
@@ -310,7 +310,7 @@ python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/�
 
 ## 9. MMD沙盒模式：两条交付路线 + 一条前置铁律
 
-> ✅ **更正**：旧版本本节标题是「不用角色卡，用『正则 JSON + persona 文本』」，正文写「不走 chara_card_v2、不走 PNG 整卡，官方明令禁止」。**这些说法是错的，已删除。** `【用户实测】`沙盒**能导 v2 整卡**（PNG/JSON）：编辑页导入 v2 卡按**新卡**处理，「新版聊天页」单选仍可改。所以前 8 节那套 v2 打包 / PNG 嵌入流程**可以照搬**。
+> ✅ **更正**：旧版「沙盒不走 chara_card_v2、不走 PNG 整卡」是错的。沙盒可走 v2 PNG 整卡，编辑页导入按**新卡**处理，「新版聊天页」单选仍可改，前 8 节的 v2 打包 / PNG 嵌入流程适用。JSON 整卡直接导入的记录冲突见文首，复验前只作为源码/备份交付。
 
 ### 9.1 两条路线
 
@@ -319,7 +319,7 @@ python make_card_image.py output/卡名.json --bg 资料/底图.png -o output/�
 | 交付物 | 内容 |
 |---|---|
 | `<短名>.png` | 内嵌 v2 卡：人设进 `data.description`、世界书进 `character_book`、正则进 `data.extensions.regex_scripts` |
-| `<短名>-v2.json`（可选） | 同一份 v2 卡的 JSON 备份（MMD 系不能直接导 json 整卡，仅留档/本地酒馆用） |
+| `<短名>-v2.json`（可选） | 同一份 v2 卡的 JSON 源码/备份；沙盒直接导入待复验，不以此文件单独承诺可导 |
 
 路线 A 的最大好处：**没有手工粘贴步骤**。人设随卡进 `data.description`，世界书与正则也一并到位。
 

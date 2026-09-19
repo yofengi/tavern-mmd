@@ -1,5 +1,7 @@
 # MMD 沙盒模式真实页 DOM/CSS 契约（实测抓取 2026-08-29）
 
+> **历史记录，保留原始正文。** 本文的域名、结构、尺寸及“卡片 CSS 打不到宿主”等结论只对应各条记录的日期和直接 iframe 样式通路；不能用于否定后来公开的静态 `[data-host]` CSS 抽取过滤。当前 21 根（19 + summary + summary-confirm）、来源层级与预览范围见 [宿主弹窗换肤](../beautify/sandbox-host-styles.md)，平台汇总见 [mmd-sandbox.md](mmd-sandbox.md)。本轮只新增此时效提示，未重测或改写下面的历史实测正文。
+
 宿主页：`https://h5.aitchat.org/#/pages/chat/host?roleId=64304`
 卡片 iframe：`https://c64304.sbx.aitchat.org/`（**独立子域、跨源**，`sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"`）
 编辑页：`https://h5.aitchat.org/#/pages/role/create?id=64304`
