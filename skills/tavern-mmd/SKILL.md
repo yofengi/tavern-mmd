@@ -55,6 +55,7 @@ description: 为MMD（魅魔岛/sexyai.top，含沙盒模式新聊天页）、�
 |---|---|
 | 平台技术细节/避坑 | `references/platforms/{mmd,mmd-sandbox,sillytavern,suki}.md` |
 | 绮梦社 `/suki` 写卡、状态栏、全局美化、同层网页、世界书或 MMD 兼容迁移 | [绮梦社指南](references/platforms/suki.md)。新作选原生卡目录、沙箱 SDK 和官方 `hearthroom` CLI；官网编辑器也可制作。下表的 MMD 基座与审核命令仅用于对应来源 |
+| 绮梦社 `/suki` 编写或迁移交互脚本、状态栏、同层网页，查询 SDK、事件或开场页接口 | [绮梦 SDK、传统页与开场页接口](references/runtime/suki-sdk.md) |
 | MMD 沙盒模式（`chatVersion:1` 新聊天页）任何技术问题：SDK/舞台/存档/`message:mount`/6键导入 json/人设格式 | `references/platforms/mmd-sandbox.md`（该平台分层来源汇总；按日期/环境读取，**不要**套用 mmd.md 的 onerror/雷达法） |
 | **已选 MMD 新页**的平台状态变量 / 好感度 / 背包 / 养成 / 地图持久化「数据放哪」 | `references/platforms/mmd-sandbox.md` §14（三来源分工：平台状态变量 vs `sdk.save` vs `sdk.cache`；`<abc_vars>` 不可碰；契约未补齐的边界）。**动手写界面前先定数据来源**，别让同一个剧情数值有两份真值 |
 | MMD 新页公开发布门槛（要过审核的卡） | `references/platforms/mmd-sandbox.md` §10.3（固定传输 2000–15000、`beginning` ≥200）。私人自用卡与纯草稿不受此约束 |

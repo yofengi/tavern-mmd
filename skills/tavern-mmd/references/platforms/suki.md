@@ -1,6 +1,6 @@
 # 绮梦社（Hearthroom）写卡与迁移
 
-目标平台始终记为 `/suki`。新作默认选沙箱；已有作品另记来源（MMD 旧页、MMD 沙盒或酒馆整卡）、当前聊天页和实际验证环境。同一功能优先采用绮梦原生 SDK，导入时先保留已有的可用效果。网页编辑器在「基本 → 聊天页」切换传统页与沙箱，保存后可用「对话测试」核对效果。`sdk.*` 属于沙箱；留在传统页时，已有脚本按该页文档使用公开接口，例如 `window.stage.state.get()`。[网页写卡指南](https://sukisuki.chat/zh-Hans/guide?way=web) · [同版 Markdown 手册](https://sukisuki.chat/zh-Hans/guide.md)
+目标平台始终记为 `/suki`。新作默认选沙箱。已有作品另记来源（MMD 旧页、MMD 沙盒或酒馆整卡）、当前聊天页和实际验证环境。同一功能优先采用绮梦原生 SDK，导入时先保留已有的可用效果。网页编辑器在「基本 → 聊天页」切换传统页与沙箱，保存后可用「对话测试」核对效果。沙箱使用 `window.sdk`，传统页的 `window.sdk` 则是 `window.stage` 的别名，两页支持的成员不同。[网页写卡指南](https://sukisuki.chat/zh-Hans/guide?way=web) · [同版 Markdown 手册](https://sukisuki.chat/zh-Hans/guide.md)
 
 ## 原生卡目录
 
@@ -18,6 +18,8 @@
 分条世界书的每个 Markdown 文件以 `---` 包住元数据，例如 `name: 夜班站台`、`keywords: [站台, 车票]`，正文写在结束的 `---` 后面。
 
 ## 沙箱交互
+
+编写交互脚本前，查对应页面的可用方法、事件和宿主要求。消息历史、卡片工具、Context、工坊与跨玩家功能各有适用条件，本地预览可验证的范围也列在接口表末尾。[绮梦 SDK、传统页与开场页接口](../runtime/suki-sdk.md)
 
 显示规则可查找固定标记或 `/pattern/flags`，替换可含 HTML、CSS 与脚本。新建规则可用 `targets` 限定消息对象。比如在 `welcome.md` 写「末班车就要开了。【查验车票】」，配上下列完整的 `rules.json`，点按钮会把一句话填入输入框，玩家可以继续编辑。
 
