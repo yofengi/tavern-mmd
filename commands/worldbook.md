@@ -4,9 +4,13 @@ description: 制作酒馆世界书（输出可导入json）
 
 调用 tavern-mmd skill，执行世界书制作流程：
 
-1. 平台确认：按 SKILL.md "确定目标平台"流程（已设定则跳过；世界书 json 在 `/st`、`/mmd`、`/mmdsandbox` 三平台通用，但需知晓平台以决定可用字段范围与条目标题上限）。
+1. 平台确认：按 SKILL.md "确定目标平台"流程（已设定则跳过；绮梦采用原生 Lorebook。SillyTavern 格式的世界书 json 在 `/st`、`/mmd`、`/mmdsandbox` 三平台通用，但需知晓平台以决定可用字段范围与条目标题上限）。
 2. 项目检查：无项目文件夹则用 AskUserQuestion 确认项目名并创建五件套（main.md/plan.md/资料/工作/output）；已有则读 main.md+plan.md 续作。
 3. 收集资料：用户提供的素材存入"资料/"，更新main.md。
+4. 目标为 `/suki` 时，按 `references/creation/worldbook.md` 规划条目并确认，再按 `references/platforms/suki.md` 制作。可以直接维护原生 `lorebook.json`；需要分文件时用 `worldbook/*.md` 与 `hearthroom lorebook build <卡目录>`，已有条目先完整转入源文件。交付后更新 main.md 与 plan.md，验收见下节。
+
+**MMD 与本地酒馆**在完成前 3 步后使用以下流程。
+
 4. 读取 `references/creation/worldbook.md`，按索引源文件工作流执行：
    - 初始化 `工作/世界书/`：`python <skill>/scripts/worldbook_tool.py init "工作/世界书"`
    - 目标平台是本地酒馆时，把 `工作/世界书/worldbook.config.json` 的 `platform` 改为 `"st"`（默认 `"mmd"`：会套用 20 字条目标题上限，超限的 `add`/`rename` 被硬拒绝）。沙盒模式填 `"mmdsandbox"`，同样保留 20 字上限
@@ -20,5 +24,7 @@ description: 制作酒馆世界书（输出可导入json）
 6. 输出：按 output/worldbook-json.md 生成/确认独立世界书json到 output/，执行 python -m json.tool 校验，更新main.md与plan.md。
 
 ## 交付前审核（强制）
+
+`/suki` 按 `references/platforms/suki.md` 的「整卡与世界书的独立复核」，派独立子代理对照条目规划审核最终世界书，在含该文件的卡目录运行 `hearthroom card check <卡目录> --json`。有 Markdown 源条目时加跑 `hearthroom lorebook check <卡目录>`。每轮写入 `工作/审核记录.md`，修复后由子代理复审。以下检查针对 MMD 与本地酒馆。
 
 输出世界书 json 后：先跑 `python <skill>/scripts/worldbook_tool.py check "工作/世界书" --out "output/<世界书名>.json"`，再派子代理跑 `python <skill>/scripts/validate.py "output/<世界书名>.json" --type worldbook --platform <mmd|mmdsandbox|st>`（`--platform` 省略时默认 `mmd`），报告写入 `工作/审核记录.md`。有 ERROR 则主AI/子代理修复后复审，0 错误才交付。世界书无交互渲染，不需 build-preview。

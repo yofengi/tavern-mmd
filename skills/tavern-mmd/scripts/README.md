@@ -2,6 +2,8 @@
 
 主要构建工具使用 Python 标准库（无 pip 依赖）。同层卡另有 Node 引擎/语法测试与可选 Playwright 浏览器验证，依赖见下节。
 
+绮梦社 `/suki` 用官方 `hearthroom card check <卡目录>` 检查原生卡。在本目录运行 `python preview_suki.py <卡目录> --open` 可直接使用 skill 自带的官网沙盒，传统页卡也能原样做兼容预览。`--check --json` 生成截图，`--shell <目录>` 可指定另一份官网构建。MMD 和本地酒馆按下文选择工具。[绮梦社制作与迁移](../references/platforms/suki.md)
+
 ## 旧版同层卡构建与验证
 
 本节 `build_same_layer.py` / `verify_same_layer.py` / `review_same_layer.py` 与 same-layer 基座测试均为 `/mmd` 旧页专用。沙盒同层卡改走 [新页制作指南](../references/creation/sandbox-same-layer-card.md) 的项目网页构建、`validate.py --platform mmdsandbox` 和 `build-preview.py --platform mmdsandbox --mode panorama`（chat/thin-preview 两套），另补作品测试；当前无沙盒同层专用构建器。

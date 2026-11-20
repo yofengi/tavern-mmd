@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 第二道閘。殼自己不發請求；connect-src 只多放行媒體素材庫：卡片 fetch 自己的 JSON、WASM 等檔案，別的外站連不到。
+     作者的外鏈腳本（傳統與模組腳本、import()）與樣式走 https:；WASM 編譯由 'unsafe-eval' 涵蓋。
+     frame-src 放行同源／srcdoc／blob：前端區塊協議把圍欄裡的整份 HTML 文件掛成各自的 iframe（作者的 <iframe> 標籤仍被淨化層剝掉）。
+     worker-src 放行 blob:：作者規則在殼自己起的 worker 裡跑（內嵌打包、blob 網址），不擋主執行緒；被擋時退回同步套用。
+     worker-src 不放行素材庫：跨源網址本來就起不了 Worker；函式庫用 blob: 起執行緒、在裡面從素材庫 import／fetch，受 script-src／connect-src 管。
+     正式站由 Worker 用回應標頭再送一次同樣的 CSP，這裡的 meta 是本機開發與預覽的保底。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https://assets.harperharbor.com; worker-src 'self' blob:; frame-src 'self' about: blob:; form-action 'none'; base-uri 'none'; object-src 'none'">
+<title>chat sandbox</title>
+  <script defer src="./sandbox.js"></script>
+  <link rel="stylesheet" href="./sandbox.css">
+</head>
+<body>
+<div id="app"></div>
+</body>
+</html>

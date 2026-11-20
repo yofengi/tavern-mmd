@@ -1,6 +1,6 @@
 # tavern-mmd
 
-为 **MMD（魅魔岛 / sexyai.top）** 和 **本地酒馆 SillyTavern** 创建角色卡、世界书、美化（状态栏 / 全局美化）与同层卡的 Skill。
+为 **MMD（魅魔岛 / sexyai.top）**、**本地酒馆 SillyTavern** 和 **绮梦社（Hearthroom / sukisuki.chat）** 创建角色卡、世界书、美化（状态栏 / 全局美化）与同层卡的 Skill。
 
 skill 本体是自包含 Markdown 文档；另附纯 Python 标准库辅助脚本，用于审核、预览、世界书源文件管理和角色卡 PNG 导出。
 
@@ -19,7 +19,7 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 
 | 能力 | 说明 |
 |---|---|
-| 三平台支持 | 当前 MMD（旧聊天页，`<script>`/ES6 + onerror 载体）/ MMD 沙盒模式（新聊天页 `chatVersion:1`，`<script>` 一等公民 + 官方 SDK + 舞台）/ 本地酒馆 SillyTavern |
+| 四种平台模式 | 当前 MMD（旧聊天页，`<script>`/ES6 + onerror 载体）/ MMD 沙盒模式（新聊天页 `chatVersion:1`，`<script>` 一等公民 + 官方 SDK + 舞台）/ 本地酒馆 SillyTavern / 绮梦社（原生卡目录、沙箱 SDK、MMD 旧页与沙盒导入） |
 | 角色卡创作 | 标准流程（快问快答）与深度共创流程（开放讨论 + 方案收敛）两种模式 |
 | 世界书制作 | 索引源文件工作流（entry_id 稳定、uid/order build 重排）、蓝绿灯策略、token 预算、递归控制 |
 | 状态栏 | 首选混合态雷达法（特征嗅探 + 动态DOM + 双轨生命周期 + 七重防御）；KV V4.0 轻量备选 |
@@ -29,6 +29,8 @@ MMD 是在线（uni-app 套壳）酒馆平台，与本地 SillyTavern 有显著�
 | 质量保障 | 写作规则（绝对零度 / 八股化扫描 / 具体性检查）+ 分层交付检查清单（含运行时主题矩阵） |
 
 ## 审核与预览脚本
+
+默认只交付所选平台的一份作品，明确要求双平台时才分别制作。绮梦社的整卡与世界书交付前由独立子代理对照需求复核，并用官方 CLI 检查原生文件。交互卡通过 `skills/tavern-mmd/scripts/preview_suki.py` 使用随 skill 分发的官网聊天页沙盒。新卡首次可离线预览，传统页卡也可直接做兼容预览。[绮梦社制作与复核指南](skills/tavern-mmd/references/platforms/suki.md)
 
 skill 自带多个纯 Python 标准库脚本（零依赖，全 agent 通用），AI 会根据 skill 指引在制作与交付前自行调用，用法详见 `skills/tavern-mmd/scripts/README.md`。
 
@@ -102,7 +104,7 @@ Trae 没有技能目录，走"仓库进项目 + 规则指路"：
 clone 本仓库到任意位置，在该 agent 的规则文件（AGENTS.md / 系统提示 / rules）里加一句：
 
 ```
-制作酒馆角色卡、世界书、状态栏或全局美化（MMD/SillyTavern 相关）时，
+制作酒馆角色卡、世界书、状态栏或全局美化（MMD、SillyTavern 或绮梦社）时，
 必须先完整阅读 <仓库路径>/skills/tavern-mmd/SKILL.md，
 并按其中"任务路由"表读取对应 references 文档后再动工。
 ```
@@ -120,6 +122,7 @@ clone 本仓库到任意位置，在该 agent 的规则文件（AGENTS.md / 系�
 | `/mmd` | 当前 MMD，旧聊天页（`<script>`/ES6 可用，状态栏走 img onerror 载体） |
 | `/mmdsandbox` | MMD 沙盒模式，新聊天页（`chatVersion: 1`；`<script>` 一等公民 + 官方 SDK + 舞台 + 跨设备存档） |
 | `/st` | 本地酒馆 SillyTavern（无限制） |
+| `/suki` | 绮梦社，优先采用原生沙箱 SDK，也可迁移 MMD 旧页或 MMD 沙盒作品 |
 
 `/mmd` 与 `/mmdsandbox` 是同一个站的两套聊天页，**技术写法互不通用，选错的产出不报错、只是不生效**。卡是新建的且在创卡页确认过是「新页 / 新版对话框」→ `/mmdsandbox`；老卡或不确定 → `/mmd`（`chatVersion` 只在新建卡导入时被读取，没法把老卡升级成新页）。
 
@@ -139,6 +142,8 @@ clone 本仓库到任意位置，在该 agent 的规则文件（AGENTS.md / 系�
 /mmd → /beautify          # 当前 MMD 状态栏（雷达法四条正则，产出可导入json）
 /mmdsandbox → /beautify   # 沙盒模式状态栏（<script>+SDK，长期面板挂舞台）
 /st → /worldbook          # 本地酒馆世界书（全字段，json 直接导入）
+/suki 做一张绮梦社卡，带可点击的选项    # 沙箱 SDK + 原生卡目录
+/suki 把这张 MMD 旧页卡迁到绮梦社     # 导入现有规则并核对兼容效果
 /mmd 做同层卡，网页聊天 + 可存档小游戏  # 原生桥接；引擎可选
 /mmdsandbox 做沙盒同层卡，完整网页聊天  # 官方 SDK + full 舞台；不继承旧页桥接
 /mmd → /cardplanmax       # 从零共创一张当前 MMD 完整角色卡
@@ -146,11 +151,11 @@ clone 本仓库到任意位置，在该 agent 的规则文件（AGENTS.md / 系�
 
 ## 产出物
 
-| 产出 | 本地酒馆 `/st` | 当前 MMD `/mmd` | 沙盒模式 `/mmdsandbox` |
-|---|---|---|---|
-| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD 仅识别 v2），整卡走 png | **chara_card_v2 json / 整卡 png**（同当前 MMD，导入按新卡处理）；或分离式 = 6 键导入正则 json + 独立 persona 文本 |
-| 世界书 | SillyTavern 世界书 json | 同左 | 同左：走整卡进卡内 `character_book`，走分离式出独立 json（根对象只留 `entries`）。**只是不能并进那份 6 键正则 json** |
-| 正则 | 正则脚本 json（直接导入） | MMD 导入 json（4 键，首选）；手填清单 .md 备选 | 导入正则 json（**6 键**，多 `chatVersion`/`personality`）；手填清单 .md 备选 |
+| 产出 | 本地酒馆 `/st` | 当前 MMD `/mmd` | 沙盒模式 `/mmdsandbox` | 绮梦社 `/suki` |
+|---|---|---|---|---|
+| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD 仅识别 v2），整卡走 png | **chara_card_v2 json / 整卡 png**（同当前 MMD，导入按新卡处理）；或分离式 = 6 键导入正则 json + 独立 persona 文本 | 原生卡目录或网页编辑器字段 |
+| 世界书 | SillyTavern 世界书 json | 同左 | 同左：走整卡进卡内 `character_book`，走分离式出独立 json（根对象只留 `entries`）。**只是不能并进那份 6 键正则 json** | 原生 `lorebook.json` |
+| 正则 | 正则脚本 json（直接导入） | MMD 导入 json（4 键，首选）；手填清单 .md 备选 | 导入正则 json（**6 键**，多 `chatVersion`/`personality`）；手填清单 .md 备选 | `rules.json`，整卡样式用 `card.css` |
 
 ## 目录结构
 
@@ -158,9 +163,10 @@ clone 本仓库到任意位置，在该 agent 的规则文件（AGENTS.md / 系�
 skills/tavern-mmd/
 ├── SKILL.md                      # 入口：平台差异矩阵、任务路由、项目文件树规则
 ├── references/
-    ├── platforms/                # 三平台技术规范
+    ├── platforms/                # 平台技术规范
     │   ├── mmd.md                #   当前 MMD / 旧聊天页（onerror 载体、五大架构模式、待验证标注）
     │   ├── mmd-sandbox.md        #   MMD 沙盒模式 / 新聊天页（SDK 30能力12事件、舞台、6键导入json、人设格式）
+    │   ├── suki.md               #   绮梦原生卡、沙箱 SDK、MMD 导入、CLI 验证
     │   └── sillytavern.md        #   本地酒馆（position 表、正则字段）
     ├── creation/                 # 创作规则
     │   ├── character.md          #   角色写作（绝对零度 / 八股化 / 具体性）
@@ -185,21 +191,21 @@ skills/tavern-mmd/
     │   └── mmd-theme-runtime/    # day/night/native 运行时主题资产
     └── radar-examples/           # 西幻 RPG 状态栏；旧日夜集成包仅 legacy 参考
 
-commands/                         # 8 个斜杠指令
+commands/                         # 9 个斜杠指令
 过时资产/                          # 已退役平台的存档（不随 skill 分发，仅作历史参考）
 ```
 
 ## 平台差异矩阵（核心）
 
-| 能力 | 本地酒馆 | 当前 MMD | 沙盒模式 |
-|---|---|---|---|
-| `<script>` | ✅ | ✅ 可执行，但 per-message 自渲染/定位不可用 | ✅ **一等公民**：装卡即抽出、整卡只跑一次；per-message 走 `message:mount` |
-| ES6+ | ✅ | ✅ 无限制（已确认实测全支持） | ✅ |
-| 正则导入 | json | MMD 专用 json（**4 键**）或手填，≤130 条；findRegex 必须包斜杠 | 导入正则 json（**6 键**）或手填，≤130 条；findRegex 可用纯字面量（官方首选） |
-| 状态栏 | 雷达法 / KV V4.0 | 首选混合态雷达法（img onerror 载体） | `<script>` + SDK（`message:done` 解析正文）；**onerror 点火器被官方禁**；长期面板挂舞台 |
-| 官方 SDK / 舞台 / 存档 | ❌ | ❌ | ✅ 30 能力 / 12 事件、`sdk.stage`、`sdk.save` 跨设备 |
-| 角色卡格式 | v3 json / png | 仅 chara_card_v2，整卡走 png | 不用 v2、**官方禁整卡 PNG**：正则 json + persona 文本 |
-| MVU/STScript | ✅ | ❌（保守） | ❌（官方 SDK 顶替） |
+| 能力 | 本地酒馆 | 当前 MMD | 沙盒模式 | 绮梦社 `/suki` |
+|---|---|---|---|---|
+| `<script>` | ✅ | ✅ 可执行，但 per-message 自渲染/定位不可用 | ✅ **一等公民**：装卡即抽出、整卡只跑一次；per-message 走 `message:mount` | 沙箱规则脚本随卡加载一次 |
+| ES6+ | ✅ | ✅ 无限制（已确认实测全支持） | ✅ | 沙箱支持 |
+| 正则导入 | json | MMD 专用 json（**4 键**）或手填，≤130 条；findRegex 必须包斜杠 | 导入正则 json（**6 键**）或手填，≤130 条；findRegex 可用纯字面量（官方首选） | 原生 `rules.json`，也可导入 MMD 规则 |
+| 状态栏 | 雷达法 / KV V4.0 | 首选混合态雷达法（img onerror 载体） | `<script>` + SDK（`message:done` 解析正文）；**onerror 点火器被官方禁**；长期面板挂舞台 | 卡变量面板、显示规则和 SDK 事件 |
+| 官方 SDK / 舞台 / 存档 | ❌ | ❌ | ✅ 30 能力 / 12 事件、`sdk.stage`、`sdk.save` 跨设备 | `sdk.stage`、`sdk.save`、`sdk.archive` |
+| 角色卡格式 | v3 json / png | 仅 chara_card_v2，整卡走 png | v2 整卡 PNG，或六键正则 JSON 与人设文本 | 原生卡目录，网页可导酒馆 PNG/JSON |
+| MVU/STScript | ✅ | ❌（保守） | ❌（官方 SDK 顶替） | 原生卡变量支持 `mvu` 数据约定 |
 
 > 证据等级不同，别混用：平台事实按源码、隔离实测、官方手册与官方 skill 分级，沙盒已有源码和真机探针记录，详见 `skills/tavern-mmd/references/platforms/mmd-sandbox.md`。第三方 Mock、示例网页和本地测试不构成真实平台证据；未确证运行契约标待验证，不能凭模拟器补齐。平台状态变量已确认存在但运行签名尚未公布，不能据此说平台不支持。
 
@@ -210,5 +216,7 @@ commands/                         # 8 个斜杠指令
 - **架构启发后的重写**：当前 MMD `theme-runtime.md` 的 day/night/native 生命周期、owner/version 租约、可恢复 property delta、存储 schema 和测试矩阵，以及 `assets/global-beautify-examples/mmd-theme-runtime/` 对应新资产，均是在既有材料提供架构启发后重新设计与实现，不复制旧运行时代码。其 MMD 实机验证状态只以资产 README / 测试记录为准，本 README 不替代实机证据。
 
 ## License
+
+绮梦聊天页沙盒由 Hearthroom 提供，采用 FSL-1.1-ALv2。[Moonstage 许可](skills/tavern-mmd/assets/suki-sandbox/LICENSE.md) · [上游第三方声明](skills/tavern-mmd/assets/suki-sandbox/THIRD-PARTY-NOTICES.md) · [沙盒依赖许可](skills/tavern-mmd/assets/suki-sandbox/DEPENDENCY-LICENSES.txt)
 
 MIT 适用于仓库中可明确归属 tavern-mmd 的原创及架构启发后重写内容。用户提供的社区文档/资产快照未记录原许可证，仅作兼容研究参考，不因收录而被重新许可为 MIT。

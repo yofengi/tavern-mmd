@@ -18,9 +18,11 @@ description: 角色卡深度共创流程（大段讨论+弹窗收敛→分节设
 阶段三：写计划分段执行
 8. 设计写入plan.md（带验收标准的勾选步骤+决策记录）。
 9. 按plan.md执行，每完成一个阶段停下给用户检查：条目清单→世界书正文抽查→开场白→技术组件→最终json。进度实时打勾，文件变动记main.md。
-10. 交付前跑 quality/checklist.md 全层，json校验，产出进output/。
+10. 交付前跑 quality/checklist.md 对应平台的检查项，json校验，产出进output/。
 
 ## 交付前审核（强制）
+
+`/suki` 将原生卡目录放入 `output/`，按 `references/platforms/suki.md` 的「整卡与世界书的独立复核」派独立子代理核对最终整卡和随卡世界书，由其运行 `hearthroom card check <卡目录> --json`。有交互的卡由主代理实测。修复后交回子代理复审，每轮写入 `工作/审核记录.md`。以下 JSON 审核适用于 MMD 与本地酒馆。
 
 产出 json 完成后：派子代理跑 `python <skill>/scripts/validate.py <文件> --type <card|regex> --platform <mmd|mmdsandbox|st>`（`--platform` 省略时默认 `mmd`），报告写入 `工作/审核记录.md`。有 ERROR 修复后复审。若卡内含状态栏/美化，按 /beautify 的预览流程让主AI 测交互。
 

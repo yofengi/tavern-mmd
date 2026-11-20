@@ -15,6 +15,7 @@ description: 查看 tavern-mmd 全部指令说明（平台指令×任务指令�
 | `/mmd` | 当前MMD（魅魔岛/sexyai.top，旧聊天页） | 支持`<script>`与ES6（实测全支持）；逐消息状态栏走 img onerror；同层卡走独立网页+原生桥接；正则≤130条、findRegex必须包斜杠、角色卡仅v2 |
 | `/mmdsandbox` | MMD沙盒模式（同站**新聊天页**，`chatVersion: 1`） | `<script>`一等公民（整卡只跑一次）+官方SDK 30能力/12事件+舞台+跨设备存档；支持舞台内完整自绘同层网页；导入正则json为**6键**；findRegex交付统一slash形态（裸字面量亦可用）；禁img onerror；**可产v2卡与整卡PNG**（导入按新卡处理，需首次保存前选「使用新版」） |
 | `/st` | 本地酒馆SillyTavern | 无限制：script/ES6+可用、正则json直接导入、世界书全字段 |
+| `/suki` | 绮梦社（Hearthroom / sukisuki.chat） | 新卡默认用绮梦沙箱 SDK。已有 MMD 旧页和沙盒作品可导入，按目标聊天页复核 |
 
 平台会写入项目 main.md；未设定平台时，任务指令会先弹窗询问。
 
@@ -41,6 +42,8 @@ description: 查看 tavern-mmd 全部指令说明（平台指令×任务指令�
 - `/mmd` → `/beautify` 选状态栏：当前MMD状态栏（首选混合态雷达法，产出可导入json）
 - `/mmdsandbox` → `/beautify` 选状态栏：新聊天页状态栏（`<script>`+SDK，长期面板挂舞台）
 - `/st` → `/worldbook`：本地酒馆世界书（可用全部字段，产出json直接导入）
+- `/suki 做一张绮梦社卡，点击选项填入输入框`：原生卡目录 + `sdk.input.set()`
+- `/suki 把这张 MMD 沙盒卡迁到绮梦社`：导入原件，核对舞台、事件与存档，保留可用脚本
 - `/mmd 做同层卡，把模型列表、切换与模型设置放进网页`：使用基座内置模型模块；已实现和未接入的原生功能见能力清单
 - `/mmd 做一张同层卡，用网页聊天UI，带可存档的寻物小游戏`：独立页面 + 原生桥接 + 可选规则引擎；未镜像功能可返回原生界面
 - `/mmdsandbox 做沙盒同层卡，自己渲染完整聊天网页，参考 new-mmd-hud`：官方 SDK + full 舞台；读取沙盒同层制作指南及上游审查，不复制旧页桥接/四键导出器
@@ -49,13 +52,15 @@ description: 查看 tavern-mmd 全部指令说明（平台指令×任务指令�
 
 ## 产出物
 
-| 产出 | 本地酒馆 `/st` | 当前MMD `/mmd` | 沙盒模式 `/mmdsandbox` |
-|---|---|---|---|
-| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD仅识别v2） | **chara_card_v2 json / 整卡PNG**（同当前MMD，导入按新卡处理）；或分离式=6键导入正则json + 独立persona文本 |
-| 世界书 | 世界书 json | 同左 | 同左：走整卡进卡内`character_book`，走分离式出独立json（根对象只留`entries`）。**只是不能并进那份6键正则json** |
-| 正则 | 正则脚本 json | MMD导入json（4键，首选）；手填清单 .md 备选 | 导入正则json（**6键**：多`chatVersion`/`personality`）；手填清单 .md 备选 |
+| 产出 | 本地酒馆 `/st` | 当前MMD `/mmd` | 沙盒模式 `/mmdsandbox` | 绮梦社 `/suki` |
+|---|---|---|---|---|
+| 角色卡 | chara_card_v3 json | chara_card_v2 json（MMD仅识别v2） | **chara_card_v2 json / 整卡PNG**（同当前MMD，导入按新卡处理）；或分离式=6键导入正则json + 独立persona文本 | 原生卡目录，或网页编辑器字段 |
+| 世界书 | 世界书 json | 同左 | 同左：走整卡进卡内`character_book`，走分离式出独立json（根对象只留`entries`）。**只是不能并进那份6键正则json** | 原生 `lorebook.json` |
+| 正则 | 正则脚本 json | MMD导入json（4键，首选）；手填清单 .md 备选 | 导入正则json（**6键**：多`chatVersion`/`personality`）；手填清单 .md 备选 | `rules.json`、`card.css` |
 
-做整张角色卡时（**三个平台都一样**），完成后会用弹窗问**输出形态**：内嵌正则的整卡 PNG / 内嵌正则的整卡 JSON / 分离式（角色卡 + 独立正则 json + 状态栏规则.md）。由 AI 正文提供状态的整卡会把状态栏生成规则作为蓝灯条目放进卡内世界书；同层卡采用确定引擎时，世界书只声明规则权威与叙述边界。单独做美化/状态栏时，默认交付 = 正则 json + 状态栏规则.md。
+为 `/mmd`、`/mmdsandbox` 或 `/st` 做整张角色卡时，完成后会用弹窗问**输出形态**：内嵌正则的整卡 PNG / 内嵌正则的整卡 JSON / 分离式（角色卡 + 独立正则 json + 状态栏规则.md）。由 AI 正文提供状态的整卡会把状态栏生成规则作为蓝灯条目放进卡内世界书；同层卡采用确定引擎时，世界书只声明规则权威与叙述边界。单独做美化/状态栏时，默认交付 = 正则 json + 状态栏规则.md。
+
+绮梦 `/suki` 默认交付可编辑的原生卡目录，使用 `hearthroom card check` 检查。绮梦聊天页可在编辑器切换。
 
 **沙盒模式也有这个弹窗**（旧版本写「没有、形态固定」已更正）：它能导 v2 整卡 —— 编辑页导入 v2 卡按**新卡**处理，所以创卡页那个「新版聊天页」单选仍能选。走分离式时 persona 必须另贴（导入页不读 `personality` 字段），走整卡则人设随卡进 `data.description`、没有手工步骤。两条路线交付时都会提醒你：**这张卡必须新建，且首次保存前在创卡页把「新版聊天页」选成「使用新版」**（首次保存后永久不可改），否则整套方案零效果且页面上看不出异常。
 
